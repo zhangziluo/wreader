@@ -28,6 +28,17 @@ wreader --version                # wreader 0.1.0
   并把工作区根加进 `python.analysis.extraPaths`（否则 Pylance 报 `rich.console` 无法解析）。
 - **`[tool.pyright]` 只对 pyright CLI 生效**，VS Code 的 Pylance 读的是 `.vscode/settings.json`；
   两者都指向同一个 `.venv`。
+- **新终端里怎么敲 `wreader`**（2026-09-22 补）：它是**项目内** `.venv` 的可编辑安装，
+  `.venv/bin` **不在**默认 PATH 上，且 `~/.zprofile`/`~/.zshenv`/`/etc/paths*` 都没配它，
+  所以**重开终端后 `wreader` 默认不可用**（实测干净 shell 里 `command -v wreader` 找不到）。
+  为此新建了 `~/.zshrc`（此前不存在），里面只加了一行**别名**：
+  `alias wreader="/Users/zhangziluo/Downloads/wreader/.venv/bin/wreader"`。
+  别名只在交互式 shell 生效，**`python3` / `pip` 不受影响**。
+  ⚠️ **故意不用 PATH 前置**：实测把 `.venv/bin` 前置进 PATH 后，新终端的
+  `python3` 会变成 `.venv/bin/python3`、`pip` 会变成 `.venv/bin/pip`，会干扰其它 Python 项目。
+  数据（`~/.wreader`、`~/novels`）与 `.venv` 无关，所以换环境不会丢书和进度。
+  没有别名时的两种等价写法：`.venv/bin/wreader ...`，或
+  `cd <项目> && source .venv/bin/activate` 之后再敲 `wreader`。
 
 ## 环境变量
 
@@ -79,6 +90,11 @@ Windows 数据目录：`%APPDATA%\wreader`。
 ## 常用命令
 
 ```bash
+# 启动（新终端里 `wreader` 来自 ~/.zshrc 的别名，见「开发环境」一节）
+wreader --version                             # wreader 0.1.0
+.venv/bin/wreader list                        # 没配别名 / 没激活 venv 时的等价写法
+source .venv/bin/activate                     # 或先激活 venv，之后直接敲 wreader
+
 # 功能
 wreader import <路径>            # 导入 txt/epub
 wreader list                     # 看书库（记下 book_id）

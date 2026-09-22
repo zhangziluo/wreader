@@ -126,6 +126,23 @@ def _init_colors() -> None:
   且 `wreader.__file__` 指向克隆副本（排除"其实在测本地 editable 安装"的假阳性）。
   结论：仓库自足，`book/` 不参与测试，忽略它没有任何副作用。
 
+### ⑧ 让 `wreader` 在新终端里可直接敲（`~/.zshrc` 别名）
+- **问题**：用户重开终端后不知道怎么打开 wreader —— 因为它是**项目内** `.venv` 的
+  editable 安装，`.venv/bin` 不在默认 PATH 上，敲 `wreader` 会 `command not found`。
+- **排查事实**：`~/.zshrc` **原本不存在**；`~/.zprofile`（只有 brew / MacPorts 的 PATH 前置）、
+  `~/.zshenv`（只 source cargo env）、`/etc/paths` 与 `/etc/paths.d/*` 全都没配这个 venv。
+- ⚠️ **排查时踩过一个坑（假阳性）**：一开始直接跑 `zsh -l -c 'command -v wreader'` 显示"能找到"，
+  但那是因为它**继承了我当时那个已激活 venv 的环境**。必须用
+  `env -i HOME=$HOME ... zsh -l -i -c ...` 把环境清干净，才测得出真实情况（结论：找不到）。
+- **第一版方案（已推翻）**：`~/.zshrc` 里 `export PATH=".../.venv/bin:$PATH"`。
+  能用，但**有副作用**：新终端里 `python3` → `.venv/bin/python3`、`pip` → `.venv/bin/pip`，
+  会干扰用户在其它 Python 项目上的工作。
+- **最终方案**：只写一行别名
+  `alias wreader="/Users/zhangziluo/Downloads/wreader/.venv/bin/wreader"`，
+  并在文件注释里写明**为什么不用 PATH**（防止以后有人好心改回去）。别名只作用于
+  交互式 shell，对 `python3` / `pip` 零影响。
+- `~/.zshrc` **在 git 仓库之外**，不受版本控制；排查结论与坑已记进 `techContext.md`。
+
 ## 本会话的验证证据（全部通过）
 
 | 检查 | 结果 |
@@ -151,6 +168,12 @@ def _init_colors() -> None:
 | **持续有效的同步判据**（别写死 SHA，否则记一次就过期一次） | 历史起点 `7ecc3eb`；`git rev-list --left-right --count origin/main...main` 应恒为 `0 0`；GitHub API 递归树应恒为 **32 个 blob**（`truncated: false`）。截至本次记录，`main` 已走到 `4434518`（4 个提交），之后每改一次 memory-bank 都会再 +1 |
 | **全新克隆验证**（对 `ee92a95` 做 `git clone` 到 `/tmp/wreader-clone`） | 32 个跟踪文件、2 个提交、`book/` 不存在；**在克隆目录内**跑 `pytest` → **494 passed in 4.12s**；`npx pyright` → `0 errors, 0 warnings` |
 | 克隆内 import 路径确认 | `wreader.__file__` = `/private/tmp/wreader-clone/wreader/__init__.py` —— 证明确实在测克隆副本，而非本地 editable 安装 |
+| 干净 shell 里 `command -v wreader`（改前） | **找不到**，`VIRTUAL_ENV` 为空 —— 确认"重开终端不可用"属实 |
+| 干净「登录+交互」shell 里 `wreader --version`（改后） | `wreader 0.1.0`；`command -v wreader` → `.venv/bin/wreader`（别名生效） |
+| 干净「非登录交互」shell 里 `wreader list`（沙箱 `WREADER_HOME`） | 正常输出 `the library is empty -- add books with wreader import <path>`，真实 `~/.wreader` 未被触碰 |
+| `zsh -n ~/.zshrc` | 语法 OK |
+| 副作用检查（PATH 前置版，已推翻） | `python3` → `.venv/bin/python3`、`pip` → `.venv/bin/pip` —— **不可接受**，故放弃 |
+| 副作用检查（别名版，最终） | `python3` → `/usr/local/bin/python3`、`pip` 不在 PATH —— 与改动前一致，**零影响** |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
