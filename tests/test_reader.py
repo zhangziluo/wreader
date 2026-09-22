@@ -350,6 +350,52 @@ def test_step_lines_follows_page_scroll_step(pager_factory) -> None:
     assert pager_factory(page_scroll_step=0.0).step_lines == 1  # never zero
 
 
+def test_page_overlap_shortens_the_page_turn(pager_factory) -> None:
+    # 每屏 4 行、重叠 3 行：翻页只前进 1 行，其余 3 行留在屏幕上当上下文
+    assert pager_factory(page_overlap=3).step_lines == 1
+
+
+def test_page_overlap_zero_keeps_the_full_page(pager_factory) -> None:
+    # 关掉重叠：步长就是原来的整页
+    assert pager_factory(page_overlap=0).step_lines == 4
+
+
+def test_page_overlap_with_a_half_page_step(pager_factory) -> None:
+    # 半屏（2 行）减掉 3 行重叠会变负：兜底成 1 行
+    assert pager_factory(page_scroll_step=0.5, page_overlap=3).step_lines == 1
+
+
+def test_page_overlap_never_stalls_the_page_keys(pager_factory) -> None:
+    # 重叠比整页还大也只兜到 1 行，按键一定有反应
+    assert pager_factory(page_overlap=10).step_lines == 1
+
+
+def test_page_overlap_defaults_to_three_lines() -> None:
+    # 不传 page_overlap 时默认保留 3 行，且模块常量与之一致
+    assert reader.Pager(["a", "b"]).page_overlap == 3
+    assert reader.DEFAULT_PAGE_OVERLAP == 3
+
+
+def test_page_overlap_is_clamped_to_zero() -> None:
+    # 负数被夹到 0：绝不会因为"负重叠"反而一次跳得更多
+    assert reader.Pager(["a", "b"], page_overlap=-5).page_overlap == 0
+
+
+def test_page_turn_keeps_the_last_lines_of_the_previous_screen(pager_factory) -> None:
+    # 每屏 6 行、重叠 3 行：翻一页后新屏幕最前面正是上一屏的最后 3 行
+    lines = [str(number) for number in range(40)]
+    pager = pager_factory(lines=lines, page_height=6, page_overlap=3)
+    before = [index for index, _ in pager.visible_rows(6)]
+    pager.next_page()
+    after = [index for index, _ in pager.visible_rows(6)]
+    # 顶部 3 行是衔接过来的旧文字，之后才是新内容
+    assert after[:3] == before[-3:]
+    assert after[3:] == [6, 7, 8]
+    # 往回翻一页就精确回到原处（既有顶部重叠也有底部重叠）
+    pager.previous_page()
+    assert pager.position == before[0]
+
+
 def test_paging_and_lines_read(pager) -> None:
     pager.next_page()
     # 前进 4 行

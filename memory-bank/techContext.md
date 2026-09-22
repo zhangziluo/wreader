@@ -63,11 +63,11 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
-## settings.toml 的 5 个 section（共 23 个键）
+## settings.toml 的 5 个 section（共 24 个键）
 
 | section | 键 |
 | --- | --- |
-| `reader` | `page_scroll_step`=1.0、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true |
+| `reader` | `page_scroll_step`=1.0、`page_overlap`=3、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true |
 | `translator` | `backend`=`google`、`batch_size`=3000、`cache_dir`、`deepseek_api_key`、`auto_translate_chapter`=false、`source_language`=`auto`、`target_language`=`zh-CN`、`deepseek_model`=`deepseek-chat`、`deepseek_url` |
 | `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true |
 | `vocab` | `highlight_in_reader`=true、`auto_add_on_mark`=true |
@@ -78,7 +78,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 路径 | 说明 |
 | --- | --- |
 | `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
-| `tests/` | 8 个测试文件（含 `conftest.py`），514 项 |
+| `tests/` | 8 个测试文件（含 `conftest.py`），522 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -119,7 +119,7 @@ GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败�
 git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
-pytest                                        # 514 项，约 3~12 秒
+pytest                                        # 522 项，约 3~25 秒
 python -m pytest tests/test_reader.py -q      # 单文件
 python -m pytest -k "streak or heatmap" -q    # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings
@@ -146,7 +146,7 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | Fixture | 作用 |
 | --- | --- |
 | `isolated_home`（autouse） | 把 `$WREADER_HOME`/`$WREADER_NOVELS_DIR` 指向 `tmp_path`，删掉旧环境变量与 `DEEPSEEK_API_KEY`，清 `config._CACHE*` 与 `translator` 全局后端 |
-| `pager_factory` | 不依赖终端构造 `reader.Pager`（默认 `page_height=4` 方便断言分页） |
+| `pager_factory` | 不依赖终端构造 `reader.Pager`（默认 `page_height=4`、`page_overlap=0`，让分页数学好断言） |
 | `imported` | 真跑一遍 import，产出 `{result, ids, zh, en, home}` |
 | `backend` | `RecordingBackend`，记录调用且不联网 |
 | `window` / `FakeStdscr` | 实现阅读器真正用到的那部分 curses API（`getmaxyx`/`erase`/`addstr`/`move`…），并保存屏幕快照与 `writes` 记录 |
@@ -160,16 +160,16 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | 文件 | 项数 |
 | --- | --- |
 | `tests/test_cli.py` | 33 |
-| `tests/test_config.py` | 50 |
+| `tests/test_config.py` | 51 |
 | `tests/test_library.py` | 116 |
-| `tests/test_reader.py` | **134** |
+| `tests/test_reader.py` | **141** |
 | `tests/test_stats.py` | 76 |
 | `tests/test_translator.py` | 74 |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **514** |
+| **合计** | **522** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 ⑫，行数、测试总数 **514**、
-> `test_reader.py` **134**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 翻页重叠，行数、测试总数 **522**、
+> `test_reader.py` **141**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 
 ## 样例数据

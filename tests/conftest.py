@@ -259,6 +259,8 @@ def pager_factory():
         defaults: Dict[str, Any] = {
             "chapters": library.parse_chapters(list(lines)),
             "page_height": 4,
+            # 工厂里关掉翻页重叠，让分页数学保持"步长 = 屏数 × 每屏行数"好断言
+            "page_overlap": 0,
         }
         # 调用方传的参数覆盖默认值
         defaults.update(kwargs)

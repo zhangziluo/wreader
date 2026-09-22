@@ -30,8 +30,9 @@ Settings
 --------
 The ``[reader]``, ``[translator]``, ``[stats]`` and ``[vocab]`` tables of
 ``~/.wreader/settings.toml`` drive the front end (see :mod:`wreader.config`):
-``page_scroll_step`` sets how much the page keys move (``1`` = one screen),
-``status_bar_format`` picks the status segments, ``auto_save_interval`` writes the
+``page_scroll_step`` sets how much the page keys move (``1`` = one screen) and
+``page_overlap`` how many lines of the previous screen stay visible after a page
+turn, ``status_bar_format`` picks the status segments, ``auto_save_interval`` writes the
 position while reading, ``auto_translate_chapter`` translates each chapter as it
 is entered, ``highlight_in_reader`` underlines notebook words and
 ``auto_add_on_mark`` files a looked up word without asking.
@@ -70,6 +71,7 @@ from . import config, library, stats, translator, vocab
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
+    "DEFAULT_PAGE_OVERLAP",
     "DEFAULT_STATUS_FORMAT",
     "Pager",
     "STATUS_TOKENS",
@@ -144,6 +146,10 @@ STATUS_TOKENS: Tuple[str, ...] = (
 # 默认状态栏：时间 | 章节 | 本章时长
 #: The status bar the settings file documents: clock, chapter, chapter time.
 DEFAULT_STATUS_FORMAT = "time|chapter|duration"
+
+# 翻页时默认保留的上下文行数（与 config.SCHEMA 里 reader.page_overlap 的默认值一致）
+#: Lines of the previous screen kept on a page turn (``reader.page_overlap``).
+DEFAULT_PAGE_OVERLAP = 3
 
 # 在同一章里待多久后，建议去看一眼中文原文
 #: Time inside one chapter before the pager suggests peeking at Chinese.
@@ -460,6 +466,8 @@ class Pager:
         streak: int = 0,
         # 翻页键一次走几屏
         page_scroll_step: float = 1.0,
+        # 翻页时上下各保留几行上下文（0 = 关闭重叠）
+        page_overlap: int = DEFAULT_PAGE_OVERLAP,
         # 滚轮/触摸一格滚几行
         wheel_scroll_step: int = 1,
         # 触摸拖动即滚动（手机终端）
@@ -493,6 +501,9 @@ class Pager:
         #: how many pages the page keys move (``reader.page_scroll_step``)
         # 翻页步长（屏数），不能为负
         self.page_scroll_step = max(0.0, float(page_scroll_step))
+        #: lines kept from the previous screen on a page turn (``reader.page_overlap``)
+        # 翻页时上下保留的上下文行数，不能为负（0 = 不重叠）
+        self.page_overlap = max(0, int(page_overlap))
         #: lines one wheel tick moves (``reader.wheel_scroll_step``)
         # 滚轮/触摸一格滚几行，至少 1 行（否则滚了等于没滚）
         self.wheel_scroll_step = max(1, int(wheel_scroll_step))
@@ -551,9 +562,18 @@ class Pager:
 
     @property
     def step_lines(self) -> int:
-        """Lines the page keys move: ``page_scroll_step`` pages, never zero."""
-        # 步长 = 屏数 × 每屏行数，至少 1 行（否则按键没反应）
-        return max(1, int(round(self.page_scroll_step * self.page_height)))
+        """Lines the page keys move: ``page_scroll_step`` pages minus the overlap.
+
+        The overlap is what keeps three lines of the previous screen visible after
+        a page turn, so the start of a page is never a cold jump into new text.
+        Never zero, so a page key always makes progress.
+        """
+        # 整步长 = 屏数 × 每屏行数
+        full_page = int(round(self.page_scroll_step * self.page_height))
+        # 再减掉重叠行：翻页后屏幕上下各留着前几行，读起来才连得上
+        step = full_page - self.page_overlap
+        # 至少 1 行：重叠比整页还大时兜底，保证按键一定有反应
+        return max(1, step)
 
     @property
     def total(self) -> int:
@@ -2046,6 +2066,8 @@ def open_reader(book_id: str) -> int:
             (document.get("stats") or {}).get("daily_read_time") or {}
         ),
         page_scroll_step=float(reader_settings.get("page_scroll_step") or 1.0),
+        # 翻页时上下保留的上下文行数（0 = 不重叠；用 get 的默认参数，别用 or，否则 0 会被吃成 3）
+        page_overlap=int(reader_settings.get("page_overlap", DEFAULT_PAGE_OVERLAP)),
         # 滚轮/触摸一格滚几行（移动端；Pager 里还会兜底成至少 1 行）
         wheel_scroll_step=int(reader_settings.get("wheel_scroll_step") or 1),
         # 触摸拖动即滚动（移动端，默认开）

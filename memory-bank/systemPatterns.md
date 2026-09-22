@@ -35,9 +35,9 @@
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 18 | `__version__`、模块地图 | `["__version__"]` |
 | `wreader/cli.py` | 1006 | argparse 定义 + 9 个子命令处理函数 | `["build_parser", "main"]` |
-| `wreader/config.py` | 987 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
+| `wreader/config.py` | 989 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1077 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索 | **无 `__all__`** |
-| `wreader/reader.py` | 2100 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 10 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 2122 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |
@@ -97,7 +97,7 @@
 | 导入一本书 | `cli.cmd_import` → `library.import_books` → `load_source_text`（编码识别/EPUB）→ `write_utf8_text` → `build_record` → `save_library` |
 | 打开阅读器 | `cli.cmd_read` → `reader.open_reader` → `read_lines`（保持行号一致）→ `Pager(...)` → `curses.wrapper(_run)` → `_run` 首行 `_init_colors()` |
 | 画一帧 | `_run` → `_draw` → `Pager.visible_rows(rows, width-1)` → 逐行 `_draw_text` → `_draw_status` → `refresh` |
-| 翻页 | `handle_key` → `Pager.next_page/scroll` → `move_to` → `_sync_chapter`（章节计时滚动） |
+| 翻页 | `handle_key` → `Pager.next_page/previous_page` → `scroll(step_lines)` → `move_to` → `_sync_chapter`（章节计时滚动）。`step_lines = round(page_scroll_step × page_height) − page_overlap`，默认重叠 3 行 |
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` + `bump_translations` → `save_library` |
 | 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
@@ -128,3 +128,9 @@
    只能用自己的状态机维护（见过按下 → 见过抬手之间），不能直接看 bstate 的按键位。
 10. **测鼠标必须用 `TERM=xterm-1006`**：macOS 的 `xterm-256color` terminfo 没有 `XM` 能力，
     curses 只开 `?1000h`，SGR 序列会被当成普通按键收进来 —— 测出来的"失败"是假的。
+11. **翻页步长里含"上下文重叠"**：`step_lines = round(page_scroll_step × page_height) − page_overlap`
+    （`page_overlap` 默认 3），所以键盘 `j` 默认只走 21 行（`page_height` 24 − 3）而不是 24。
+    这是为了让上一屏末尾几行留在新屏幕顶部，读起来连得上；`0` = 关闭。
+    ⚠️ `tools/verify_mouse.py` 的各项期望值是**顺序累积**的，改 `page_height`/`page_overlap`/
+    `page_scroll_step` 会平移它后面所有数字。滚轮 / 触摸拖动走的是 `scroll(±wheel_scroll_step)`，
+    不经过 `step_lines`，所以逐行滚动**不受重叠影响**（本来就有上下文）。

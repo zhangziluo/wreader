@@ -127,21 +127,24 @@ def main() -> int:
     print("沙箱:", home)
     print("book_id:", book_id)
     print("== 端到端结果 ==")
-    # ① 键盘翻页做基准：j 往后一整页（page_height 默认 24）
-    run_case(home, env, book_id, "① 键盘 j 翻一整页", [("j", 0.5)], 24)
+    # ① 键盘翻页做基准：j 往后一整页（page_height 默认 24 行，减去默认重叠 3 行 = 21 行）
+    run_case(home, env, book_id, "① 键盘 j 翻一整页（24-3 行）", [("j", 0.5)], 21)
     # ② 滚轮上一格 = 往回 1 行（wheel_scroll_step 默认 1）
-    run_case(home, env, book_id, "② 滚轮上一格", WHEEL_UP, 23)
+    run_case(home, env, book_id, "② 滚轮上一格", WHEEL_UP, 20)
     # ③ 手指上滑 4 行 = 往后 4 行
-    run_case(home, env, book_id, "③ 向上拖 4 行", DRAG_UP_4, 27)
+    run_case(home, env, book_id, "③ 向上拖 4 行", DRAG_UP_4, 24)
     # ④ 手指下滑 3 行 = 往回 3 行
-    run_case(home, env, book_id, "④ 向下拖 3 行", DRAG_DOWN_3, 24)
+    run_case(home, env, book_id, "④ 向下拖 3 行", DRAG_DOWN_3, 21)
     # ⑤ touch_scroll=false 时拖动应当无效
     set_config(env, "reader.touch_scroll", "false")
-    run_case(home, env, book_id, "⑤ touch_scroll=false 拖动无效", DRAG_UP_4, 24)
+    run_case(home, env, book_id, "⑤ touch_scroll=false 拖动无效", DRAG_UP_4, 21)
     set_config(env, "reader.touch_scroll", "true")
     # ⑥ 步长改成 5：一格滚 5 行
     set_config(env, "reader.wheel_scroll_step", "5")
-    run_case(home, env, book_id, "⑥ 步长=5 时滚轮上一格", WHEEL_UP, 19)
+    run_case(home, env, book_id, "⑥ 步长=5 时滚轮上一格", WHEEL_UP, 16)
+    # ⑦ 关掉翻页重叠：j 又翻回一整页 24 行（验证 page_overlap 真的生效）
+    set_config(env, "reader.page_overlap", "0")
+    run_case(home, env, book_id, "⑦ page_overlap=0 时 j 翻整页 24 行", [("j", 0.5)], 40)
     print()
     print("RESULT:", "全部通过" if not failures else "失败项 {}".format(failures))
     return 0 if not failures else 1

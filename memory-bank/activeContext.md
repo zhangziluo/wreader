@@ -4,13 +4,13 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`514 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`522 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-从 GitHub **全新克隆下来跑同样全绿**（514 passed + 全部校验脚本），说明仓库自足、无遗漏。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2134** 条语句上方没有紧邻注释行
+从 GitHub **全新克隆下来跑同样全绿**（522 passed + 全部校验脚本），说明仓库自足、无遗漏。
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2142** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
-README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页。
+README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、**翻页保留 3 行上下文**（见 ⑭）。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -275,6 +275,26 @@ def _init_colors() -> None:
   免得下次误判成 keychain / helper 出问题而去乱改配置。
 - **结论**：6 个状态文件 + 索引全部与实测一致，没有留下"以后再说"的过期内容。
 
+### ⑭ 翻页保留 3 行上下文（用户需求：「阅读翻页的时候，上下保留三行前面的文字」）
+- **需求解读**：翻页后新屏幕**顶部**要留着上一屏末尾的几行（往回翻时留下来的是**底部**），
+  别让整屏跳转把上下文切断。
+- **做法**：把翻页步长减去一个重叠行数 ——
+  `Pager.step_lines = max(1, round(page_scroll_step × page_height) − page_overlap)`，默认 `page_overlap = 3`。
+  因为翻页键 (next_page/previous_page) 前后对称，所以「顶部重叠 + 底部重叠」一次实现。
+- **做成配置项而非写死 3**：`config.SCHEMA` 新增 `reader.page_overlap`（键数 **23 → 24**）。
+  项目既有约定是阅读行为都走 SCHEMA；写死会留魔数，且用户可调大或设 `0` 关闭。
+- **不动滚轮/触摸**：它们走 `scroll(±wheel_scroll_step)` 逐行走，本来就有上下文，不经过 `step_lines`。
+- **关键点 / 坑（全在 `reader.py`）**：
+  - 新增 `DEFAULT_PAGE_OVERLAP = 3`（模块 `__all__` 10 → **11**），与 `DEFAULT_STATUS_FORMAT` 同款约定。
+  - `open_reader` 读配置必须用 `reader_settings.get('page_overlap', DEFAULT_PAGE_OVERLAP)`，
+    **不能用 `or 3`** —— `0 or 3 == 3`，那样「关闭重叠」会被静默吃成默认值。
+  - `Pager.__init__` 里 `self.page_overlap = max(0, int(page_overlap))`，负重叠夹到 0（否则会跳更多）。
+  - `tests/conftest.py` 的 `pager_factory` 显式注入 `page_overlap=0`：否则 `page_height=4` 的既有分页断言
+    （步长 = 屏数 × 每屏行数）会全被重叠改写而失真。
+  - ⚠️ **`tools/verify_mouse.py` 的期望值是顺序累积的**：键盘基准从 24 行变 21 行（24−3），
+    后续 23/27/24/24/19 连锁平移成 20/24/21/21/16；并新增第 ⑦ 项
+    （`page_overlap=0` 时 `j` 仍走 24 行）来验证该设置真的生效。
+
 ## 本会话的验证证据（全部通过）
 
 | 检查 | 结果 |
@@ -326,6 +346,7 @@ def _init_colors() -> None:
 | 拖动探针日志（修复后） | press→`0x2` y=19 active=True；motion→`0x8000000` y=15 **delta=4**；release→`0x1` active=False |
 | 灌 SGR 序列的真实解码表 | wheel-up(64)→`0x80000`=BUTTON4_PRESSED；wheel-down(65)→`0x8000000`（**本平台没有该位**）；press b1→`0x2`；motion→`0x8000000`；release→`0x1` |
 | **本轮（⑫）回归** | `pytest tests/` → **514 passed**（覆盖上面那行旧的 494）；`npx pyright` → **0 errors / 0 warnings**；`tools/check_doc_numbers.py` → **ALL OK**；`tools/check_docs.py` → 三份文档 OK；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → 全部通过 |
+| **本轮（⑭）回归** | `pytest tests/` → **522 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **7 项全过**（键盘 j=21、滚轮上=20、上拖 4=24、下拖 3=21、`touch_scroll=false`=21、步长 5=16、`page_overlap=0` 时 j=40） |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
@@ -348,6 +369,20 @@ def _init_colors() -> None:
 **同步更新了 2 个原先锁"字符数语义"的测试**：
 `test_format_status_bar_drops_whole_segments_when_narrow`（改用 10/22/23/36 列验证）、
 `test_message_row_shows_the_long_chapter_nudge`（宽 5 列时 `"看中文?"` → `"看中"`）。
+
+## ⑭ 新增的测试（8 项）
+
+`tests/test_config.py`（1 项）：`test_page_overlap_setting_is_declared`（默认 3、`coerce_value` 认 `"5"`/`"0"`）。
+
+`tests/test_reader.py`（7 项）：
+`test_page_overlap_shortens_the_page_turn`（4 行 − 3 = 1）、
+`test_page_overlap_zero_keeps_the_full_page`（0 → 4）、
+`test_page_overlap_with_a_half_page_step`（0.5 屏 − 3 兜成 1）、
+`test_page_overlap_never_stalls_the_page_keys`（重叠 > 整页仍为 1）、
+`test_page_overlap_defaults_to_three_lines`（`Pager` 默认 3、`DEFAULT_PAGE_OVERLAP` 常量一致）、
+`test_page_overlap_is_clamped_to_zero`（负重叠夹到 0）、
+`test_page_turn_keeps_the_last_lines_of_the_previous_screen`（**端到端语义**：6 行屏 + 3 行重叠，
+翻页后新屏前 3 行 == 上一屏末 3 行，往回翻精确回到原处）。
 
 ## 待办 / 下一步
 

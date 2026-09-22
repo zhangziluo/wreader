@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 23 项
-    assert len(paths) == 23
+    # 当前 schema 共 24 项
+    assert len(paths) == 24
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:
@@ -38,6 +38,14 @@ def test_mobile_scrolling_settings_are_declared() -> None:
     # 类型按默认值推断：一个是整数、一个是布尔
     assert config.coerce_value("reader.wheel_scroll_step", "3") == 3
     assert config.coerce_value("reader.touch_scroll", "off") is False
+
+
+def test_page_overlap_setting_is_declared() -> None:
+    # 翻页重叠默认保留 3 行上下文，0 表示关掉（值本身合法，不能被吃成默认值）
+    assert config.DEFAULT_FLAT["reader.page_overlap"] == 3
+    # 类型是整数
+    assert config.coerce_value("reader.page_overlap", "5") == 5
+    assert config.coerce_value("reader.page_overlap", "0") == 0
 
 
 def test_settings_paths_follow_nr_home(isolated_home) -> None:
