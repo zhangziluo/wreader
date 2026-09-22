@@ -263,6 +263,11 @@ def _init_colors() -> None:
   - `memory-bank/README.md`：494→514，并补一条**本次基线快照**。
   - `productContext.md`（本会话之前一直没动过）：补上"手机终端用户"这类目标用户、
     "手机上也能读"的体验目标、以及 3 条相关产品决策（1 行 = 1 行、方向约定、按键位不猜）。
+- **推送插曲（值得记）**：提交 `63b1eb8` 后第一次 `git push` 报了
+  `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`；
+  而**原样重试立刻成功**，同一时刻 `curl -x http://127.0.0.1:7897 https://github.com` 也返回 200 ——
+  属于网络抖动，不是认证或代理配置坏了。这条已写进 `.clinerules/memory-bank.md`，
+  免得下次误判成 keychain / helper 出问题而去乱改配置。
 - **结论**：6 个状态文件 + 索引全部与实测一致，没有留下"以后再说"的过期内容。
 
 ## 本会话的验证证据（全部通过）

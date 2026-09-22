@@ -82,6 +82,9 @@
   **没有**注册到 GitHub 账号，改用 SSH 会 `Permission denied (publickey)`。
   全局另有 `http.proxy` / `https.proxy = http://127.0.0.1:7897`，代理没开时 push 会失败，
   可临时用 `git -c http.proxy= push` 绕过。自动化推送时设 `GIT_TERMINAL_PROMPT=0` 避免卡住。
+  ⚠️ **偶发瞬时失败**：实测遇到过 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL ... github.com:443`，
+  而同一时刻 `curl -x http://127.0.0.1:7897 https://github.com` 返回 200 —— 是网络抖动，
+  **先原样重试一次**（通常立刻成功），别急着当成认证/配置坏了去改 remote 或 helper。
 - **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会变成
   `-qq`，此时只输出 `文件: 数量`、不打印 `N passed`。想看到汇总就少加一个 `-q`。
 - **改动必须先实测验证**：跑 `py_compile`、`pytest tests/`、`npx pyright`；
