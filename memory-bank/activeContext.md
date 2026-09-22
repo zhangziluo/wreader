@@ -6,6 +6,7 @@
 
 代码库处于**干净、全绿**状态：`494 passed`、`pyright 0 errors / 0 warnings`、
 注释覆盖检查 `TOTAL: 0`，且**已 git 化并推送到 GitHub**（`main` → `origin/main`，首个提交 `7ecc3eb`）。
+从 GitHub **全新克隆下来同样 `494 passed`**，说明仓库自足、无遗漏。
 本会话完成的三件事（中文注释、自动换行、背景跟随终端）都已落地并验证。
 
 ## 最近改动（2026-09-22，按时间顺序）
@@ -120,6 +121,10 @@ def _init_colors() -> None:
 - 顺带清掉散落文档里的"无 git 仓库"过期说法：`.clinerules/memory-bank.md`（含新增的
   `book/` 禁上传、认证方式提醒）、`projectbrief.md`、`progress.md`、`techContext.md`、
   `activeContext.md`；`progress.md` 的待办序号因删掉第一项而整体前移一位。
+- **推完做了克隆回环验证**：从 GitHub 全新 `git clone` 到 `/tmp/wreader-clone`，
+  在克隆目录内跑 `pytest` → **494 passed**、`npx pyright` → `0 errors`，
+  且 `wreader.__file__` 指向克隆副本（排除"其实在测本地 editable 安装"的假阳性）。
+  结论：仓库自足，`book/` 不参与测试，忽略它没有任何副作用。
 
 ## 本会话的验证证据（全部通过）
 
@@ -143,6 +148,8 @@ def _init_colors() -> None:
 | GitHub REST API 复核 | 默认分支 `main`；根目录 11 项（5 目录 + 6 文件）与本地一致；`book/` 未上传 |
 | `git check-ignore -v` | `book/`、`.DS_Store`（×2）、`.venv/`、`.pytest_cache/`、`*.egg-info/` 全部命中 `.gitignore` |
 | staged 体积审计 | 32 个文件共 **704 KB**，最大单文件 76 KB（`reader.py`），无 >1 MB 文件 |
+| **全新克隆验证**（对 `ee92a95` 做 `git clone` 到 `/tmp/wreader-clone`） | 32 个跟踪文件、2 个提交、`book/` 不存在；**在克隆目录内**跑 `pytest` → **494 passed in 4.12s**；`npx pyright` → `0 errors, 0 warnings` |
+| 克隆内 import 路径确认 | `wreader.__file__` = `/private/tmp/wreader-clone/wreader/__init__.py` —— 证明确实在测克隆副本，而非本地 editable 安装 |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
