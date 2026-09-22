@@ -35,5 +35,5 @@
   源码行数、**514** 项测试、`reader.py` 2100 行、"新终端怎么打开"、"手机上的滚轮 / 触摸翻页"。
   数字由 `tools/check_doc_numbers.py` 对拍、锚点由 `tools/check_docs.py` 校验，**当前都通过**。
 - **本次复核的基线快照（2026-09-22）**：514 项测试 / pyright 0 告警 /
-  23 个 `.py`（wreader 8 + tests 8 + tools 7）/ 12 个 git 提交 / 40 个跟踪文件；
+  23 个 `.py`（wreader 8 + tests 8 + tools 7）/ 40 个跟踪文件；
   `tools/` 的 7 个校验脚本全绿。这是**实测值**，不是估算。

@@ -17,7 +17,7 @@
 | Python | **>= 3.11** |
 | 入口 | console script `wreader` → `wreader.cli:main` |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **12 个提交 / 40 个跟踪文件**，工作区干净且与远端同步 |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **40 个跟踪文件**，工作区干净且与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求

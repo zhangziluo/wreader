@@ -5,7 +5,7 @@
 ## 当前状态一句话
 
 代码库处于**干净、全绿**状态：`514 passed`、`pyright 0 errors / 0 warnings`、
-`tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，12 个提交）。
+`tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
 从 GitHub **全新克隆下来跑同样全绿**（514 passed + 全部校验脚本），说明仓库自足、无遗漏。
 ⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2134** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
@@ -244,7 +244,8 @@ def _init_colors() -> None:
     translator 74 / vocab 31），`tests/` 共 5050 行
   - `tools/`：**7 个脚本 + README**（862 行）
   - 配置：`SCHEMA` 共 **23** 键（reader 8 / translator 9 / stats 3 / vocab 2 / library 1）
-  - git：**12 个提交 / 40 个跟踪文件**，`main` 与 `origin/main` 一致（`0 0`），工作区干净
+  - git：**40 个跟踪文件**（`git ls-files` 实测）；提交数刻意不写死 —— 见下面那条教训；
+    `main` 与 `origin/main` 一致（`0 0`），工作区干净
   - 校验脚本：check_docs OK、check_doc_numbers ALL OK、check_comments **2134**、
     verify_wrap 40077、verify_draw 420、verify_mouse 6 项全过；`pyright` **0 告警**
 - **改掉了这些与事实不符的内容**：
@@ -263,6 +264,10 @@ def _init_colors() -> None:
   - `memory-bank/README.md`：494→514，并补一条**本次基线快照**。
   - `productContext.md`（本会话之前一直没动过）：补上"手机终端用户"这类目标用户、
     "手机上也能读"的体验目标、以及 3 条相关产品决策（1 行 = 1 行、方向约定、按键位不猜）。
+- ⚠️ **又踩了一次"写死就会过期"的坑**（与早先写死 SHA 是同一类）：这次同步里我在 **5 处**写了
+  "12 个提交"，可**这次同步自己又提交了两次** —— 落笔即过期。已全部改成稳定事实
+  （"40 个跟踪文件"）或判据（"`git status` 不领先/不落后"）。
+  并把这条教训补进了 `.clinerules/memory-bank.md` 的「写作纪律」，下次别再犯。
 - **推送插曲（值得记）**：提交 `63b1eb8` 后第一次 `git push` 报了
   `LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443`；
   而**原样重试立刻成功**，同一时刻 `curl -x http://127.0.0.1:7897 https://github.com` 也返回 200 ——

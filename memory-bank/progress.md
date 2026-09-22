@@ -11,7 +11,7 @@
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
 | 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2134** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，42 KB）、`README.en.md`（44 KB）、`使用指南.md`（37 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**12 个提交 / 40 个跟踪文件**，工作区干净 |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**40 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
 | 编译 | `py_compile` 全部 **23 个** .py 通过（wreader 8 + tests 8 + tools 7） |
 | 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 6 项全过 |
