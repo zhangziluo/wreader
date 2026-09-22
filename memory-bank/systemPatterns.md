@@ -37,7 +37,7 @@
 | `wreader/cli.py` | 1006 | argparse 定义 + 9 个子命令处理函数 | `["build_parser", "main"]` |
 | `wreader/config.py` | 989 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1077 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索 | **无 `__all__`** |
-| `wreader/reader.py` | 2122 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 2193 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |
@@ -69,6 +69,8 @@
 `Pager` 是一个**数据对象**：位置、视图模式、搜索命中、书签、计时、译文字典。
 - `rows_for(index)` 决定"一个源行在该视图下显示成哪些行"
 - `visible_rows(height, width=None)` 决定"这一屏填哪些行"（给了 width 会按显示宽度折行）
+- `viewport_rows` / `viewport_width` 由 `_draw` **每帧**按真实终端填入，供翻页按屏幕行计算
+- `next_position(screen_rows, width)` / `previous_position(...)` 按**屏幕行**算出下一屏的源行号
 - `_draw` 只负责画，`handle_key` 只负责改 `Pager` 状态
 => 分页/视图逻辑可脱离 curses 测试（`tests/test_reader.py` 从来不启动真终端）。
 
@@ -97,7 +99,7 @@
 | 导入一本书 | `cli.cmd_import` → `library.import_books` → `load_source_text`（编码识别/EPUB）→ `write_utf8_text` → `build_record` → `save_library` |
 | 打开阅读器 | `cli.cmd_read` → `reader.open_reader` → `read_lines`（保持行号一致）→ `Pager(...)` → `curses.wrapper(_run)` → `_run` 首行 `_init_colors()` |
 | 画一帧 | `_run` → `_draw` → `Pager.visible_rows(rows, width-1)` → 逐行 `_draw_text` → `_draw_status` → `refresh` |
-| 翻页 | `handle_key` → `Pager.next_page/previous_page` → `scroll(step_lines)` → `move_to` → `_sync_chapter`（章节计时滚动）。`step_lines = round(page_scroll_step × page_height) − page_overlap`，默认重叠 3 行 |
+| 翻页 | `handle_key` → `Pager.next_page/previous_page` → `next_position/previous_position(page_budget, viewport_width)` → `move_to` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行**；`viewport_rows` 由 `_draw` 每帧按终端正文区高度填入 |
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` + `bump_translations` → `save_library` |
 | 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
@@ -128,9 +130,15 @@
    只能用自己的状态机维护（见过按下 → 见过抬手之间），不能直接看 bstate 的按键位。
 10. **测鼠标必须用 `TERM=xterm-1006`**：macOS 的 `xterm-256color` terminfo 没有 `XM` 能力，
     curses 只开 `?1000h`，SGR 序列会被当成普通按键收进来 —— 测出来的"失败"是假的。
-11. **翻页步长里含"上下文重叠"**：`step_lines = round(page_scroll_step × page_height) − page_overlap`
-    （`page_overlap` 默认 3），所以键盘 `j` 默认只走 21 行（`page_height` 24 − 3）而不是 24。
-    这是为了让上一屏末尾几行留在新屏幕顶部，读起来连得上；`0` = 关闭。
-    ⚠️ `tools/verify_mouse.py` 的各项期望值是**顺序累积**的，改 `page_height`/`page_overlap`/
-    `page_scroll_step` 会平移它后面所有数字。滚轮 / 触摸拖动走的是 `scroll(±wheel_scroll_step)`，
-    不经过 `step_lines`，所以逐行滚动**不受重叠影响**（本来就有上下文）。
+11. **翻页必须按「屏幕行」算，不能按「文本行」**：长段落没有换行，在终端里被折成多行，
+    所以"一屏"对应的文本行数是变的。翻页走 `page_budget = round(page_scroll_step × viewport_rows) − page_overlap`
+    （单位屏幕行，`page_overlap` 默认 3），再由 `next_position` / `previous_position` 用
+    `visible_rows`（= 已有的正确折行）换算成源行号。
+    ⚠️ **绝不能**用 `ceil(len(text) / width)` 这类字符数近似：汉字占 2 列，`len()` 会把折行算错，
+    而且会劈开英文单词、无视双语视图的多行。这是 `_wrap_line` 存在的唯一理由，必须复用。
+    ⚠️ `tools/verify_mouse.py` 键盘基准是 **pty 真实高度**（40 行 → 正文区 38 行 → `j` 走 38−3=35 行），
+    不是 `page_height`；各项期望值**顺序累积**，改翻页逻辑 / 重叠 / pty 尺寸都要全部重算。
+    滚轮 / 触摸拖动走 `scroll(±wheel_scroll_step)` 逐行走，**不经过翻页路径**，不受影响。
+    ⚠️ **残留限制**：`position` 是源行号（不是「行 + 段内偏移」），所以一段长到恰好在一屏中途被
+    折行截断时，下一页从**下一源行**开始，该段剩下的几屏行看不到。彻底修需要把位置升级成
+    `(行, 段内偏移)`，改动面大，当前未做。

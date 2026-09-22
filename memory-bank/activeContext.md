@@ -4,13 +4,14 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`522 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`531 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-从 GitHub **全新克隆下来跑同样全绿**（522 passed + 全部校验脚本），说明仓库自足、无遗漏。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2142** 条语句上方没有紧邻注释行
+从 GitHub **全新克隆下来跑同样全绿**（531 passed + 全部校验脚本），说明仓库自足、无遗漏。
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2197** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
-README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、**翻页保留 3 行上下文**（见 ⑭）。
+README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
+**翻页改按屏幕行精确推进（修跳行 bug，见 ⑮）**。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -294,6 +295,32 @@ def _init_colors() -> None:
   - ⚠️ **`tools/verify_mouse.py` 的期望值是顺序累积的**：键盘基准从 24 行变 21 行（24−3），
     后续 23/27/24/24/19 连锁平移成 20/24/21/21/16；并新增第 ⑦ 项
     （`page_overlap=0` 时 `j` 仍走 24 行）来验证该设置真的生效。
+    （此段数字已被 ⑮ 再次平移，见 ⑮。）
+
+### ⑮ 修复"翻页跳行"：翻页改按**屏幕行**推进（用户报告）
+- **现象/根因**：`step_lines` 是**文本行**数（`round(page_scroll_step × page_height) − overlap`），
+  而小说里长段落没有换行、会被终端折成多屏行，所以"一屏"对应的文本行数是变的 ——
+  按固定文本行数跳，会整段跳过**从未显示过**的内容。
+- **关键取舍：拒绝用户提案里的 `ceil(len(text) / max_x)` 算法**。汉字占 2 列，
+  `len()` 会把折行算错一倍；而且它会劈开英文单词、忽略 Tab 与双语视图。
+  项目硬约束要求宽度计算只能走 `_char_width`/`_wrap_line`。
+- **改法（复用已有正确折行）**：
+  - `Pager` 新增 `viewport_rows` / `viewport_width`，由 `_draw` **每帧**按真实终端填入
+    （`text_rows = height − 2`、`text_width = width − 1`），所以窗口 size 改了下一帧即生效。
+  - 新增 `_screen_rows(index, width)`：一个源行占几屏行（`rows_for` + `_wrap_line`，CJK/双语都对）。
+  - 新增 `next_position(screen_rows, width)` / `previous_position(...)`：按屏幕行预算算出下一屏顶部的源行号。
+  - `step_lines` 属性删除，换成 `page_budget`（单位屏幕行）；
+    `next_page`/`previous_page` → `move_to(next_position/previous_position(page_budget, viewport_width))`。
+  - 顺带修同一根因的 `_screen_range()`（`t`/`T`/切视图时翻"当前屏"的范围），
+    也用 `visible_rows` 取真实可见源行。
+  - 默认 `viewport_rows = page_height`、`viewport_width = None`：**没有终端尺寸时行为与旧版一致**
+    （既有单测因此只需改 `step_lines` 那几个）。
+- **`page_height` 降级**：真实终端里不再参与翻页，只作"拿不到终端尺寸时的回退值"；文档已说明。
+- ⚠️ **残留限制（已知、未修）**：`position` 是**源行号**而非「行 + 段内偏移」，
+  所以一段长到恰好在一屏中途被折行截断时，下一页从**下一源行**开始，该段剩下的几屏行看不到。
+  用户提案的算法同样有这个行为（`line += 1`）。彻底修需要把位置升级成 `(行, 段内偏移)`，改动面大。
+- `tools/verify_mouse.py` 期望值**再次平移**：键盘基准改成 pty 真实高度
+  （pty 40 行 → 正文区 38 行 → `j` 走 38−3=**35** 行），整串变成 35/34/38/35/35/30/68。
 
 ## 本会话的验证证据（全部通过）
 
@@ -347,6 +374,8 @@ def _init_colors() -> None:
 | 灌 SGR 序列的真实解码表 | wheel-up(64)→`0x80000`=BUTTON4_PRESSED；wheel-down(65)→`0x8000000`（**本平台没有该位**）；press b1→`0x2`；motion→`0x8000000`；release→`0x1` |
 | **本轮（⑫）回归** | `pytest tests/` → **514 passed**（覆盖上面那行旧的 494）；`npx pyright` → **0 errors / 0 warnings**；`tools/check_doc_numbers.py` → **ALL OK**；`tools/check_docs.py` → 三份文档 OK；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → 全部通过 |
 | **本轮（⑭）回归** | `pytest tests/` → **522 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **7 项全过**（键盘 j=21、滚轮上=20、上拖 4=24、下拖 3=21、`touch_scroll=false`=21、步长 5=16、`page_overlap=0` 时 j=40） |
+| **本轮（⑮）回归** | `pytest tests/` → **531 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **7 项全过**（pty 40 行下键盘 j=**35**、滚轮上=34、上拖 4=38、下拖 3=35、`touch_scroll=false`=35、步长 5=30、`page_overlap=0` 时 j=68） |
+| **⑮ 关键对照（翻页跳行）** | 长段落（50 汉字 = 100 列，宽 20 时占 5 屏行）+ 短行、正文区 12 行：`j` 从第 0 行到第 **8** 行（长段 5 行 + 第 1..7 行）；旧逻辑会按 `page_height=24` 硬跳到第 24 行，**跳过第 8..23 行** |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
@@ -383,6 +412,24 @@ def _init_colors() -> None:
 `test_page_overlap_is_clamped_to_zero`（负重叠夹到 0）、
 `test_page_turn_keeps_the_last_lines_of_the_previous_screen`（**端到端语义**：6 行屏 + 3 行重叠，
 翻页后新屏前 3 行 == 上一屏末 3 行，往回翻精确回到原处）。
+
+## ⑮ 新增/改写的测试（`tests/test_reader.py`）
+
+改写（原先直接断言 `step_lines` 的 5 个，现在断言翻页后的 `position`）：
+`test_page_scroll_step_controls_the_page_turn`、`test_page_overlap_shortens_the_page_turn`、
+`test_page_overlap_zero_keeps_the_full_page`、`test_page_overlap_with_a_half_page_step`、
+`test_page_overlap_never_stalls_the_page_keys`。
+
+新增（10 项）：
+`test_page_budget_counts_screen_rows`（预算单位是屏幕行）、
+`test_screen_rows_counts_wrapped_and_cjk_lines`（**汉字按 2 列**：宽度 4 的 4 个汉字 → 2 行）、
+`test_screen_rows_counts_every_row_of_the_bilingual_view`、
+`test_next_position_stops_at_the_first_line_that_does_not_fit`、
+`test_previous_position_is_the_mirror_of_next_position`、
+`test_long_wrapped_paragraph_is_not_skipped`（**跳行 bug 的回归测试**）、
+`test_page_turn_never_skips_a_source_line`（用户验收口径：翻 10 次，每屏首页 == 上屏末页 + 1）、
+`test_next_page_is_reversible_with_wrapping`、
+`test_screen_range_counts_wrapped_lines`（`_screen_range` 同根因修复的回归测试）。
 
 ## 待办 / 下一步
 

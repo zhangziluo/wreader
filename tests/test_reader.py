@@ -341,33 +341,65 @@ def test_pager_position_and_percentage(pager) -> None:
     assert pager.percentage == 100.0
 
 
-def test_step_lines_follows_page_scroll_step(pager_factory) -> None:
-    # 每屏 4 行（工厂默认），步长 = 屏数 × 每屏行数
-    assert pager_factory(page_scroll_step=1.0).step_lines == 4
-    assert pager_factory(page_scroll_step=0.5).step_lines == 2
-    assert pager_factory(page_scroll_step=2.0).step_lines == 8
-    # 0 也会被兜成 1，保证按键一定有反应
-    assert pager_factory(page_scroll_step=0.0).step_lines == 1  # never zero
+def test_page_scroll_step_controls_the_page_turn(pager_factory) -> None:
+    # 用一本足够长的书，免得到书末被夹住影响断言
+    lines = ["l{}".format(n) for n in range(40)]
+    # 默认视口 = page_height=4 且不折行：一次翻满 4 行
+    full = pager_factory(lines=lines, chapters=[], page_scroll_step=1.0)
+    full.next_page()
+    assert full.position == 4
+    # 半屏 = 2 行；两屏 = 8 行
+    half = pager_factory(lines=lines, chapters=[], page_scroll_step=0.5)
+    half.next_page()
+    assert half.position == 2
+    double = pager_factory(lines=lines, chapters=[], page_scroll_step=2.0)
+    double.next_page()
+    assert double.position == 8
+    # 0 会被兜成至少 1 行，保证按键一定有反应
+    stalled = pager_factory(lines=lines, chapters=[], page_scroll_step=0.0)
+    stalled.next_page()
+    assert stalled.position == 1
+
+
+def test_page_budget_counts_screen_rows(pager_factory) -> None:
+    # 预算是"屏幕行"：视口 10 行、无重叠 → 10
+    pager = pager_factory(page_overlap=0)
+    pager.viewport_rows = 10
+    assert pager.page_budget == 10
+    # 重叠 3 行 → 预算 7
+    pager.page_overlap = 3
+    assert pager.page_budget == 7
+    # 重叠比整屏还大 → 兜底 1，按键不会没反应
+    pager.page_overlap = 99
+    assert pager.page_budget == 1
 
 
 def test_page_overlap_shortens_the_page_turn(pager_factory) -> None:
     # 每屏 4 行、重叠 3 行：翻页只前进 1 行，其余 3 行留在屏幕上当上下文
-    assert pager_factory(page_overlap=3).step_lines == 1
+    pager = pager_factory(page_overlap=3)
+    pager.next_page()
+    assert pager.position == 1
 
 
 def test_page_overlap_zero_keeps_the_full_page(pager_factory) -> None:
-    # 关掉重叠：步长就是原来的整页
-    assert pager_factory(page_overlap=0).step_lines == 4
+    # 关掉重叠：一次翻满整屏
+    pager = pager_factory(page_overlap=0)
+    pager.next_page()
+    assert pager.position == 4
 
 
 def test_page_overlap_with_a_half_page_step(pager_factory) -> None:
     # 半屏（2 行）减掉 3 行重叠会变负：兜底成 1 行
-    assert pager_factory(page_scroll_step=0.5, page_overlap=3).step_lines == 1
+    pager = pager_factory(page_scroll_step=0.5, page_overlap=3)
+    pager.next_page()
+    assert pager.position == 1
 
 
 def test_page_overlap_never_stalls_the_page_keys(pager_factory) -> None:
-    # 重叠比整页还大也只兜到 1 行，按键一定有反应
-    assert pager_factory(page_overlap=10).step_lines == 1
+    # 重叠比整屏还大也只前进 1 行，按键一定有反应
+    pager = pager_factory(page_overlap=10)
+    pager.next_page()
+    assert pager.position == 1
 
 
 def test_page_overlap_defaults_to_three_lines() -> None:
@@ -394,6 +426,101 @@ def test_page_turn_keeps_the_last_lines_of_the_previous_screen(pager_factory) ->
     # 往回翻一页就精确回到原处（既有顶部重叠也有底部重叠）
     pager.previous_page()
     assert pager.position == before[0]
+
+
+def test_screen_rows_counts_wrapped_and_cjk_lines(pager_factory) -> None:
+    # 不给宽度：一个源行就是一条屏幕行
+    pager = pager_factory(lines=["中文测试"], chapters=[])
+    assert pager._screen_rows(0, None) == 1
+    # 宽度 4：4 个汉字占 8 列 → 折成 2 行（用 len() 会误算成 1 行）
+    assert pager._screen_rows(0, 4) == 2
+    # ASCII 12 字符、宽度 5 → 3 行（按词/硬断，不丢字符）
+    latin = pager_factory(lines=["abcdefghijkl"], chapters=[])
+    assert latin._screen_rows(0, 5) == 3
+
+
+def test_screen_rows_counts_every_row_of_the_bilingual_view(pager_factory) -> None:
+    # 双语视图：一个源行是"原文 + 译文"两段，各占一屏行
+    pager = pager_factory(lines=["hello"], chapters=[])
+    pager.mode = "both"
+    pager.translations = {0: "你好"}
+    assert pager._screen_rows(0, None) == 2
+
+
+def test_next_position_stops_at_the_first_line_that_does_not_fit(pager_factory) -> None:
+    # 第 0 行长到占 3 屏行，后面是 1 行一条的短行；屏幕只放得下 4 行
+    lines = ["x" * 15] + ["ab{}".format(n) for n in range(10)]
+    pager = pager_factory(lines=lines, chapters=[])
+    # 宽度 5：15 个字符折成 3 行，再加第 1 行正好 4 行 → 下一屏从第 2 行开始
+    assert pager.next_position(4, 5) == 2
+
+
+def test_previous_position_is_the_mirror_of_next_position(pager_factory) -> None:
+    # 不折行、每屏 4 行：从第 8 行往回一屏落在第 4 行
+    pager = pager_factory(lines=["l{}".format(n) for n in range(40)], chapters=[])
+    pager.move_to(8)
+    assert pager.previous_position(4, None) == 4
+    # 从第 4 行往前一屏同样回到第 8 行
+    pager.move_to(4)
+    assert pager.next_position(4, None) == 8
+
+
+def test_long_wrapped_paragraph_is_not_skipped(pager_factory) -> None:
+    # 长段落（50 个汉字 = 100 列 → 宽 20 时占 5 屏行）+ 短行
+    lines = ["长" * 50] + ["第 {} 行".format(n) for n in range(80)]
+    pager = pager_factory(lines=lines, chapters=[], page_height=24, page_overlap=0)
+    # 模拟真实终端：正文区 12 行 × 20 列
+    pager.viewport_rows = 12
+    pager.viewport_width = 20
+    start = pager.position
+    pager.next_page()
+    # 长段落占 5 行 + 第 1..7 行 = 一整屏，所以下一屏从第 8 行接上
+    assert pager.position == 8
+    # 一次翻页跨越的文本行数绝不会超过一屏能放下的行数
+    # （旧逻辑按 page_height=24 硬跳，会一次跳过从未显示过的第 8..23 行）
+    assert pager.position - start <= pager.viewport_rows
+
+
+def test_page_turn_never_skips_a_source_line(pager_factory) -> None:
+    # 用户场景：长段落 + 翻页 10 次，每次首页紧接上一屏末页，不重叠也不跳过
+    lines = ["长" * 50] + ["第 {} 行内容".format(n) for n in range(300)]
+    pager = pager_factory(lines=lines, chapters=[], page_height=24, page_overlap=0)
+    pager.viewport_rows = 12
+    pager.viewport_width = 20
+    for _ in range(10):
+        shown = [index for index, _ in pager.visible_rows(12, 20)]
+        # 记下这一屏最后显示到的源行
+        last_shown = max(shown)
+        pager.next_page()
+        # 新一屏的首页正是它的下一行：既没跳过、也没重复
+        assert pager.position == last_shown + 1
+
+
+def test_next_page_is_reversible_with_wrapping(pager_factory) -> None:
+    # 长段落折行时，一页页往回翻应当和前进时的落点一一对应
+    lines = ["长" * 60] + ["第 {} 行".format(n) for n in range(40)]
+    pager = pager_factory(lines=lines, chapters=[], page_overlap=0)
+    pager.viewport_rows = 6
+    pager.viewport_width = 10
+    # 先往前翻 4 页，记下每一页的起点
+    starts = []
+    for _ in range(4):
+        starts.append(pager.position)
+        pager.next_page()
+    # 再倒着翻回去，落点应当逐页吻合
+    for expected in reversed(starts):
+        pager.previous_page()
+        assert pager.position == expected
+
+
+def test_screen_range_counts_wrapped_lines(window, pager_factory) -> None:
+    # 假窗口 10×40 → 正文区 8 行 × 39 列；长段折行后覆盖的源行变少
+    lines = ["x" * 120] + ["短行 {}".format(n) for n in range(20)]
+    pager = pager_factory(lines=lines, chapters=[])
+    first, last = reader._screen_range(window, pager)
+    assert first == 0
+    # 120 字符按 39 列折成 4 屏行，剩下 4 行给短行 → 画到第 4 行（半开区间末端 5）
+    assert last == 5
 
 
 def test_paging_and_lines_read(pager) -> None:

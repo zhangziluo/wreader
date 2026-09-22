@@ -54,8 +54,8 @@ python tools/check_comments.py --strict wreader/vocab.py   # 限定文件，适�
 ```
 
 项目约定「每条逻辑语句上方都要有一行口语化中文注释」，但**这是个很严的字面规则**：
-2026-09-22 实测 `wreader/` + `tests/` 仍有 **2142** 条语句上方没有紧邻注释行
-（`reader.py` 379、`translator.py` 189、`library.py` 163 …）。
+2026-09-22 实测 `wreader/` + `tests/` 仍有 **2197** 条语句上方没有紧邻注释行
+（`reader.py` 385、`test_reader.py` 398、`translator.py` 189 …）。
 所以默认模式**只报告、不判定**；要拿它当门禁就加 `--strict`，并配合文件参数一次啃一个。
 
 > ⚠️ 历史坑：这个脚本早先的版本把 `tokenize.NEWLINE` 也放进了「跳过」集合，
@@ -100,9 +100,11 @@ python tools/verify_mouse.py     # 期望：RESULT: 全部通过
 鼠标这套东西**单元测试盖不到底**：「终端有没有把事件送进来」取决于 curses / terminfo /
 终端模拟器三者。所以这个脚本自己开一个真 pty、跑一次阅读器、灌标准 SGR 鼠标序列，
 再读 `library.json` 里的进度对账 —— 键盘基准、滚轮上一格、向上拖 4 行、向下拖 3 行、
-`touch_scroll=false` 拖动无效、步长=5、`page_overlap=0` 时键盘翻整页，共 **7 项**。
+`touch_scroll=false` 拖动无效、步长=5、`page_overlap=0` 时键盘翻整屏，共 **7 项**。
 ⚠️ 各项是**顺序累积**的：上一项退出的位置就是下一项的起点，所以改翻页步长 / 重叠时，
 后面所有期望值都要跟着平移。
+⚠️ 键盘翻页的基准是**pty 的真实高度**（40 行 → 正文区 38 行），不是 `reader.page_height`：
+翻页现在按屏幕行算。改 pty 尺寸或改成按屏幕行推进的逻辑，① 及之后全部期望值都要重算。
 
 > ⚠️ 两个前提，别随便改：
 > 1. 它固定用 **`TERM=xterm-1006`**。实测：macOS 上 `xterm-256color` 的 terminfo **没有 `XM` 能力**，

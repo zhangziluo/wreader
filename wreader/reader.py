@@ -5,8 +5,10 @@ produced at import time.  The pager works in **source lines**: the stored file i
 split on ``\\n`` exactly the way the importer split it, so
 ``progress["current_line"]``, ``progress["bookmarks"][].line`` and every
 ``chapters[].line_start`` are indexes into the same list.  One source line may
-occupy more than one screen row in the bilingual view, which is why pagination
-counts source lines and drawing expands them.
+occupy more than one screen row (long paragraphs wrap, and the bilingual view adds
+a row per translation), so a page turn is measured in **screen rows**, not source
+lines: pagination fills a real screenful and then continues from the first line
+that did not fit, which is what stops long paragraphs from being skipped.
 
 Views
 -----
@@ -449,7 +451,7 @@ class Pager:
         chapters: Sequence[Dict[str, Any]] = (),
         # 从第几行开始读
         position: int = 0,
-        # 每屏显示多少行
+        # 没有终端尺寸时的回退每屏行数（真实终端里由 _draw 填入正文区行数）
         page_height: int = 24,
         book_id: str = "",
         title: str = "untitled",
@@ -504,6 +506,12 @@ class Pager:
         #: lines kept from the previous screen on a page turn (``reader.page_overlap``)
         # 翻页时上下保留的上下文行数，不能为负（0 = 不重叠）
         self.page_overlap = max(0, int(page_overlap))
+        #: rows of the text area, refreshed by the curses layer on every frame
+        # 正文区屏幕行数：_draw 每帧按真实终端填进来；没有终端时退回 page_height
+        self.viewport_rows = self.page_height
+        #: columns of the text area, ``None`` while no terminal size is known
+        # 正文区列数：没有终端尺寸时为 None，此时按"一行 = 一屏行"处理
+        self.viewport_width: Optional[int] = None
         #: lines one wheel tick moves (``reader.wheel_scroll_step``)
         # 滚轮/触摸一格滚几行，至少 1 行（否则滚了等于没滚）
         self.wheel_scroll_step = max(1, int(wheel_scroll_step))
@@ -561,18 +569,18 @@ class Pager:
         self._sync_chapter()
 
     @property
-    def step_lines(self) -> int:
-        """Lines the page keys move: ``page_scroll_step`` pages minus the overlap.
+    def page_budget(self) -> int:
+        """Screen rows one page key moves: ``page_scroll_step`` screens minus the overlap.
 
-        The overlap is what keeps three lines of the previous screen visible after
-        a page turn, so the start of a page is never a cold jump into new text.
-        Never zero, so a page key always makes progress.
+        The budget is counted in **screen rows**, not source lines, so a page turn
+        lines up with what the terminal actually shows even when long paragraphs
+        wrap onto several rows.  Never zero, so a page key always makes progress.
         """
-        # 整步长 = 屏数 × 每屏行数
-        full_page = int(round(self.page_scroll_step * self.page_height))
+        # 一屏的屏幕行数 × 屏数 = 整步长
+        full_page = int(round(self.page_scroll_step * self.viewport_rows))
         # 再减掉重叠行：翻页后屏幕上下各留着前几行，读起来才连得上
         step = full_page - self.page_overlap
-        # 至少 1 行：重叠比整页还大时兜底，保证按键一定有反应
+        # 至少 1 行：重叠比整屏还大时兜底，保证按键一定有反应
         return max(1, step)
 
     @property
@@ -673,6 +681,52 @@ class Pager:
             index += 1
         return rows
 
+    def _screen_rows(self, index: int, width: Optional[int]) -> int:
+        """How many screen rows one source line takes in the current view.
+
+        Wrapping is delegated to :func:`_wrap_line`, so double width CJK characters
+        and latin word wrapping are counted exactly the way the screen draws them.
+        """
+        # 一个源行在当前视图下可能拆成多段显示文本（双语是原文 + 译文）
+        texts = self.rows_for(index)
+        # 没有宽度信息（纯数据场景）：一段文本就是一屏行
+        if width is None:
+            return len(texts)
+        # 有宽度：每段各自按显示宽度折行，行数相加
+        return sum(len(_wrap_line(text, int(width))) for text in texts)
+
+    def next_position(self, screen_rows: int, width: Optional[int] = None) -> int:
+        """The source line that sits at the top of the screen *screen_rows* ahead.
+
+        Advancing by **screen rows** instead of source lines is what stops a page
+        turn from skipping text: a wrapped paragraph eats several rows, so one
+        screenful of rows is fewer source lines than a fixed per-page step assumed.
+        """
+        # 先看从当前位置起，这一屏的屏幕行到底填到哪个源行
+        rows = self.visible_rows(max(1, int(screen_rows)), width)
+        # 一屏都填不满（已在书末）：至少前进一行，保证按键有反应
+        if not rows:
+            return min(self.position + 1, self.total)
+        # 屏幕上最后一个已显示源行的下一行，才是下一屏的起点
+        last = max(index for index, _ in rows)
+        return min(last + 1, self.total)
+
+    def previous_position(self, screen_rows: int, width: Optional[int] = None) -> int:
+        """The source line a screen of *screen_rows* rows would start on going back.
+
+        The mirror image of :meth:`next_position`: walk upwards row by row until a
+        whole screenful has been covered, and land on the line that then tops it.
+        """
+        # 从当前位置往上走
+        index = self.position
+        # 还要往上凑多少屏幕行
+        remaining = max(1, int(screen_rows))
+        # 逐行往上走，直到凑满一屏或到达书首
+        while index > 0 and remaining > 0:
+            index -= 1
+            remaining -= self._screen_rows(index, width)
+        return max(0, index)
+
     # -- movement --------------------------------------------------------
     def move_to(self, position: int) -> None:
         """Jump to *position*, counting the forward distance as lines read."""
@@ -691,12 +745,14 @@ class Pager:
         self.move_to(self.position + delta)
 
     def next_page(self) -> None:
-        """Advance by the configured number of pages."""
-        self.scroll(self.step_lines)
+        """Advance one page, counted in screen rows so nothing is skipped."""
+        # 按屏幕行推进：折行后的长段不会被整段跳过去
+        self.move_to(self.next_position(self.page_budget, self.viewport_width))
 
     def previous_page(self) -> None:
-        """Go back by the configured number of pages."""
-        self.scroll(-self.step_lines)
+        """Go back one page, counted in screen rows like :meth:`next_page`."""
+        # 往回也按屏幕行，和前进对称
+        self.move_to(self.previous_position(self.page_budget, self.viewport_width))
 
     def to_start(self) -> None:
         """Jump to the first line."""
@@ -1211,6 +1267,10 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
     text_rows = max(1, height - _STATUS_ROWS)
     # 正文从第 1 列写起（第 0 列留给书签标记），所以可用宽度要减掉那一列
     text_width = max(1, width - 1)
+    # 把真实视口告诉 Pager：翻页要按"屏幕行"算，长段折行才不会被整段跳过
+    # （每帧都刷新，所以窗口大小变了下一帧就生效）
+    pager.viewport_rows = text_rows
+    pager.viewport_width = text_width
     # 关掉高亮时传空集合，_draw_text 就不做生词切分了
     words = pager.vocab_words if pager.highlight_vocab else _EMPTY_WORDS
     # 清屏，接着重画整帧
@@ -1360,12 +1420,23 @@ def _confirm(stdscr: Any, title: str, body: Sequence[str]) -> bool:
 
 
 def _screen_range(stdscr: Any, pager: Pager) -> Tuple[int, int]:
-    """The half open range of source lines currently on screen."""
-    height, _ = stdscr.getmaxyx()
-    # 正文区行数
+    """The half open range of source lines currently on screen.
+
+    The end comes from the rows that actually fit, so a wrapped paragraph counts
+    for as many source lines as it takes up on the terminal rather than one.
+    """
+    height, width = stdscr.getmaxyx()
+    # 正文区屏幕行数（减去状态栏两行）
     rows = max(1, height - _STATUS_ROWS)
-    # 返回 [当前位置, 当前位置+行数) 的半开区间
-    return pager.position, min(pager.position + rows, pager.total)
+    # 正文区列数（第 0 列留给书签位）
+    text_width = max(1, width - 1)
+    # 这一屏真实画到的源行（长段会折成多屏行）
+    visible = pager.visible_rows(rows, text_width)
+    # 一屏都填不满（空书 / 已在书末）：退化成空区间
+    if not visible:
+        return pager.position, pager.position
+    # 返回 [当前位置, 最后一个已显示源行 + 1) 的半开区间
+    return pager.position, min(max(index for index, _ in visible) + 1, pager.total)
 
 
 def _progress_text(done: int, total: int, width: int = 16) -> str:

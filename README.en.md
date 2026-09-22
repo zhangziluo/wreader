@@ -395,7 +395,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | Key | Action |
 | --- | --- |
 | `q` / `Q` / `Ctrl-C` | Quit (saves position, bookmarks and this session's duration) |
-| `j` / `space` / `Enter` / `↓` / `PageDown` | Next page (the distance comes from `reader.page_scroll_step`, keeping `reader.page_overlap` lines of context) |
+| `j` / `space` / `Enter` / `↓` / `PageDown` | Next page (measured in **screen rows**, so wrapped paragraphs are never missed; the distance comes from `reader.page_scroll_step`, keeping `reader.page_overlap` lines of context) |
 | `k` / `↑` / `PageUp` | Previous page |
 | Mouse wheel down · swipe up | Scroll **one line at a time** forward (lines per tick: `reader.wheel_scroll_step`) |
 | Mouse wheel up · swipe down | Scroll **one line at a time** backwards |
@@ -444,13 +444,13 @@ really break it.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `page_scroll_step` | `1` | How many screens the page keys move. `0.5` = half a screen (finer), `2` = two screens |
-| `page_overlap` | `3` | Lines of the previous screen kept at the top (and symmetrically at the bottom) on a page turn, so the text never jumps coldly; `0` turns the overlap off and each page is a clean screenful |
+| `page_scroll_step` | `1` | How many screens the page keys move (a screen is the height of the text area; wrapped paragraphs are counted in **screen rows**, so nothing you never saw is skipped). `0.5` = half a screen (finer), `2` = two screens |
+| `page_overlap` | `3` | **Screen rows** of the previous screen kept at the top (and symmetrically at the bottom) on a page turn, so the text never jumps coldly; `0` turns the overlap off and each page is a clean screenful |
 | `wheel_scroll_step` | `1` | Lines moved per mouse-wheel tick / per drag row (1–3 feels right on a phone) |
 | `touch_scroll` | `true` | Drag the finger to scroll (mobile terminals); `false` keeps the wheel and keyboard only |
 | `status_bar_format` | the `time`, `chapter`, `duration` segments | Which status bar segments to show, separated by a vertical bar (see the table below) |
 | `auto_save_interval` | `60` | Seconds between automatic position saves; `0` disables |
-| `page_height` | `24` | Lines per screen (also the basis for the page size) |
+| `page_height` | `24` | Fallback lines per screen when no terminal size is known (a real terminal pages by the actual height of the text area, so you normally leave this alone) |
 | `theme` | `"default"` | Colour theme name (reserved, not implemented yet) |
 | `store_history` | `true` | Record this session's duration into the statistics; `false` reads without counting time |
 
@@ -679,17 +679,17 @@ wreader/
 │   ├── cli.py               argparse definition + one handler per sub-command (1006 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (989 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1077 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2122 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2193 lines)
 │   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   522 tests, all offline (see "Running the tests" below)
+└── tests/                   531 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      116 tests — encodings, chapters, epub, dedup, file names, search
-    ├── test_reader.py       141 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel
+    ├── test_reader.py       150 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
     ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
@@ -743,7 +743,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 522 tests, a few seconds
+pytest                      # 531 tests, a few seconds
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -880,7 +880,7 @@ Ten former issues that are now fixed, kept here so they are not mistaken for pen
   the real `TranslatorCallable`; before the fix `from wreader.translator import *` raised `AttributeError`.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings.
-- ~~No automated tests~~ → 522 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 531 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → fixed (found while
   writing the tests): `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN` and
   fails with `No support for the provided language` *before* sending anything. All three translation entry
