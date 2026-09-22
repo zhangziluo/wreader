@@ -174,6 +174,8 @@ def _init_colors() -> None:
   （英文版写的是 Seven，本来就是对的）。补上本轮三项修复后，中英两版统一为 **十条**。
 - 「特性」表的阅读器一行补上"按终端宽度自动折行（汉字按 2 列算）、配色跟随终端主题与透明背景"。
 - 「已知问题」里"README 陈旧"那一条已删除（不再成立）。
+- 两版 README 的目录（TOC）各加一行指向新章节的链接，保持原有的扁平列表风格
+  （锚点 `#新开一个终端后怎么用-wreader` / `#using-wreader-in-a-new-terminal`，已校验可解析）。
 - 后果：`progress.md` 待办 #1 与 `activeContext.md` 待办 #1 都已标记完成；
   `techContext.md`、`memory-bank/README.md` 里"README 尚未同步"的提示也一并改掉了。
 

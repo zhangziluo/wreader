@@ -16,6 +16,7 @@ the next launch resumes exactly where you stopped.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Using wreader in a new terminal](#using-wreader-in-a-new-terminal)
 - [Quick start](#quick-start)
 - [Command reference](#command-reference)
 - [Reader key bindings](#reader-key-bindings)
