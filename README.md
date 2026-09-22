@@ -39,7 +39,7 @@
 | 🆔 去重 | 书号是正文的 SHA-1，同一本书重复导入直接跳过，不会出现两份 |
 | 🔖 章节 | 导入时自动识别章节标题（`第一章`、`Chapter 1` 等），之后可以按章跳转 |
 | 🔍 搜索 | 模糊搜索书库：标题、作者、标签都认，还能首字母跳跃匹配（`hptr` 找得到 *Harry Potter*） |
-| 📖 阅读器 | curses 分页阅读：跳行、跳章、搜索高亮、书签、状态栏、自动保存进度 |
+| 📖 阅读器 | curses 分页阅读：跳行、跳章、搜索高亮、书签、状态栏、自动保存进度；按终端宽度自动折行（汉字按 2 列算），配色跟随终端主题与透明背景 |
 | 🌍 三种视图 | `中文` / `英文` / `双语对照`，按 `l` 循环切换；本来就是中文的书看中文视图不需要翻译，离线也能读 |
 | 🈶 翻译 | 章节级翻译 + 磁盘缓存，译一次永久复用；支持 Google（免密钥）和 DeepSeek（OpenAI 兼容接口） |
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
@@ -84,20 +84,43 @@ Windows 用户请改用：
 pip install -e ".[windows]"
 ```
 
-装完之后就有了 `wreader` 命令：
+装完之后，**在当前这个终端窗口里**就有了 `wreader` 命令：
 
 ```bash
 wreader --version
 # wreader 0.1.0
 ```
 
-> **`wreader: command not found`？**
-> 说明虚拟环境没激活，或者 Python 的脚本目录不在 `PATH` 里。两个办法：
-> ```bash
-> source .venv/bin/activate      # 每次开新终端都激活一下
-> python -m wreader.cli --help        # 或者干脆不激活，直接用模块方式调用
-> ```
-> 本文档里所有 `wreader xxx` 都可以换成 `python -m wreader.cli xxx`。
+### 新开一个终端后怎么用 wreader
+
+`wreader` 装在**项目自己的 `.venv`** 里，而 `.venv/bin` 默认不在系统的 `PATH` 上，
+所以**关掉终端再新开一个窗口，直接敲 `wreader` 会报 `command not found`**——
+这很正常，不代表装坏了。三种办法，任选一种：
+
+| 办法 | 每次要敲什么 | 说明 |
+| --- | --- | --- |
+| **① 配一次别名**（推荐） | `wreader read <id>` | 配一次，此后**所有新终端**都能直接用 |
+| **② 用完整路径** | `<项目路径>/.venv/bin/wreader read <id>` | 不改任何配置文件 |
+| **③ 每次激活虚拟环境** | `cd <项目路径>` → `source .venv/bin/activate` → `wreader ...` | 顺手，但每个新窗口都要来一遍 |
+
+办法①在 macOS / Linux（zsh）下就是往 `~/.zshrc` 追加一行（把路径换成你的实际位置）：
+
+```bash
+echo 'alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"' >> ~/.zshrc
+source ~/.zshrc                       # 立刻生效；或者干脆重开一个窗口
+wreader --version                     # 验证：应输出 wreader 0.1.0
+```
+
+用 bash 的话把 `~/.zshrc` 换成 `~/.bashrc`；Windows PowerShell 则在 `$PROFILE` 里定义一个同名函数。
+
+> ⚠️ **不要把 `.venv/bin` 前置进 `PATH`**（`export PATH=".../.venv/bin:$PATH"`）。
+> 那样 `wreader` 确实能用了，但新终端里的 `python3` 和 `pip` 也会一起变成这个虚拟环境的版本，
+> 会干扰你在其它 Python 项目上的工作；别名只多一条命令，没有这个副作用。
+
+> **只是临时用一下？** 也可以完全不配置，直接把 `wreader xxx` 换成
+> `python -m wreader.cli xxx`——本文档里两种写法等价。
+> 面向新手的详细版（含 Windows 写法、以及"为什么书和进度不会丢"）见
+> [使用指南.md](使用指南.md) 的「关掉终端之后」一节。
 
 ### 从旧版 `nr` 升级
 
@@ -603,21 +626,21 @@ wreader/
 ├── 使用指南.md               小白手把手教程（第一次用看这个）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
-│   ├── __init__.py          __version__ 和模块地图（16 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（811 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（779 行）
-│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（826 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏（1412 行）
-│   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1048 行）
-│   ├── vocab.py             生词本：增删查、复习、Anki 导出（298 行）
-│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（655 行）
+│   ├── __init__.py          __version__ 和模块地图（18 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1006 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（985 行）
+│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1077 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏（1948 行）
+│   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
+│   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
+│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   474 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   494 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_config.py       49 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      116 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索
-    ├── test_reader.py       95 项 —— 分页数学、Pager、状态栏、按键、会话落库
+    ├── test_reader.py       115 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行与显示宽度
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
     ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
@@ -670,7 +693,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 474 项，约 5 秒
+pytest                      # 494 项，约 5 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -692,8 +715,11 @@ pytest -k "streak or heatmap" -q          # 按名字筛选
 
 ## 常见问题
 
-**Q：`wreader: command not found`？**
-虚拟环境没激活，或者脚本目录不在 `PATH`。`source .venv/bin/activate`，或改用 `python -m wreader.cli ...`。
+**Q：新开终端后敲 `wreader` 提示 command not found？**
+这是最常见的报错，**不是装坏了**：`wreader` 装在项目自己的 `.venv` 里，而 `.venv/bin` 默认不在 `PATH` 上。
+推荐在 `~/.zshrc` 里配一行别名一劳永逸，见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)；
+临时也可以用 `<项目路径>/.venv/bin/wreader`、先 `source .venv/bin/activate`，
+或者干脆把 `wreader xxx` 写成 `python -m wreader.cli xxx`。
 
 **Q：升级后我原来的书库去哪了？**
 `wreader` 第一次运行时会把 `~/.nr` 整体搬到 `~/.wreader`，不用你动手。如果两个目录都存在，
@@ -770,14 +796,14 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - **`library.json` 里 `progress` 的数值不做类型强制转换**：手写成字符串（`"current_line": "12"`）
   也能正常读，因为消费方都用 `int(...)` 兜住了，但它不会被自动改回数字。
 
-已经解决、不再属于已知问题的六条（留个记录，免得又被当成待办）：
+已经解决、不再属于已知问题的十条（留个记录，免得又被当成待办）：
 
 - ~~没有 LICENSE~~ → 已加 MIT（`LICENSE` + `pyproject.toml` 的 `license = "MIT"`）。
 - ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 已移除该名字，
   换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **474 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **494 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
   `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，
@@ -786,6 +812,15 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   UTF-16 的 BOM 开头），解码失败就降级成 `(replaced)`；单个坏文件只会进 `failed`，不再中止整个 import。
 - ~~下载站的 `《书名》（校对版全本）作者：某人.txt` 解析不出干净书名和作者~~ → 已支持，且尾部
   `（…）`/`(...)` 注释统一剥掉；只认**尾部**括号，所以 `书名（中）下册` 这类标题保持完整。
+- ~~超长正文行在终端里被静默截断~~ → 已修：阅读器现在**按终端宽度自动折行**，且折行严格按
+  **显示列数**算（汉字占 2 列、英文在空格处断词、Tab 展开成 4 空格、行尾空格丢弃）。
+  一个源行可以占多条屏幕行，书签 `★` 只画在该源行的第一行。
+- ~~状态栏 / 消息行 / 确认弹窗还在按字符数算宽度~~ → 已修：这些位置全部改用显示列数
+  （`_text_width` / `_clip_line` / `_pad_line`），窄屏下不会再整行越界消失；
+  `_addstr` 写入前还会再裁一次作安全网，即使某行超宽也只是被裁剪、不会整行不见。
+- ~~正文背景被锁成不透明黑底，不跟随终端主题／透明~~ → 已修：`initscr()` 之后调用
+  `start_color()` + `use_default_colors()`（**必须成对**，只调前者反而会把默认配色锁成黑底），
+  全程不 `init_pair()`，所以 `A_REVERSE` / `A_BOLD` / `A_DIM` 高亮不受影响。
 
 ---
 

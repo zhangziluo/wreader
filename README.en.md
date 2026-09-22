@@ -39,7 +39,7 @@ the next launch resumes exactly where you stopped.
 | 🆔 Deduplication | A book's id is the SHA-1 of its text, so importing the same book twice is a no-op instead of a second copy |
 | 🔖 Chapters | Chapter headings (`第一章`, `Chapter 1`, …) are detected at import time, which enables chapter navigation |
 | 🔍 Search | Fuzzy library search over title, author and tags, with subsequence matching too (`hptr` finds *Harry Potter*) |
-| 📖 Reader | A curses pager: line jumps, chapter jumps, highlighted search, bookmarks, a status bar and automatic progress saving |
+| 📖 Reader | A curses pager: line jumps, chapter jumps, highlighted search, bookmarks, a status bar and automatic progress saving; wraps to the terminal width (CJK counted as two columns) and follows the terminal theme / transparency |
 | 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
 | 🈶 Translation | Chapter-level translation with an on-disk cache — translate once, reuse forever; Google (no API key) and DeepSeek (OpenAI-compatible endpoint) |
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
@@ -85,20 +85,47 @@ On Windows use:
 pip install -e ".[windows]"
 ```
 
-You now have the `wreader` command:
+You now have the `wreader` command **in the current terminal window**:
 
 ```bash
 wreader --version
 # wreader 0.1.0
 ```
 
-> **`wreader: command not found`?**
-> Either the virtualenv is not active, or Python's script directory is not on `PATH`. Two options:
-> ```bash
-> source .venv/bin/activate      # activate it in every new terminal
-> python -m wreader.cli --help        # or skip activation and call the module directly
-> ```
-> Every `wreader xxx` in this document can be replaced by `python -m wreader.cli xxx`.
+### Using wreader in a new terminal
+
+`wreader` lives inside the project's own `.venv`, and `.venv/bin` is not on `PATH` by
+default. So **after you close the terminal and open a new one, typing `wreader` fails
+with `command not found`** — that is expected, and it does not mean the install is broken.
+Pick whichever of these three you prefer:
+
+| Option | What you type each time | Notes |
+| --- | --- | --- |
+| **① Add an alias** (recommended) | `wreader read <id>` | Do it once; works in **every** new terminal |
+| **② Use the full path** | `<project>/.venv/bin/wreader read <id>` | Nothing to configure |
+| **③ Activate the venv** | `cd <project>` → `source .venv/bin/activate` → `wreader ...` | Fine if you work in the project anyway |
+
+Option ① on macOS / Linux (zsh) is one line appended to `~/.zshrc`
+(put in your real project path):
+
+```bash
+echo 'alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"' >> ~/.zshrc
+source ~/.zshrc                       # takes effect now; or simply open a new window
+wreader --version                     # check: prints wreader 0.1.0
+```
+
+With bash, use `~/.bashrc` instead; on Windows PowerShell, define a function of the
+same name in `$PROFILE`.
+
+> ⚠️ **Do not prepend `.venv/bin` to `PATH`** (`export PATH=".../.venv/bin:$PATH"`).
+> That does make `wreader` work, but it also turns `python3` and `pip` in every new
+> terminal into this virtualenv's copies, which will confuse you in other Python
+> projects. An alias adds one command and nothing else.
+
+> **Just passing through?** You can skip all of the above and write
+> `python -m wreader.cli xxx` wherever this document says `wreader xxx` — the two are
+> equivalent. A beginner-oriented version of this section (including the Windows form and
+> why your books and progress are unaffected) is in [使用指南.md](使用指南.md) (Chinese).
 
 ### Upgrading from the old `nr`
 
@@ -633,21 +660,21 @@ wreader/
 ├── 使用指南.md               step-by-step beginner guide (Chinese only)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
-│   ├── __init__.py          __version__ and the module map (16 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (811 lines)
-│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (779 lines)
-│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (826 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar (1412 lines)
-│   ├── translator.py        Google / DeepSeek backends + chapter cache (1048 lines)
-│   ├── vocab.py             the notebook: add, remove, search, review, Anki export (298 lines)
-│   ├── stats.py             metrics, heatmap, achievement checks, celebration (655 lines)
+│   ├── __init__.py          __version__ and the module map (18 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1006 lines)
+│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (985 lines)
+│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1077 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar (1948 lines)
+│   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
+│   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
+│   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   474 tests, all offline (see "Running the tests" below)
+└── tests/                   494 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       49 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      116 tests — encodings, chapters, epub, dedup, file names, search
-    ├── test_reader.py       95 tests — paging maths, Pager, status bar, key handling, sessions
+    ├── test_reader.py       115 tests — paging maths, Pager, status bar, keys, sessions, wrapping, widths
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
     ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
@@ -701,7 +728,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 474 tests, a few seconds
+pytest                      # 494 tests, a few seconds
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -726,9 +753,12 @@ A few conventions the suite follows, which are worth knowing before you change c
 
 ## FAQ
 
-**Q: `wreader: command not found`?**
-The virtualenv is not active, or the script directory is not on `PATH`. Run `source .venv/bin/activate`, or use
-`python -m wreader.cli ...` instead.
+**Q: After opening a new terminal, `wreader` says command not found?**
+The most common report — and **not** a broken install: `wreader` lives in the project's own `.venv`,
+whose `bin` directory is not on `PATH` by default. Add one alias to `~/.zshrc` and forget about it
+(see [Using wreader in a new terminal](#using-wreader-in-a-new-terminal)); or call
+`<project>/.venv/bin/wreader` directly, run `source .venv/bin/activate` first, or simply write
+`python -m wreader.cli xxx` instead of `wreader xxx`.
 
 **Q: Where did my library go after upgrading?**
 The first run of `wreader` moves `~/.nr` into `~/.wreader` for you. When both directories exist, `wreader`
@@ -811,14 +841,14 @@ These are the limitations that genuinely exist today; better to write them down 
   (`"current_line": "12"`) still works because every consumer wraps it in `int(...)`, but it is not
   turned back into a number for you.
 
-Seven former issues that are now fixed, kept here so they are not mistaken for pending work:
+Ten former issues that are now fixed, kept here so they are not mistaken for pending work:
 
 - ~~No LICENSE~~ → MIT added (`LICENSE` plus `license = "MIT"` in `pyproject.toml`).
 - ~~`translator.__all__` listed a non-existent `chapter_paragraphs`~~ → the name was removed and replaced by
   the real `TranslatorCallable`; before the fix `from wreader.translator import *` raised `AttributeError`.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings.
-- ~~No automated tests~~ → 474 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 494 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → fixed (found while
   writing the tests): `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN` and
   fails with `No support for the provided language` *before* sending anything. All three translation entry
@@ -830,6 +860,17 @@ Seven former issues that are now fixed, kept here so they are not mistaken for p
 - ~~Download-site names like `《Title》（校对版全本）作者：Someone.txt` parsed badly~~ → supported now, and a
   trailing `（…）` / `(...)` annotation is dropped from the title. Only *trailing* groups count, so a title
   such as `书名（中）下册` is left intact.
+- ~~Overlong lines were silently truncated in the terminal~~ → fixed: the reader now **wraps to the
+  terminal width** and measures in **display columns** (a CJK character counts as two, Latin text breaks
+  at a space, tabs expand to 4 spaces, trailing spaces are dropped). One source line may occupy several
+  screen rows, and the bookmark `★` is drawn only on that source line's first row.
+- ~~The status bar / message row / confirm dialog still counted characters~~ → fixed: they now measure in
+  display columns too (`_text_width` / `_clip_line` / `_pad_line`), so a narrow terminal no longer loses a
+  whole row; `_addstr` additionally clips before writing, as a safety net.
+- ~~The body background was locked to opaque black instead of following the terminal theme~~ → fixed by
+  calling `start_color()` **and** `use_default_colors()` right after `initscr()` (they must be paired —
+  `start_color()` on its own locks the default colours to black), and by never calling `init_pair()`, so
+  `A_REVERSE` / `A_BOLD` / `A_DIM` highlighting keeps working.
 
 ---
 

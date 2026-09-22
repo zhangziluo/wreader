@@ -83,7 +83,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
 | `book/` | 开发用真实电子书样例（体积极大，不属于分发包） |
 | `pyproject.toml` | 打包、依赖、`[project.scripts]`、`[tool.pytest]`、`[tool.pyright]` |
-| `README.md` / `README.en.md` / `使用指南.md` | 中文主文档 / 英文文档 / 小白教程（**结构一节尚未同步**） |
+| `README.md` / `README.en.md` / `使用指南.md` | 中文主文档 / 英文文档 / 小白教程（2026-09-22 已同步行数与测试项数，并补上"新终端怎么打开"一节） |
 | `.vscode/settings.json` | 把 Pylance 与终端指向 `.venv` |
 | `.gitignore` | Python / venv / 工具缓存 / `.DS_Store` / `*.log` / **`book/`**（**不排除** `memory-bank/` 与 `.clinerules/`） |
 | `.git/` + 远端 | git 仓库本体（2026-09-22 建）。`origin` = `https://github.com/zhangziluo/wreader`，`main` 为默认分支 |
@@ -158,8 +158,10 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `tests/test_vocab.py` | 31 |
 | **合计** | **494** |
 
-> `README.md` 的"项目结构"一节仍写着 474 项与旧的源码行数，**已过期**，
-> 下次改 README 时一并更正（详见 `progress.md`）。
+> **已同步（2026-09-22）**：`README.md` / `README.en.md` 的"项目结构"行数、
+> 测试总数（494）、`test_reader.py` 项数（115）都已按实测改对。
+> 想复核就运行 `/tmp/verify_readme_numbers.py`：它把 README 声称的数字与
+> 真实文件行数、pytest 实际收集数逐项对一遍（当前 **ALL OK**）。
 
 ## 样例数据
 
