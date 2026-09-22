@@ -7,13 +7,14 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **494 passed**，全离线、不碰真实数据，约 4~7 秒 |
-| 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations** |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
-| 文档 | `README.md`（中文主文档，37 KB）、`README.en.md`（40 KB）、`使用指南.md`（31 KB） |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），首个提交 `7ecc3eb` |
+| 测试 | **514 passed**，全离线、不碰真实数据，约 3~12 秒 |
+| 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2134** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 文档 | `README.md`（中文主文档，42 KB）、`README.en.md`（44 KB）、`使用指南.md`（37 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**12 个提交 / 40 个跟踪文件**，工作区干净 |
 | CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
-| 编译 | `py_compile` 全部 16 个文件通过 |
+| 编译 | `py_compile` 全部 **23 个** .py 通过（wreader 8 + tests 8 + tools 7） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 6 项全过 |
 
 ## 已完成（可用的功能）
 
@@ -68,9 +69,11 @@
 - 旧数据目录 `~/.nr` 首次运行时整体搬迁到 `~/.wreader`。
 
 ### 工程质量
-- 474 → **494** 项自动化测试（全离线、每测试独立 `tmp_path`）。
-- pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置。
-- 16 个 Python 文件**逐条逻辑语句上方都有口语化中文注释**（2026-09）。
+- 474 → **514** 项自动化测试（全离线、每测试独立 `tmp_path`）。
+- pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
+- `wreader/` 8 个 + `tests/` 8 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
+  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 2134 条语句上方没有紧邻注释行），
+  实际遵循的风格是"一段逻辑配一段中文注释"，详见待办 #4。
 - 校验脚本已从 `/tmp` 搬进 **`tools/`**（2026-09-22）：`check_docs.py`、`check_doc_numbers.py`、
   `check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py` + `tools/README.md`。
   统一从 `__file__` 推算仓库根（任意目录可跑）、退出码 0/1（可接 CI），并纳入 `[tool.pyright]`。
@@ -102,12 +105,13 @@
 
 ### 低优先级
 4. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，需要拍板）：
-   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **2054** 条不满足
-   （`reader.py` 357、`translator.py` 189、`library.py` 163 …）。三个选项：
+   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **2134** 条不满足
+   （`reader.py` 379、`test_reader.py` 342、`translator.py` 189、`library.py` 163 …）。
+   三个选项：
    (a) 把约定口径改成"一段逻辑配一段中文注释"，不再声称 100%
    —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条）；
    (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
-   (c) 全量补齐 2054 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
+   (c) 全量补齐 2134 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
 5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
 6. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
    但只能手改 `library.json` 才能加标签。
@@ -147,7 +151,7 @@
 | **2026-09-22** | `.gitignore` 忽略 `book/` | 367 MB 真实电子书样例，单文件最大 147 MB 超 GitHub 单文件 100 MB 上限，且不属于分发包 |
 | **2026-09-22** | 远端走 HTTPS 而非 SSH | 本机 SSH key 未注册到 GitHub，而 Keychain 里已有 `github.com` 凭证，HTTPS 零交互可推 |
 | **2026-09-22** | 校验脚本从 `/tmp` 搬进 `tools/`，并纳入 `[tool.pyright]` | `/tmp` 会被系统清理；进仓库才可能挂 CI、也才有人看得见 |
-| **2026-09-22** | 把"注释全覆盖"从**事实**改成**目标**（口径：一段逻辑配一段中文注释） | 严格测量发现 `wreader/`+`tests/` 还有 2054 条差距；早先的 `TOTAL: 0` 是脚本 bug 造成的假绿，留着旧说法会误导下个会话 |
+| **2026-09-22** | 把"注释全覆盖"从**事实**改成**目标**（口径：一段逻辑配一段中文注释） | 严格测量发现 `wreader/`+`tests/` 还有 2054 条差距（后随代码增加涨到 **2134**）；早先的 `TOTAL: 0` 是脚本 bug 造成的假绿，留着旧说法会误导下个会话 |
 | **2026-09-22** | 文档（README / 使用指南）开始有**自动守卫**：锚点、数字都有脚本对拍 | 手写数字必然漂移，这次就一次抓到 6 处陈旧数字 |
 | **2026-09-22** | 加鼠标滚轮 + 触摸拖动逐行滚动（Termux 滑动原本完全没反应） | 用户反馈手机上翻页丢上下文；先在真 pty 里灌鼠标序列验证，才敢动代码 |
 | **2026-09-22** | 滚轮下**不做位猜测**（拿不到 `BUTTON5_PRESSED` 就放弃该方向） | 猜出来的位正好撞上 `BUTTON_SHIFT`，会把 shift+点击误判成滚轮；宁可少一个方向 |

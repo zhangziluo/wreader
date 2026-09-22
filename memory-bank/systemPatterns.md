@@ -35,9 +35,9 @@
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 18 | `__version__`、模块地图 | `["__version__"]` |
 | `wreader/cli.py` | 1006 | argparse 定义 + 9 个子命令处理函数 | `["build_parser", "main"]` |
-| `wreader/config.py` | 985 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
+| `wreader/config.py` | 987 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1077 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索 | **无 `__all__`** |
-| `wreader/reader.py` | 1948 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制 | 10 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 2100 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 10 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |

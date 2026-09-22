@@ -17,7 +17,7 @@
 | Python | **>= 3.11** |
 | 入口 | console script `wreader` → `wreader.cli:main` |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`，首个提交 `7ecc3eb`（32 文件 / 15,843 行） |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **12 个提交 / 40 个跟踪文件**，工作区干净且与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求
@@ -26,6 +26,7 @@
    `book_id` → 去重入库；单个坏文件只进 `failed`，不中止整次导入。
 2. **书库**：`list`、`search <关键词>`（模糊匹配）、`search '#tag'`。
 3. **阅读**：`read <book_id>` 全屏 curses 分页器；位置、书签、本次时长落库，随时续读。
+   除键盘外还支持**鼠标滚轮 / 触摸拖动逐行滚动**（手机终端 Termux 上就是靠它翻页）。
 4. **翻译**：`google`（deep-translator）与 `deepseek`（HTTP/SSE）两个后端。`t` 翻当前屏幕**不缓存**，
    `T` 翻整章并写入 `cache/<book_id>/`。
 5. **生词本**：阅读中按 `v` 查词入库；命令行增删查、`--review` 复习、`--export anki`。
@@ -49,13 +50,14 @@
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-22）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻注释行
-  （`reader.py` 357 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2134** 条语句上方没有紧邻注释行
+  （`reader.py` 379 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"。
 
 ## 明确的非目标
 
-- 不做 GUI / Web / 移动端，只做终端。
+- 不做 GUI / Web / **手机 App**，只做终端 —— 但**要能在手机上的终端里用**：
+  Termux 等移动终端已支持触摸拖动 / 滚轮逐行翻页，音量键可通过终端自身映射来翻页。
 - 不做电子书格式转换器：EPUB 优先交给 Calibre 的 `ebook-convert`，没装才用内置提取器。
 - 不做云同步 / 账号 / 多设备。
 - `reader.theme` 是**预留项，未实现**，改了没有任何效果。

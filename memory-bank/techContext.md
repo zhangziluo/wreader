@@ -78,7 +78,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 路径 | 说明 |
 | --- | --- |
 | `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
-| `tests/` | 8 个测试文件（含 `conftest.py`），494 项 |
+| `tests/` | 8 个测试文件（含 `conftest.py`），514 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -119,7 +119,7 @@ GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败�
 git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
-pytest                                        # 494 项，约 5 秒
+pytest                                        # 514 项，约 3~12 秒
 python -m pytest tests/test_reader.py -q      # 单文件
 python -m pytest -k "streak or heatmap" -q    # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings
@@ -168,10 +168,9 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `tests/test_vocab.py` | 31 |
 | **合计** | **514** |
 
-> **已同步（2026-09-22）**：`README.md` / `README.en.md` 的"项目结构"行数、
-> 测试总数（494）、`test_reader.py` 项数（115）都已按实测改对。
-> 想复核就运行 `tools/check_doc_numbers.py`：它把 README 声称的数字与
-> 真实文件行数、pytest 实际收集数逐项对一遍（当前 **ALL OK**）。
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 ⑫，行数、测试总数 **514**、
+> `test_reader.py` **134**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 
 ## 样例数据
 
