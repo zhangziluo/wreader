@@ -166,6 +166,9 @@ wreader list
 
 # (4) start reading (replace the id with the one you just saw)
 wreader read 3e027c4de949
+
+# forgot which book you were on? this lists the three you opened most recently
+wreader continue
 ```
 
 Real `wreader import` output:
@@ -208,6 +211,7 @@ At a glance:
 | `wreader list` | List the books in the library |
 | `wreader search <keyword>` | Fuzzy search over title / author / tags |
 | `wreader read <book_id>` | Open the paged reader |
+| `wreader continue` | The three books you opened most recently (with their ids) |
 | `wreader translate <book_id>` | Translate and cache a whole book, chapter by chapter |
 | `wreader vocab` | Vocabulary notebook: list / review / search / remove / export |
 | `wreader stats` | Reading statistics and a heatmap (`--json` for scripts) |
@@ -265,6 +269,32 @@ The heart of the tool; see [Reader key bindings](#reader-key-bindings) for every
 - On exit, the session's duration and lines read are written to the statistics and achievements are checked.
 - It **needs a real interactive terminal**; in a pipe or with redirected output you get:
   `error: wreader read needs an interactive terminal (a tty on stdin and stdout)`
+
+### `wreader continue`
+
+```bash
+wreader continue        # the three books you opened most recently (with ids)
+```
+
+Sorted by `last_read` (the timestamp written when you leave the reader), listing only books you have
+actually read, at most three:
+
+```
+最近在读 (recent)
+┏━━━┳━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
+┃ # ┃ id           ┃ title ┃ author ┃ progress ┃ words ┃
+┡━━━╇━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
+│ 1 │ f1ba2379642f │ 呐喊  │ 鲁迅   │     0.0% │     8 │
+│ 2 │ 421d50d43552 │ 基地  │ 艾萨克 │     0.0% │     8 │
+│ 3 │ a43433e88bb3 │ 三体  │ 刘慈欣 │     0.0% │     8 │
+└───┴──────────────┴───────┴────────┴──────────┴───────┘
+```
+
+Copy an `id` into `wreader read` to pick up where you stopped. When nothing has been read yet it tells
+you to pick a book with `wreader list` (or import one) and still exits `0`.
+
+> With the alias from [Using wreader in a new terminal](#using-wreader-in-a-new-terminal) in place,
+> resuming after a reboot is two lines: `wreader continue` for the shortlist, `wreader read <id>` to open.
 
 ### `wreader translate <book_id>`
 
@@ -676,24 +706,24 @@ wreader/
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
 │   ├── __init__.py          __version__ and the module map (18 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1006 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1028 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (989 lines)
-│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1077 lines)
+│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1099 lines)
 │   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2287 lines)
 │   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   540 tests, all offline (see "Running the tests" below)
+└── tests/                   545 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
-    ├── test_library.py      116 tests — encodings, chapters, epub, dedup, file names, search
+    ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
     ├── test_reader.py       159 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
     ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
-    └── test_cli.py          33 tests — argument parsing, every sub-command's output, exit codes
+    └── test_cli.py          35 tests — argument parsing, every sub-command's output, exit codes, continue
 ```
 
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,
@@ -743,7 +773,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 540 tests, a few seconds
+pytest                      # 545 tests, a few seconds
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -880,7 +910,7 @@ Ten former issues that are now fixed, kept here so they are not mistaken for pen
   the real `TranslatorCallable`; before the fix `from wreader.translator import *` raised `AttributeError`.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings.
-- ~~No automated tests~~ → 540 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 545 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → fixed (found while
   writing the tests): `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN` and
   fails with `No support for the provided language` *before* sending anything. All three translation entry

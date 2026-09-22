@@ -739,6 +739,35 @@ def test_list_books_is_ordered_by_title(imported) -> None:
     assert titles == sorted(titles, key=str.lower)
 
 
+def test_recent_books_are_ordered_by_last_read(imported) -> None:
+    # 给英文书一个更早的阅读时间、中文书更晚：最近读的应当排在前面
+    document = library.load_library()
+    document["books"][imported["en"]]["progress"]["last_read"] = "2026-01-01T08:00:00"
+    document["books"][imported["zh"]]["progress"]["last_read"] = "2026-01-02T08:00:00"
+    library.save_library(document)
+    # 只比对 id 顺序：中文（新）在前，英文（旧）在后
+    assert [book_id for book_id, _ in library.recent_books()] == [
+        imported["zh"],
+        imported["en"],
+    ]
+
+
+def test_recent_books_skips_never_read_books(imported) -> None:
+    # 两本书都导入了，但都没读过（last_read 为 None），不该出现在最近在读里
+    assert library.recent_books() == []
+
+
+def test_recent_books_respects_the_limit(imported) -> None:
+    # 两本都读过，limit=1 时只给最近的那一本
+    document = library.load_library()
+    document["books"][imported["en"]]["progress"]["last_read"] = "2026-01-01T08:00:00"
+    document["books"][imported["zh"]]["progress"]["last_read"] = "2026-01-02T08:00:00"
+    library.save_library(document)
+    # 默认取 3 本时两本都在，收窄到 1 本只剩中文那本
+    assert len(library.recent_books()) == 2
+    assert [book_id for book_id, _ in library.recent_books(limit=1)] == [imported["zh"]]
+
+
 def test_get_book_and_remove_book(imported) -> None:
     book_id = imported["zh"]
     # 按 id 能查到

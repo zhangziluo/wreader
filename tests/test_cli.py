@@ -30,12 +30,13 @@ from conftest import BOOK_LINES
 # ----------------------------------------------------------------- the parser
 def test_build_parser_knows_every_command() -> None:
     parser = cli.build_parser()
-    # 九个已知子命令都要能解析出来
+    # 十个已知子命令都要能解析出来
     for command in (
         "import",
         "list",
         "search",
         "read",
+        "continue",
         "translate",
         "vocab",
         "stats",
@@ -349,6 +350,26 @@ def test_read_needs_a_terminal(capsys, imported) -> None:
     # 测试环境 stdin/stdout 不是 tty，所以应当提示需要交互终端
     assert cli.main(["read", imported["zh"]]) == 1
     assert "needs an interactive terminal" in capsys.readouterr().err
+
+
+def test_continue_on_an_empty_library(capsys) -> None:
+    # 一本都没读过：给出提示，退出码仍是 0（与空书库的 list 一致）
+    assert cli.main(["continue"]) == 0
+    assert "还没有阅读记录" in capsys.readouterr().out
+
+
+def test_continue_lists_the_recently_read_books(capsys, imported) -> None:
+    # 中文书标一个更近的阅读时间，它应当排在表格第一行
+    document = library.load_library()
+    document["books"][imported["zh"]]["progress"]["last_read"] = "2026-02-02T20:00:00"
+    document["books"][imported["en"]]["progress"]["last_read"] = "2026-02-01T20:00:00"
+    library.save_library(document)
+
+    assert cli.main(["continue"]) == 0
+    out = capsys.readouterr().out
+    # 两本书的 id 都打出来了，且最近读的那本在前
+    assert imported["zh"] in out and imported["en"] in out
+    assert out.index(imported["zh"]) < out.index(imported["en"])
 
 
 def test_translate_rejects_an_unknown_book(capsys) -> None:

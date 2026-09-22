@@ -4,14 +4,14 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`540 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`545 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-从 GitHub **全新克隆下来跑同样全绿**（540 passed + 全部校验脚本），说明仓库自足、无遗漏。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2260** 条语句上方没有紧邻注释行
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2279** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
-翻页改按屏幕行精确推进（⑮）、**屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）**。
+翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
+**新增 `wreader continue` 列"最近打开阅读的三本书"（⑰）**。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -471,17 +471,67 @@ def _init_colors() -> None:
 `test_a_stale_intra_line_offset_never_blanks_the_screen`（窗口变宽后偏移越界的兜底）、
 `test_bookmark_mark_is_not_drawn_on_a_mid_line_resume`（书签不画在半截行上）。
 
+## ⑰ 新增 `wreader continue`（最近打开阅读的三本书）
+
+**用户诉求**：「优化 wreader 在 linux 重启之后的启动命令，应该控制在一到两行就可以开启 wreader 看书」。
+
+**拆出的两个摩擦点**：
+1. 命令不在 PATH 上 → 重启后新终端敲 `wreader` 报 `command not found`（别名方案早已有，文档里写了）。
+2. **读书要先知道 `book_id`**：得 `wreader list` 找 id → 再 `wreader read <id>`，两步且要记 id。
+
+第 2 点才是真痛点 —— 因为 `progress.last_read` **早就在退出阅读器时写好了**
+（`reader._write_position` 写 `_iso(moment)`，格式定长 `YYYY-MM-DDTHH:MM:SS`），只是从来没有入口去读它。
+
+**改法**：
+1. `wreader/library.py` 新增纯函数 `recent_books(limit=3)`：遍历 `load_library()["books"]`，
+   跳过 `progress.last_read` 为空的书，按时间戳**字典序倒排**（定长 ISO ⇒ 字典序 == 时间序，
+   不必解析 datetime），返回前 `limit` 个 `(book_id, record)`；`limit` 负数/0 返回空。
+2. `wreader/cli.py` 新增子命令 `continue` + `cmd_continue`：打印
+   `_book_table("最近在读 (recent)", books)`；一本都没读过时打印中文提示、返回 `0`
+   （与空书库的 `list` 一致）。同步补上 `_HANDLERS` 与模块 docstring。
+3. 顺手修正 `cli.py` 顶部那段**过期 docstring**（原文写 "read/translate/vocab/stats/achievements
+   还是占位符"，实际早就全部实现了）。
+
+**刻意不做的事**：**不自动打开最近那一本**。最近读的不一定是此刻想读的，程序不该替用户猜；
+而且"列 id + 抄 id"正好就是用户要的「一到两行」。
+
+**重启后两行开读**（Linux / macOS 同构）：
+```bash
+wreader continue      # 最近打开阅读的三本书（附 id）
+wreader read f1ba2379642f
+```
+前置条件只有一条：`wreader` 得能用（配一次别名，见 `techContext.md` 的「开发环境」一节）。
+
+**验证证据（2026-09-22 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest tests/` | **545 passed**（+5：`test_library.py` +3、`test_cli.py` +2） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` | 三份文档 **OK** |
+| `tools/check_doc_numbers.py` | **ALL OK**（`cli.py` 1028、`library.py` 1099、总数 545 全对上） |
+| `tools/verify_wrap.py` / `verify_draw.py` | **40077 / 420**（未受影响，与改动前一致） |
+| 沙箱端到端 | 4 本书（3 本设了 `last_read`、1 本从没读过）→ `wreader continue` 打出 `呐喊 / 基地 / 三体` 三行，**未读那本不出现**；空书库 → 中文提示 + `exit=0` |
+
+**没踩到的坑（记录一下幸运之处）**：全程没碰落库格式、没碰行号坐标、没动阅读器绘制，
+所以「行号坐标唯一」「CJK 宽度」两条硬约束都不受影响 —— `verify_wrap` / `verify_draw` 数字不变即为证。
+
 ## 待办 / 下一步
 
 按优先级（本会话已完成的"git 化"一项已移除，序号整体前移）：
 
 1. ~~更新 `README.md` 的过期内容~~ → **已完成（2026-09-22）**，详见下方 ⑩；
-   两份 README 的数字都用 `tools/check_doc_numbers.py` 逐项核过（`ALL OK`）。
+   两份 README 的数字都用 `tools/check_doc_numbers.py` 逐项核过（`ALL OK`；最近一次同步见 ⑰）。
 2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
    `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
 3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
-4. 可选：把本会话写在 `/tmp` 的校验脚本（注释覆盖、折行属性、绘制越界）搬进
-   `tests/` 或 `tools/`，因为 `/tmp` 会被系统清理；仓库已 git 化，搬进来即可挂 CI。
+4. ~~把 `/tmp` 的校验脚本搬进 `tests/` 或 `tools/`~~ → **已完成（2026-09-22）**：
+   7 个脚本都在 `tools/` 里（见 `techContext.md` 的「命令」一节），`/tmp` 里已无依赖。
+5. 可选：`wreader continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
+   走 `SCHEMA`（项目约定：阅读行为不写魔数）。
+6. 可选（产品取舍，先问再做）：`wreader continue` 只"列 id"，不做交互选择。
+   若哪天想省掉"抄 id"这一步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+
+   无参时续读最近一本 —— 但那会让程序替用户猜要读哪本，需先确认。
 
 ## 已知会话级注意事项
 

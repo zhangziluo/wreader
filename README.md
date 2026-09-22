@@ -160,6 +160,9 @@ wreader list
 
 # ④ 开读（把 id 换成上一步看到的）
 wreader read 3e027c4de949
+
+# 忘了上次读到哪本？它会列出最近打开阅读的三本书
+wreader continue
 ```
 
 `wreader import` 的真实输出长这样：
@@ -200,6 +203,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `wreader list` | 列出书库里的书 |
 | `wreader search <关键词>` | 模糊搜索书名 / 作者 / 标签 |
 | `wreader read <book_id>` | 打开分页阅读器 |
+| `wreader continue` | 列出最近打开阅读的三本书（附 id，抄去 `read` 即可续读） |
 | `wreader translate <book_id>` | 把整本书逐章翻译并缓存 |
 | `wreader vocab` | 生词本：列表 / 复习 / 搜索 / 删除 / 导出 |
 | `wreader stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
@@ -254,6 +258,31 @@ wreader search '#fantasy'    # 带 # 前缀表示只搜标签
 - 退出时把这次会话的时长、读过的行数写进统计，并检查有没有达成新成就。
 - **需要真正的交互式终端**，重定向或管道里跑会报错：
   `error: wreader read needs an interactive terminal (a tty on stdin and stdout)`
+
+### `wreader continue`
+
+```bash
+wreader continue        # 最近打开阅读的三本书（附 id）
+```
+
+按 `last_read`（退出阅读器时写入的时间戳）倒序排列，只列**真正读过**的书，最多三本：
+
+```
+最近在读 (recent)
+┏━━━┳━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
+┃ # ┃ id           ┃ title ┃ author ┃ progress ┃ words ┃
+┡━━━╇━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
+│ 1 │ f1ba2379642f │ 呐喊  │ 鲁迅   │     0.0% │     8 │
+│ 2 │ 421d50d43552 │ 基地  │ 艾萨克 │     0.0% │     8 │
+│ 3 │ a43433e88bb3 │ 三体  │ 刘慈欣 │     0.0% │     8 │
+└───┴──────────────┴───────┴────────┴──────────┴───────┘
+```
+
+把表格里的 `id` 抄给 `wreader read` 就能接着上次的位置读。一本都没读过时它会提示你先
+`wreader list` 挑一本（或 `wreader import` 导入新书），退出码仍是 `0`。
+
+> 配上别名（见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)）之后，
+> 重开终端接着读书就是两行：`wreader continue` 看最近在读，`wreader read <id>` 开读。
 
 ### `wreader translate <book_id>`
 
@@ -642,24 +671,24 @@ wreader/
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（18 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1006 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1028 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（989 行）
-│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1077 行）
+│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1099 行）
 │   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2287 行）
 │   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   540 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   545 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
-    ├── test_library.py      116 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索
+    ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
     ├── test_reader.py       159 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮与触摸
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
     ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
-    └── test_cli.py          33 项 —— 参数解析、各子命令输出、退出码
+    └── test_cli.py          35 项 —— 参数解析、各子命令输出、退出码、continue
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
@@ -708,7 +737,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 540 项，约 5 秒
+pytest                      # 545 项，约 5 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -834,7 +863,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **540 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **545 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
   `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，

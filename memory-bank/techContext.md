@@ -41,6 +41,12 @@ wreader --version                # wreader 0.1.0
   `cd <项目> && source .venv/bin/activate` 之后再敲 `wreader`。
   这三种办法与"为什么新终端找不到 wreader"已写进面向用户的文档
   **《使用指南.md》的「关掉终端之后：下次怎么打开 wreader」一节**（2026-09-22）。
+- **Linux 上同理，重启后两行开读**（2026-09-22 补，用户诉求「重启之后一到两行就能开 wreader 看书」）：
+  bash 写 `~/.bashrc`、zsh 写 `~/.zshrc`，内容都是
+  `alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"`（**只配一次**）。
+  之后重启再开终端，日常就是两行：`wreader continue`（列出最近打开阅读的**三本**书，抄 id）
+  → `wreader read <id>`。数据在 `~/.wreader` / `~/novels`，与 `.venv` 无关，
+  所以重启机器 / 换环境都不会丢书和进度。
 
 ## 环境变量
 
@@ -78,7 +84,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 路径 | 说明 |
 | --- | --- |
 | `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
-| `tests/` | 8 个测试文件（含 `conftest.py`），540 项 |
+| `tests/` | 8 个测试文件（含 `conftest.py`），545 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -103,6 +109,7 @@ wreader import <路径>            # 导入 txt/epub
 wreader list                     # 看书库（记下 book_id）
 wreader search <关键词>          # 模糊搜索；'#tag' 按标签
 wreader read <book_id>           # 开读（真 TTY）
+wreader continue                 # 最近打开阅读的三本书（附 id，抄去 read 续读）
 wreader translate <book_id>      # 命令行整本/整章翻译
 wreader vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page N]
 wreader stats [--json]
@@ -119,7 +126,7 @@ GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败�
 git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
-pytest                                        # 540 项，约 3~25 秒
+pytest                                        # 545 项，约 3~25 秒
 python -m pytest tests/test_reader.py -q      # 单文件
 python -m pytest -k "streak or heatmap" -q    # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings
@@ -159,17 +166,17 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 
 | 文件 | 项数 |
 | --- | --- |
-| `tests/test_cli.py` | 33 |
+| `tests/test_cli.py` | 35 |
 | `tests/test_config.py` | 51 |
-| `tests/test_library.py` | 116 |
+| `tests/test_library.py` | 119 |
 | `tests/test_reader.py` | **159** |
 | `tests/test_stats.py` | 76 |
 | `tests/test_translator.py` | 74 |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **540** |
+| **合计** | **545** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 翻页段内偏移，行数、测试总数 **540**、
-> `test_reader.py` **159**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 新增 `wreader continue`，
+> 行数、测试总数 **545**、`test_reader.py` **159**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 
 ## 样例数据

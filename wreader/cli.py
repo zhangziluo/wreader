@@ -4,9 +4,9 @@ Owns argument parsing and the top level command dispatch.  Every sub-command is
 declared in :func:`build_parser` and wired to a handler function through
 ``_HANDLERS``.
 
-Wired up so far: ``import``, ``list``, ``search`` and ``config``.  The remaining
-handlers (``read``, ``translate``, ``vocab``, ``stats``, ``achievements``) are
-still placeholders that only report that they are not implemented.
+Every command is wired up: ``import``, ``list``, ``search``, ``read``,
+``continue``, ``translate``, ``vocab``, ``stats``, ``achievements`` and
+``config``.
 """
 
 # 延迟求值类型注解，避免运行时解析注解带来的开销和顺序问题
@@ -96,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # 位置参数 book_id：要阅读的书
     read_parser.add_argument("book_id", help="id of the book to read")
+
+    # wreader continue：列出最近在读的几本书，方便接着上次的进度读
+    subparsers.add_parser(
+        "continue", help="list the books you read most recently",
+    )
 
     # wreader translate <book_id>：把整本书翻成目标语言并缓存
     translate_parser = subparsers.add_parser(
@@ -445,6 +450,22 @@ def cmd_read(args: argparse.Namespace) -> int:
 
     # 把书 id 交给阅读器，它会进入全屏循环直到用户退出
     return reader.open_reader(args.book_id)
+
+
+def cmd_continue(args: argparse.Namespace) -> int:
+    """Handle ``wreader continue`` -- show the books read most recently."""
+    # 按 last_read 取最近读过的几本（没读过的书不会出现，时间从新到旧）
+    books = library.recent_books()
+    # 一本都没读过：提示先去挑一本；退出码与空书库的 list 保持一致，都是 0
+    if not books:
+        console.print(
+            "还没有阅读记录 —— 用 [bold]wreader list[/bold] 挑一本，"
+            "或 [bold]wreader import <路径>[/bold] 导入新书"
+        )
+        return 0
+    # 复用书库表格：id 列直接摆出来，抄给 wreader read 就能接着读
+    console.print(_book_table("最近在读 (recent)", books))
+    return 0
 
 
 def _count_translations(count: int) -> List[Dict[str, Any]]:
@@ -971,6 +992,7 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "list": cmd_list,
     "search": cmd_search,
     "read": cmd_read,
+    "continue": cmd_continue,
     "translate": cmd_translate,
     "vocab": cmd_vocab,
     "stats": cmd_stats,

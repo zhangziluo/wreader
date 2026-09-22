@@ -302,6 +302,28 @@ def list_books() -> List[Tuple[str, Dict[str, Any]]]:
     return sorted(load_library()["books"].items(), key=_title_key)
 
 
+def recent_books(limit: int = 3) -> List[Tuple[str, Dict[str, Any]]]:
+    """Return the *limit* most recently read ``(book_id, record)`` pairs.
+
+    Only books carrying a ``progress.last_read`` timestamp are listed, and the
+    newest reading time comes first -- the shortlist behind ``wreader continue``.
+    """
+    # 收集读过的书，形如 (last_read 时间戳, book_id, 记录)
+    read: List[Tuple[str, str, Dict[str, Any]]] = []
+    for book_id, book in load_library()["books"].items():
+        # load_library 保证 progress 是 dict；这里再兜一层，防止手改的索引里有怪值
+        progress = book.get("progress") or {}
+        # last_read 是定长 ISO 字符串（YYYY-MM-DDTHH:MM:SS）；空或缺省 = 从没读过
+        stamp = str(progress.get("last_read") or "")
+        # 只有真正读过的书才进候选名单
+        if stamp:
+            read.append((stamp, str(book_id), book))
+    # 时间戳是定长格式，字典序就是时间序，倒序排即"最近读的排最前"
+    read.sort(key=lambda entry: entry[0], reverse=True)
+    # 只取前 limit 本（负数/0 就返回空），并把排序用的时间戳从结果里丢掉
+    return [(book_id, book) for _stamp, book_id, book in read[: max(0, int(limit))]]
+
+
 def position_percentage(position: int, total_lines: int) -> float:
     """Return the progress of *position* as a percentage (0-100).
 
