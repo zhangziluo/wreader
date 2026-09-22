@@ -41,13 +41,28 @@ DRAG_DOWN_3 = [("\x1b[<0;10;10M", 0.3), ("\x1b[<32;10;13M", 0.3), ("\x1b[<0;10;1
 failures: list[str] = []
 
 
-def build_sandbox() -> tuple[Path, dict[str, str], str]:
-    """造一个沙箱数据目录 + 一本 200 行的书并导入，返回 (目录, 环境变量, book_id)。"""
+def build_sandbox() -> tuple[Path, dict[str, str], str, str]:
+    """造沙箱数据目录 + 两本书并导入。
+
+    返回 ``(目录, 环境变量, 普通书 id, 长段落书 id)``：
+
+    * **普通书**：每行都很短（一行 = 一条屏幕行），键盘 / 滚轮 / 拖动拿它做基准；
+    * **长段落书**：第一行是两万个汉字，一屏根本装不下，用来验证"翻页会停在段内
+      继续读"，而不是跳到下一行。
+    """
     home = Path(tempfile.mkdtemp(prefix="wreader-mouse-"))
     novels = home / "novels"
     novels.mkdir(parents=True, exist_ok=True)
     book = novels / "鼠标校验-测试作者.txt"
     book.write_text("\n".join("第 {:03d} 行内容".format(i) for i in range(200)), encoding="utf-8")
+    # 长段落书放在另一个目录：分两次导入，好区分哪本书是哪个 id
+    wrap_dir = home / "wrap"
+    wrap_dir.mkdir(parents=True, exist_ok=True)
+    wrap_book = wrap_dir / "长段落-测试作者.txt"
+    wrap_book.write_text(
+        "长" * 20000 + "\n" + "\n".join("尾 {:03d}".format(i) for i in range(20)),
+        encoding="utf-8",
+    )
 
     env = dict(os.environ)
     env.update({
@@ -57,10 +72,17 @@ def build_sandbox() -> tuple[Path, dict[str, str], str]:
         "TERM": "xterm-1006",
         "PYTHONPATH": str(ROOT),
     })
-    # 先导入，才有书可读
+    # 先导入普通书，记下它的 id
     subprocess.run([PY, "-m", "wreader.cli", "import", str(book)], env=env, capture_output=True)
     document = json.loads((home / "library.json").read_text(encoding="utf-8"))
-    return home, env, next(iter(document["books"]))
+    short_id = next(iter(document["books"]))
+    # 再导入长段落书：新出现的那个 id 就是它
+    subprocess.run(
+        [PY, "-m", "wreader.cli", "import", str(wrap_book)], env=env, capture_output=True
+    )
+    document = json.loads((home / "library.json").read_text(encoding="utf-8"))
+    wrap_id = next(book_id for book_id in document["books"] if book_id != short_id)
+    return home, env, short_id, wrap_id
 
 
 def current_line(home: Path, book_id: str) -> int:
@@ -123,9 +145,10 @@ def run_case(home: Path, env: dict[str, str], book_id: str, label: str, events, 
 
 def main() -> int:
     """入口：逐项验证键盘 / 滚轮 / 拖动 / 配置开关。"""
-    home, env, book_id = build_sandbox()
+    home, env, book_id, wrap_id = build_sandbox()
     print("沙箱:", home)
-    print("book_id:", book_id)
+    print("普通书 book_id:", book_id)
+    print("长段落书 book_id:", wrap_id)
     print("== 端到端结果 ==")
     # ① 键盘翻页做基准：j 翻一整屏（正文区 38 行 = pty 40 - 状态栏 2，减去默认重叠 3 行 = 35 行）
     #    注意基准是**真实终端高度**，不再是页高配置 page_height（翻页现在按屏幕行算）
@@ -146,6 +169,16 @@ def main() -> int:
     # ⑦ 关掉翻页重叠：j 又翻满整屏 38 行（验证 page_overlap 真的生效）
     set_config(env, "reader.page_overlap", "0")
     run_case(home, env, book_id, "⑦ page_overlap=0 时 j 翻整屏 38 行", [("j", 0.5)], 68)
+    # ⑧ 长段落里翻页：第一行两万汉字，一屏装不下，翻两页后仍应停在第 0 行
+    #    （段内偏移只影响显示、不落库），旧逻辑这里已经跳到第 2 行了
+    run_case(
+        home,
+        env,
+        wrap_id,
+        "⑧ 长段落翻页停在原行（段内偏移）",
+        [("j", 0.5), ("j", 0.5)],
+        0,
+    )
     print()
     print("RESULT:", "全部通过" if not failures else "失败项 {}".format(failures))
     return 0 if not failures else 1

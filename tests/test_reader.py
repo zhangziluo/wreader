@@ -447,22 +447,140 @@ def test_screen_rows_counts_every_row_of_the_bilingual_view(pager_factory) -> No
     assert pager._screen_rows(0, None) == 2
 
 
-def test_next_position_stops_at_the_first_line_that_does_not_fit(pager_factory) -> None:
+def test_next_top_stops_at_the_first_row_that_does_not_fit(pager_factory) -> None:
     # 第 0 行长到占 3 屏行，后面是 1 行一条的短行；屏幕只放得下 4 行
     lines = ["x" * 15] + ["ab{}".format(n) for n in range(10)]
     pager = pager_factory(lines=lines, chapters=[])
-    # 宽度 5：15 个字符折成 3 行，再加第 1 行正好 4 行 → 下一屏从第 2 行开始
-    assert pager.next_position(4, 5) == 2
+    # 宽度 5：15 个字符折成 3 行，再加第 1 行正好 4 行 → 下一屏从第 2 行开头
+    assert pager.next_top(4, 5) == (2, 0)
 
 
-def test_previous_position_is_the_mirror_of_next_position(pager_factory) -> None:
-    # 不折行、每屏 4 行：从第 8 行往回一屏落在第 4 行
+def test_next_top_returns_an_intra_line_offset(pager_factory) -> None:
+    # 第 0 行 200 个汉字 = 400 列，宽 20 时折成 20 屏行；屏幕只放得下 5 行
+    pager = pager_factory(lines=["长" * 200, "下一行"], chapters=[])
+    # 一屏 5 行全落在第 0 行里，于是下一屏还是第 0 行，但要跳过前 5 条折行片段
+    assert pager.next_top(5, 20) == (0, 5)
+    # 再往后 10 行：20 条片段全在屏幕内，落点回到第 1 行开头
+    pager.move_to(0, 5)
+    assert pager.previous_top(5, 20) == (0, 0)
+
+
+def test_previous_top_is_the_mirror_of_next_top(pager_factory) -> None:
+    # 不折行、每屏 4 行：从第 8 行往回一屏落在第 4 行开头
     pager = pager_factory(lines=["l{}".format(n) for n in range(40)], chapters=[])
     pager.move_to(8)
-    assert pager.previous_position(4, None) == 4
-    # 从第 4 行往前一屏同样回到第 8 行
+    assert pager.previous_top(4, None) == (4, 0)
+    # 从第 4 行往前一屏同样回到第 8 行开头
     pager.move_to(4)
-    assert pager.next_position(4, None) == 8
+    assert pager.next_top(4, None) == (8, 0)
+
+
+def test_previous_top_walks_back_inside_a_wrapped_line(pager_factory) -> None:
+    # 当前在第 0 行的第 5 条折行片段上：往回 3 屏行应当落在第 2 条
+    pager = pager_factory(lines=["长" * 200], chapters=[])
+    pager.move_to(0, 5)
+    assert pager.previous_top(3, 20) == (0, 2)
+
+
+def test_page_turn_resumes_inside_a_truncated_paragraph(pager_factory) -> None:
+    # 长段落折成 6 屏行，屏幕只有 4 行：翻页后要停在同一行的第 4 条片段上
+    pager = pager_factory(lines=["长" * 60, "末行"], chapters=[], page_overlap=0)
+    pager.viewport_rows = 4
+    pager.viewport_width = 20
+    # 第一屏：第 0 行的前 4 条折行片段
+    assert [text for _, text in pager.visible_rows(4, 20)] == reader._wrap_line(
+        "长" * 60, 20
+    )[:4]
+    pager.next_page()
+    # 接着显示第 4、5 条片段，再往下才是第 1 行 —— 中间一条都没漏
+    assert (pager.position, pager.line_offset) == (0, 4)
+    assert [index for index, _ in pager.visible_rows(4, 20)] == [0, 0, 1]
+    pager.next_page()
+    # 第 0 行、第 1 行都读完了：停在书末
+    assert (pager.position, pager.line_offset) == (1, 0)
+
+
+def test_page_turns_show_every_row_of_a_long_paragraph(pager_factory) -> None:
+    # 验收口径：一屏装不下的长段落，必须一屏一屏全部读出来，一条都不能漏
+    lines = ["长" * 200] + ["第 {} 行".format(n) for n in range(20)]
+    pager = pager_factory(lines=lines, chapters=[], page_overlap=0)
+    pager.viewport_rows = 12
+    pager.viewport_width = 20
+    seen: List[Tuple[int, str]] = []
+    for _ in range(3):
+        seen.extend(pager.visible_rows(12, 20))
+        pager.next_page()
+    # 长段落折出来的 20 条屏幕行，按原顺序一条不少地出现过
+    assert [text for index, text in seen if index == 0] == reader._wrap_line("长" * 200, 20)
+
+
+def test_next_page_from_a_mid_line_position_is_reversible(pager_factory) -> None:
+    # 长段落 + 折行：一页页往回翻，落点（含段内偏移）应当逐页吻合
+    lines = ["长" * 60] + ["第 {} 行".format(n) for n in range(40)]
+    pager = pager_factory(lines=lines, chapters=[], page_overlap=0)
+    pager.viewport_rows = 6
+    pager.viewport_width = 10
+    # 先往前翻 4 页，记下每一页的屏顶坐标
+    tops: List[Tuple[int, int]] = []
+    for _ in range(4):
+        tops.append((pager.position, pager.line_offset))
+        pager.next_page()
+    # 再倒着翻回去，坐标应当逐页吻合
+    for expected in reversed(tops):
+        pager.previous_page()
+        assert (pager.position, pager.line_offset) == expected
+
+
+def test_scroll_is_measured_in_screen_rows(pager_factory) -> None:
+    # 第 0 行折成 5 屏行：往后滚 2 行只走到这一行的第 2 条片段，不是跳过整行
+    pager = pager_factory(lines=["长" * 50, "末行"], chapters=[], page_overlap=0)
+    pager.viewport_rows = 12
+    pager.viewport_width = 20
+    pager.scroll(2)
+    assert (pager.position, pager.line_offset) == (0, 2)
+    pager.scroll(-2)
+    assert (pager.position, pager.line_offset) == (0, 0)
+
+
+def test_move_to_resets_the_intra_line_offset(pager_factory) -> None:
+    # 直接跳行（goto / 搜索 / 章节 / 首尾）总是落在该行开头
+    pager = pager_factory(lines=["长" * 60] + ["l{}".format(n) for n in range(20)], chapters=[])
+    pager.move_to(0, 3)
+    assert pager.line_offset == 3
+    pager.move_to(2)
+    assert (pager.position, pager.line_offset) == (2, 0)
+    pager.move_to(0, 2)
+    pager.to_start()
+    assert (pager.position, pager.line_offset) == (0, 0)
+    pager.move_to(0, 2)
+    pager.to_end()
+    assert pager.line_offset == 0
+
+
+def test_a_stale_intra_line_offset_never_blanks_the_screen(pager_factory) -> None:
+    # 窗口变宽会让折行片段变少，旧偏移可能越界：此时不能让整行（甚至整屏）消失
+    lines = ["长" * 60] + ["第 {} 行".format(n) for n in range(10)]
+    pager = pager_factory(lines=lines, chapters=[])
+    pager.move_to(0, 99)
+    rows = pager.visible_rows(4, 20)
+    # 越界偏移被夹到这一行的最后一条，屏幕照样填满
+    assert rows[0][0] == 0
+    assert len(rows) == 4
+
+
+def test_bookmark_mark_is_not_drawn_on_a_mid_line_resume(window, pager_factory) -> None:
+    # 书签画在第 0 行；但整屏是从第 0 行中间续显示的，那条半截不该标出来
+    lines = ["长" * 60, "末行"]
+    pager = pager_factory(lines=lines, chapters=[], page_overlap=0)
+    pager.toggle_bookmark(0)
+    pager.move_to(0, 3)
+    reader._draw(window, pager, MOMENT)
+    # 正文区第一行的书签栏是空的（A_DIM 的占位空格），没有 ★
+    assert window.row(0)[0].strip() == ""
+    # 回到第 0 行开头时，书签正常显示
+    pager.move_to(0)
+    reader._draw(window, pager, MOMENT)
+    assert window.row(0)[0] == reader._BOOKMARK_MARK
 
 
 def test_long_wrapped_paragraph_is_not_skipped(pager_factory) -> None:

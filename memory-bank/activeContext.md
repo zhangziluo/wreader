@@ -4,14 +4,14 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`531 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`540 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-从 GitHub **全新克隆下来跑同样全绿**（531 passed + 全部校验脚本），说明仓库自足、无遗漏。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2197** 条语句上方没有紧邻注释行
+从 GitHub **全新克隆下来跑同样全绿**（540 passed + 全部校验脚本），说明仓库自足、无遗漏。
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2260** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
-**翻页改按屏幕行精确推进（修跳行 bug，见 ⑮）**。
+翻页改按屏幕行精确推进（⑮）、**屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）**。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -316,11 +316,33 @@ def _init_colors() -> None:
   - 默认 `viewport_rows = page_height`、`viewport_width = None`：**没有终端尺寸时行为与旧版一致**
     （既有单测因此只需改 `step_lines` 那几个）。
 - **`page_height` 降级**：真实终端里不再参与翻页，只作"拿不到终端尺寸时的回退值"；文档已说明。
-- ⚠️ **残留限制（已知、未修）**：`position` 是**源行号**而非「行 + 段内偏移」，
-  所以一段长到恰好在一屏中途被折行截断时，下一页从**下一源行**开始，该段剩下的几屏行看不到。
-  用户提案的算法同样有这个行为（`line += 1`）。彻底修需要把位置升级成 `(行, 段内偏移)`，改动面大。
+- ⚠️ **残留限制（已被 ⑯ 修掉）**：当时 `position` 还是纯源行号，一段长到恰好在一屏中途被折行
+  截断时，下一页会从**下一源行**开始，该段剩下的几屏行看不到。⑯ 把屏顶坐标升级成
+  `(源行号, 段内偏移)` 后不再有这个漏洞。
 - `tools/verify_mouse.py` 期望值**再次平移**：键盘基准改成 pty 真实高度
   （pty 40 行 → 正文区 38 行 → `j` 走 38−3=**35** 行），整串变成 35/34/38/35/35/30/68。
+
+### ⑯ 修掉"半截段落被跳过"：屏顶坐标升级为 `(源行号, 段内偏移)`
+- **现象/根因**：⑮ 之后翻页按屏幕行推进，但 `position` 仍然只是**源行号**。
+  一段长到在一屏中途被折行截断时，下一页只能从 `position + 1`（下一源行）开始 ——
+  该段**剩下的几屏行整段丢失**（读起来像"段落突然少了半页"）。
+- **改法**：
+  - `Pager` 新增 `line_offset`：这一行里已经翻过去的**折行屏幕行数**。屏顶坐标 = `(position, line_offset)`。
+  - 抽出 `_row_texts(index, width)`（一个源行摊平后的全部屏幕行）与 `_walk_forward(start, offset, budget, width)`
+    （分页核心：返回"这一屏的行 + 下一屏的屏顶坐标"）；`visible_rows` 改为走它。
+  - `next_position`/`previous_position` → 改名 **`next_top`/`previous_top`，返回 `(行, 偏移)`**（不再只返回行号）。
+  - `move_to(position, offset=0)`：goto / 搜索 / 章节 / 首尾跳转一律回到**行首**（offset 归零）。
+  - **`scroll` 也改成按屏幕行**（`next_top`/`previous_top`）：否则从"半截行"滚轮下滚会直接跳到下一行
+    开头，又把这一行剩下的折屏行跳掉 —— 同一个 bug 从鼠标路径复现。
+  - `_draw` 的书签 `★` 只在**真正的行首屏行**上画：整屏从行中间续显示时，第一条是半截，标在它上面会误标到段落中间。
+- **两条硬约束（写进 systemPatterns 坑清单）**：
+  1. **`line_offset` 绝不落库**：`progress["current_line"]` 只写源行号，否则书签 / 章节 / 翻译缓存
+     共用的「行号坐标唯一」约定就破了。代价是重开书从行首开始（重看一小段半截行），是刻意取舍。
+  2. **越界偏移必须夹住**：窗口变宽会让折屏行变少，旧偏移可能越界。`_walk_forward` 把偏移夹到
+     "这一行的最后一条"，`visible_rows` 再加一层"offset 一条都取不出来就退回行首"的兜底 ——
+     少了这两层会画出**空白屏**。
+- **真终端也验证了**：`tools/verify_mouse.py` 新增第 ⑧ 项（另一本"第一行两万汉字"的书）：
+  连按两次 `j`，落库的 `current_line` 仍是 **0**（旧逻辑会变成 2），证明段内偏移端到端生效。
 
 ## 本会话的验证证据（全部通过）
 
@@ -376,6 +398,7 @@ def _init_colors() -> None:
 | **本轮（⑭）回归** | `pytest tests/` → **522 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **7 项全过**（键盘 j=21、滚轮上=20、上拖 4=24、下拖 3=21、`touch_scroll=false`=21、步长 5=16、`page_overlap=0` 时 j=40） |
 | **本轮（⑮）回归** | `pytest tests/` → **531 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **7 项全过**（pty 40 行下键盘 j=**35**、滚轮上=34、上拖 4=38、下拖 3=35、`touch_scroll=false`=35、步长 5=30、`page_overlap=0` 时 j=68） |
 | **⑮ 关键对照（翻页跳行）** | 长段落（50 汉字 = 100 列，宽 20 时占 5 屏行）+ 短行、正文区 12 行：`j` 从第 0 行到第 **8** 行（长段 5 行 + 第 1..7 行）；旧逻辑会按 `page_height=24` 硬跳到第 24 行，**跳过第 8..23 行** |
+| **本轮（⑯）回归** | `pytest tests/` → **540 passed**；`npx pyright` → **0 errors / 0 warnings**；`tools/check_docs.py` → 三份文档 OK；`tools/check_doc_numbers.py` → **ALL OK**；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → **8 项全过**（新增第 ⑧ 项：长段落书连按两次 `j` 后 `current_line` 仍为 **0**） |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
@@ -430,6 +453,23 @@ def _init_colors() -> None:
 `test_page_turn_never_skips_a_source_line`（用户验收口径：翻 10 次，每屏首页 == 上屏末页 + 1）、
 `test_next_page_is_reversible_with_wrapping`、
 `test_screen_range_counts_wrapped_lines`（`_screen_range` 同根因修复的回归测试）。
+
+## ⑯ 新增/改写的测试（`tests/test_reader.py`，159 项）
+
+改名（原来只返回行号，现在返回 `(行, 段内偏移)`）：
+`test_next_top_stops_at_the_first_row_that_does_not_fit`、`test_previous_top_is_the_mirror_of_next_top`。
+
+新增（9 项）：
+`test_next_top_returns_an_intra_line_offset`（`next_top(5, 20) == (0, 5)`）、
+`test_previous_top_walks_back_inside_a_wrapped_line`、
+`test_page_turn_resumes_inside_a_truncated_paragraph`（翻页停在同一行的第 4 条折屏片段上）、
+`test_page_turns_show_every_row_of_a_long_paragraph`（**验收口径**：一屏装不下的长段落，
+折出来的每条屏幕行都按顺序出现过，一条不漏）、
+`test_next_page_from_a_mid_line_position_is_reversible`（含偏移的往返一致性）、
+`test_scroll_is_measured_in_screen_rows`（滚轮也从"半截行"继续，不再跳掉剩下一截）、
+`test_move_to_resets_the_intra_line_offset`（goto / 首尾跳转回到行首）、
+`test_a_stale_intra_line_offset_never_blanks_the_screen`（窗口变宽后偏移越界的兜底）、
+`test_bookmark_mark_is_not_drawn_on_a_mid_line_resume`（书签不画在半截行上）。
 
 ## 待办 / 下一步
 

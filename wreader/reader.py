@@ -6,9 +6,10 @@ split on ``\\n`` exactly the way the importer split it, so
 ``progress["current_line"]``, ``progress["bookmarks"][].line`` and every
 ``chapters[].line_start`` are indexes into the same list.  One source line may
 occupy more than one screen row (long paragraphs wrap, and the bilingual view adds
-a row per translation), so a page turn is measured in **screen rows**, not source
-lines: pagination fills a real screenful and then continues from the first line
-that did not fit, which is what stops long paragraphs from being skipped.
+a row per translation), so pagination is measured in **screen rows**: the next
+screen starts at the first row that did not fit, kept as a ``(source line, offset)``
+pair.  ``line_offset`` is the offset inside that line, and it is display state only
+-- never written to disk, so ``progress["current_line"]`` stays a plain line index.
 
 Views
 -----
@@ -512,6 +513,10 @@ class Pager:
         #: columns of the text area, ``None`` while no terminal size is known
         # 正文区列数：没有终端尺寸时为 None，此时按"一行 = 一屏行"处理
         self.viewport_width: Optional[int] = None
+        #: how many wrapped rows of ``position`` are scrolled off the top already
+        # 段内偏移：当前位置这一行顶部已经翻过去几条折行屏幕行（0 = 从这行开头显示）。
+        # 它只是**显示用**状态、不落库 —— 落库的 current_line 永远是源行号。
+        self.line_offset = 0
         #: lines one wheel tick moves (``reader.wheel_scroll_step``)
         # 滚轮/触摸一格滚几行，至少 1 行（否则滚了等于没滚）
         self.wheel_scroll_step = max(1, int(wheel_scroll_step))
@@ -648,8 +653,28 @@ class Pager:
         # 还没有译文：先显示原文
         return [original]
 
+    def _row_texts(self, index: int, width: Optional[int]) -> List[str]:
+        """Every screen row one source line owns, from its top downwards.
+
+        A source line can produce several rows: the bilingual view adds the
+        translation, and a long paragraph is wrapped by :func:`_wrap_line`, which
+        knows a CJK character is two columns wide.  An empty list means the line
+        contributes nothing -- the translated-only view drops a line whose
+        paragraph was already translated above it.
+        """
+        # 一个源行在当前视图下可能拆成多段显示文本（双语是原文 + 译文）
+        texts = self.rows_for(index)
+        # 没有宽度信息（纯数据场景）：一段文本就是一屏行
+        if width is None:
+            return list(texts)
+        # 有宽度：每段各自按显示宽度折行，再依次拼起来
+        chunks: List[str] = []
+        for text in texts:
+            chunks.extend(_wrap_line(text, int(width)))
+        return chunks
+
     def visible_rows(
-        self, height: int, width: Optional[int] = None
+        self, height: int, width: Optional[int] = None, offset: Optional[int] = None
     ) -> List[Tuple[int, str]]:
         """Return ``(source_line, text)`` for the rows that fit into *height*.
 
@@ -657,28 +682,23 @@ class Pager:
         rows as it needs, so a long paragraph is never cut off at the right edge.
         Without it the text is handed over unwrapped (one source line per screen
         row) -- the historical behaviour, still handy for plain assertions.
+
+        Drawing starts *offset* screen rows into ``self.position``, so a screen that
+        was cut in the middle of a wrapped paragraph continues exactly there rather
+        than jumping to the next source line.
         """
         # 最多能画多少行
         room = max(1, int(height))
-        # 结果是 (源行号, 该行要显示的文字)
-        rows: List[Tuple[int, str]] = []
-        index = self.position
-        # 从当前位置往下灌，直到填满屏幕或读到结尾
-        while index < self.total and len(rows) < room:
-            # 一个源行可能占多行（双语视图）
-            for text in self.rows_for(index):
-                if len(rows) >= room:
-                    break
-                # 没给宽度：不做折行，一行就是一行
-                if width is None:
-                    rows.append((index, text))
-                    continue
-                # 给了宽度：把超长的显示文本折成多个屏幕行
-                for chunk in _wrap_line(text, int(width)):
-                    if len(rows) >= room:
-                        break
-                    rows.append((index, chunk))
-            index += 1
+        # 不指定就跟着当前段内偏移走
+        start_offset = self.line_offset if offset is None else int(offset)
+        # 从 (当前位置, 段内偏移) 往下灌，直到填满屏幕或读到结尾
+        rows, _line, _offset = self._walk_forward(
+            self.position, start_offset, room, width
+        )
+        # 兜底：偏移失效（比如窗口变宽、折行变少）导致一条都取不出来时，
+        # 退回这行开头重来，宁可重复一点也绝不交白屏
+        if not rows and start_offset:
+            rows, _line, _offset = self._walk_forward(self.position, 0, room, width)
         return rows
 
     def _screen_rows(self, index: int, width: Optional[int]) -> int:
@@ -687,72 +707,139 @@ class Pager:
         Wrapping is delegated to :func:`_wrap_line`, so double width CJK characters
         and latin word wrapping are counted exactly the way the screen draws them.
         """
-        # 一个源行在当前视图下可能拆成多段显示文本（双语是原文 + 译文）
-        texts = self.rows_for(index)
-        # 没有宽度信息（纯数据场景）：一段文本就是一屏行
-        if width is None:
-            return len(texts)
-        # 有宽度：每段各自按显示宽度折行，行数相加
-        return sum(len(_wrap_line(text, int(width))) for text in texts)
+        # 直接数这一行摊平后有几千屏幕行
+        return len(self._row_texts(index, width))
 
-    def next_position(self, screen_rows: int, width: Optional[int] = None) -> int:
-        """The source line that sits at the top of the screen *screen_rows* ahead.
+    def _walk_forward(
+        self, start: int, offset: int, budget: int, width: Optional[int]
+    ) -> Tuple[List[Tuple[int, str]], int, int]:
+        """Collect screen rows from ``(start, offset)``, at most *budget* of them.
+
+        Returns ``(rows, line, offset)``: *rows* is what fits, and ``(line,
+        offset)`` is the **first screen row that did not fit** -- precisely the
+        coordinate the next screen has to start from.  Keeping that coordinate
+        (rather than rounding up to the next source line) is what stops the tail of
+        a wrapped paragraph from being skipped.
+        """
+        # 攒出来的屏幕行
+        rows: List[Tuple[int, str]] = []
+        index = clamp(start, self.total)
+        # 还能再取几条屏幕行
+        remaining = max(0, int(budget))
+        # 起始行里还要跳过几条折行屏幕行
+        skip = max(0, int(offset))
+        # 一行一行往下取，直到取满预算或读到结尾
+        while index < self.total and remaining > 0:
+            chunks = self._row_texts(index, width)
+            # 偏移越界（窗口变宽后折行条数会变少）：夹到最后一条，别让整行凭空消失
+            if chunks:
+                skip = min(skip, len(chunks) - 1)
+            # 这一行从第 skip 条开始取
+            position = skip
+            skip = 0
+            # 逐条屏幕行塞进结果
+            while position < len(chunks) and remaining > 0:
+                rows.append((index, chunks[position]))
+                position += 1
+                remaining -= 1
+            # 预算刚好用完、而这一行还有剩：下一屏的屏顶就落在这条上
+            if remaining == 0 and position < len(chunks):
+                return rows, index, position
+            index += 1
+        # 取到预算用完或书末：下一屏从下一行的开头开始
+        return rows, min(index, self.total), 0
+
+    def next_top(
+        self, screen_rows: int, width: Optional[int] = None
+    ) -> Tuple[int, int]:
+        """The ``(line, offset)`` that tops the screen *screen_rows* rows ahead.
 
         Advancing by **screen rows** instead of source lines is what stops a page
-        turn from skipping text: a wrapped paragraph eats several rows, so one
-        screenful of rows is fewer source lines than a fixed per-page step assumed.
+        turn from skipping text; also returning the intra-line offset is what stops
+        it from skipping the tail of a paragraph the screen edge cut in half.
         """
-        # 先看从当前位置起，这一屏的屏幕行到底填到哪个源行
-        rows = self.visible_rows(max(1, int(screen_rows)), width)
-        # 一屏都填不满（已在书末）：至少前进一行，保证按键有反应
+        # 从当前屏顶往后走一屏，落点就是下一屏的屏顶
+        rows, line, offset = self._walk_forward(
+            self.position, self.line_offset, max(1, int(screen_rows)), width
+        )
+        # 一条都走不出来（已经在书末）：至少往下挪一行，保证按键有反应
         if not rows:
-            return min(self.position + 1, self.total)
-        # 屏幕上最后一个已显示源行的下一行，才是下一屏的起点
-        last = max(index for index, _ in rows)
-        return min(last + 1, self.total)
+            return min(self.position + 1, self.total), 0
+        return line, offset
 
-    def previous_position(self, screen_rows: int, width: Optional[int] = None) -> int:
-        """The source line a screen of *screen_rows* rows would start on going back.
+    def previous_top(
+        self, screen_rows: int, width: Optional[int] = None
+    ) -> Tuple[int, int]:
+        """The ``(line, offset)`` a screen of *screen_rows* rows would top going back.
 
-        The mirror image of :meth:`next_position`: walk upwards row by row until a
-        whole screenful has been covered, and land on the line that then tops it.
+        The mirror image of :meth:`next_top`: hand back the rows already scrolled
+        past inside the current line first, then walk whole source lines upwards,
+        and land on the coordinate that then tops the screen.
         """
-        # 从当前位置往上走
-        index = self.position
-        # 还要往上凑多少屏幕行
+        # 还要往上退多少屏幕行
         remaining = max(1, int(screen_rows))
-        # 逐行往上走，直到凑满一屏或到达书首
+        index = self.position
+        # 先把当前行里已经翻过去的那几条退回来（段内偏移只在这里发生）
+        if self.line_offset:
+            if remaining <= self.line_offset:
+                return index, self.line_offset - remaining
+            remaining -= self.line_offset
+        # 再一行一行往上退，直到凑满一屏或到达书首
         while index > 0 and remaining > 0:
             index -= 1
-            remaining -= self._screen_rows(index, width)
-        return max(0, index)
+            chunks = self._screen_rows(index, width)
+            # 这一行还不够退：整行退掉继续往上
+            if remaining >= chunks:
+                remaining -= chunks
+                continue
+            # 退到这一行中间：剩下的几条（从 chunks-remaining 起）就是新屏顶
+            return index, chunks - remaining
+        return max(0, index), 0
 
     # -- movement --------------------------------------------------------
-    def move_to(self, position: int) -> None:
-        """Jump to *position*, counting the forward distance as lines read."""
+    def move_to(self, position: int, offset: int = 0) -> None:
+        """Jump to *position*, *offset* screen rows into that line (default: its top).
+
+        The intra-line offset only matters to the paging code, where it lets a screen
+        resume halfway down a wrapped paragraph.  Every other jump (goto, search,
+        chapter, start/end) starts at the top of a line, so it keeps the default.
+        """
         # 先把目标位置夹进合法范围
         target = clamp(position, self.total)
         # 只统计"向前"的位移，往回翻不抵消阅读量
         if target > self.position:
             self.lines_read += target - self.position
         self.position = target
+        # 段内偏移不能为负；大到超出这一行的折行条数时由渲染侧夹住
+        self.line_offset = max(0, int(offset))
         # 位置变了，章节计时可能需要滚动到下一章
         self._sync_chapter()
 
     def scroll(self, delta: int) -> None:
-        """Move by *delta* lines."""
-        # 相对移动：在当前位置上加减
-        self.move_to(self.position + delta)
+        """Move by *delta* **screen rows** (wrapping aware, so nothing is skipped).
+
+        The wheel and the touch drag feed this, which is why one tick is one visible
+        row: on a book full of long paragraphs a source line can be a whole screen
+        tall, and stepping by source lines would fly past the text.
+        """
+        # 没要动就直接返回，免得白算一趟
+        if not delta:
+            return
+        # 往后滚：用"下一屏"的算法；往前滚：用"上一屏"的算法
+        if delta > 0:
+            self.move_to(*self.next_top(int(delta), self.viewport_width))
+        else:
+            self.move_to(*self.previous_top(int(-delta), self.viewport_width))
 
     def next_page(self) -> None:
         """Advance one page, counted in screen rows so nothing is skipped."""
-        # 按屏幕行推进：折行后的长段不会被整段跳过去
-        self.move_to(self.next_position(self.page_budget, self.viewport_width))
+        # 按屏幕行推进：折行后的长段连"半截"也不会被跳过去
+        self.move_to(*self.next_top(self.page_budget, self.viewport_width))
 
     def previous_page(self) -> None:
         """Go back one page, counted in screen rows like :meth:`next_page`."""
         # 往回也按屏幕行，和前进对称
-        self.move_to(self.previous_position(self.page_budget, self.viewport_width))
+        self.move_to(*self.previous_top(self.page_budget, self.viewport_width))
 
     def to_start(self) -> None:
         """Jump to the first line."""
@@ -1275,15 +1362,22 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
     words = pager.vocab_words if pager.highlight_vocab else _EMPTY_WORDS
     # 清屏，接着重画整帧
     stdscr.erase()
-    # 上一条屏幕行属于哪个源行，用来判断"这是不是某个源行的第一行"
+    # 上一条屏幕行属于哪个源行，用来判断"这是不是某个源行的第一屏行"
     previous_index: Optional[int] = None
-    for offset, (index, text) in enumerate(pager.visible_rows(text_rows, text_width)):
-        # 折行后一个源行可能占多条屏幕行，书签只画在它的第一行上
-        marked = index != previous_index and pager.is_bookmarked(index)
+    for screen_row, (index, text) in enumerate(
+        pager.visible_rows(text_rows, text_width)
+    ):
+        # 换行就算"某源行自己的第一屏行"
+        line_start = index != previous_index
+        # 若整屏是从某源行中间续显示的，那第一条只是半截，别把书签误标在段落中间
+        if screen_row == 0 and pager.line_offset:
+            line_start = False
+        # 折行后一个源行可能占多条屏幕行，书签只画在它的第一屏行上
+        marked = line_start and pager.is_bookmarked(index)
         # 第 0 列放书签标记（有就实心星，没有就留空占位）
         _addstr(
             stdscr,
-            offset,
+            screen_row,
             0,
             _BOOKMARK_MARK if marked else " ",
             curses.A_BOLD if marked else curses.A_DIM,
@@ -1295,7 +1389,7 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
         elif index in pager.matches:
             attr = curses.A_BOLD
         # 第 1 列开始写正文（文本已在 visible_rows 里按宽度折好、Tab 也展开过）
-        _draw_text(stdscr, offset, 1, text, attr, words)
+        _draw_text(stdscr, screen_row, 1, text, attr, words)
         # 记下这条屏幕行属于哪个源行，供下一轮判断
         previous_index = index
     # 最后画状态栏两行

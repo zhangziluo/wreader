@@ -370,7 +370,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | 按键 | 作用 |
 | --- | --- |
 | `q` / `Q` / `Ctrl-C` | 退出阅读器（会保存进度、书签、本次时长） |
-| `j` / `空格` / `回车` / `↓` / `PageDown` | 往下翻页（按**屏幕行**精确推进，长段落折行也不会漏读；翻页量由 `reader.page_scroll_step` 决定，并保留 `reader.page_overlap` 行上下文） |
+| `j` / `空格` / `回车` / `↓` / `PageDown` | 往下翻页（按**屏幕行**精确推进：长段落折行后一屏装不下，下一页就从段落中间接着显示，不漏也不重；翻页量由 `reader.page_scroll_step` 决定，并保留 `reader.page_overlap` 行上下文） |
 | `k` / `↑` / `PageUp` | 往上翻页 |
 | 滚轮下 · 手指向上滑 | 往后**逐行**滚动（一行一行往下读；一格滚几行由 `reader.wheel_scroll_step` 决定） |
 | 滚轮上 · 手指向下滑 | 往前**逐行**滚动（回看上文） |
@@ -415,7 +415,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `page_scroll_step` | `1` | 每次翻页滚几屏（一屏 = 终端正文区的高度；长段落折行后按**屏幕行**计算，不会跳过没看到的内容）。`0.5` = 半屏（更细腻），`2` = 两屏 |
+| `page_scroll_step` | `1` | 每次翻页滚几屏（一屏 = 终端正文区的高度）。翻页按**屏幕行**计算：长段落折行后一屏装不下，就分多屏读完，下一页从段落**中间**接着显示，既不跳过也不重复。`0.5` = 半屏（更细腻），`2` = 两屏 |
 | `page_overlap` | `3` | 翻页时上下各保留几行**屏幕行**上下文（上一屏末尾的这几行会留在新屏幕顶部，读起来连得上）；`0` = 关掉重叠，翻页就是整屏跳转 |
 | `wheel_scroll_step` | `1` | 滚轮一格 / 触摸拖动一格滚几行（移动端建议 1~3） |
 | `touch_scroll` | `true` | 触摸拖动即滚动（手机终端）；设 `false` 只留滚轮与键盘 |
@@ -645,17 +645,17 @@ wreader/
 │   ├── cli.py               argparse 定义 + 各子命令处理函数（1006 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（989 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1077 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2193 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2287 行）
 │   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   531 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   540 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      116 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索
-    ├── test_reader.py       150 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮与触摸
+    ├── test_reader.py       159 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮与触摸
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
     ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
@@ -708,7 +708,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 531 项，约 5 秒
+pytest                      # 540 项，约 5 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -834,7 +834,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **531 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **540 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
   `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，

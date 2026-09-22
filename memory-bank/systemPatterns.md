@@ -37,7 +37,7 @@
 | `wreader/cli.py` | 1006 | argparse 定义 + 9 个子命令处理函数 | `["build_parser", "main"]` |
 | `wreader/config.py` | 989 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1077 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索 | **无 `__all__`** |
-| `wreader/reader.py` | 2193 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 2287 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |
@@ -67,10 +67,14 @@
 
 ### 4. 视图层与数据层分离（Pager）
 `Pager` 是一个**数据对象**：位置、视图模式、搜索命中、书签、计时、译文字典。
-- `rows_for(index)` 决定"一个源行在该视图下显示成哪些行"
-- `visible_rows(height, width=None)` 决定"这一屏填哪些行"（给了 width 会按显示宽度折行）
-- `viewport_rows` / `viewport_width` 由 `_draw` **每帧**按真实终端填入，供翻页按屏幕行计算
-- `next_position(screen_rows, width)` / `previous_position(...)` 按**屏幕行**算出下一屏的源行号
+- **屏顶坐标 = `(position, line_offset)`**：`position` 是源行号（与落库坐标一致），
+  `line_offset` 是这一行里已经翻过去的**折行屏幕行数**（纯显示态，**不落库**）
+- `rows_for(index)` 决定"一个源行在该视图下显示成哪些行"；`_row_texts(index, width)` 把它摊平成屏幕行
+- `visible_rows(height, width, offset)` 决定"这一屏填哪些行"（含折行与段内偏移）
+- `_walk_forward(start, offset, budget, width)` 是分页的核心：返回 `(这一屏的行, 下一屏的屏顶坐标)`
+- `next_top` / `previous_top` 按屏幕行预算算出下一屏 / 上一屏的 `(行, 段内偏移)`
+- `viewport_rows` / `viewport_width` 由 `_draw` **每帧**按真实终端填入
+- `move_to(line, offset=0)`：goto / 搜索 / 章节 / 首尾跳转一律回到**行首**（offset 归零）
 - `_draw` 只负责画，`handle_key` 只负责改 `Pager` 状态
 => 分页/视图逻辑可脱离 curses 测试（`tests/test_reader.py` 从来不启动真终端）。
 
@@ -99,7 +103,7 @@
 | 导入一本书 | `cli.cmd_import` → `library.import_books` → `load_source_text`（编码识别/EPUB）→ `write_utf8_text` → `build_record` → `save_library` |
 | 打开阅读器 | `cli.cmd_read` → `reader.open_reader` → `read_lines`（保持行号一致）→ `Pager(...)` → `curses.wrapper(_run)` → `_run` 首行 `_init_colors()` |
 | 画一帧 | `_run` → `_draw` → `Pager.visible_rows(rows, width-1)` → 逐行 `_draw_text` → `_draw_status` → `refresh` |
-| 翻页 | `handle_key` → `Pager.next_page/previous_page` → `next_position/previous_position(page_budget, viewport_width)` → `move_to` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行**；`viewport_rows` 由 `_draw` 每帧按终端正文区高度填入 |
+| 翻页 | `handle_key` → `Pager.next_page/previous_page` → `next_top/previous_top(page_budget, viewport_width)` → `move_to(行, 段内偏移)` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行**；屏顶坐标是 `(position, line_offset)` |
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` + `bump_translations` → `save_library` |
 | 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
@@ -139,6 +143,13 @@
     ⚠️ `tools/verify_mouse.py` 键盘基准是 **pty 真实高度**（40 行 → 正文区 38 行 → `j` 走 38−3=35 行），
     不是 `page_height`；各项期望值**顺序累积**，改翻页逻辑 / 重叠 / pty 尺寸都要全部重算。
     滚轮 / 触摸拖动走 `scroll(±wheel_scroll_step)` 逐行走，**不经过翻页路径**，不受影响。
-    ⚠️ **残留限制**：`position` 是源行号（不是「行 + 段内偏移」），所以一段长到恰好在一屏中途被
-    折行截断时，下一页从**下一源行**开始，该段剩下的几屏行看不到。彻底修需要把位置升级成
-    `(行, 段内偏移)`，改动面大，当前未做。
+    ⚠️ **屏顶必须是 `(源行号, 段内偏移)` 两元组**：只记源行号 → 一屏中途被折行截断的那半截
+    会在下一页被跳过（`position` 一加就丢掉这一行剩下的折屏行）。所以 `Pager.line_offset`
+    记着"这一行里已经翻过去几条折屏行"，`visible_rows` 从它开始画；
+    `next_top`/`previous_top` 返回的都是这个两元组。
+12. **段内偏移是显示态、绝不落库**：`progress["current_line"]` 永远只写源行号，
+    否则书签 / 章节 / 翻译缓存共用的「行号坐标唯一」约定就被破坏。代价是重开书时从行首开始
+    （会重看一小段半截行）—— 这是刻意的取舍，不是遗漏。
+    另外**窗口变宽会让折屏行变少**，旧偏移可能越界：`_walk_forward` 会把偏移夹到
+    「这一行的最后一条」，`visible_rows` 还有一层「offset 一条都取不出来就退回行首」的兜底 ——
+    少了这两层会画出**空白屏**。

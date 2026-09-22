@@ -20,7 +20,7 @@ python tools/check_docs.py
 | `verify_wrap.py` | `reader._wrap_line` 折行：不超宽、不丢字符、不产空行（约 4 万次属性检查） | 0 / 1 |
 | `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 × 3 视图 = 420 组） | 0 / 1 |
 | `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
-| `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（7 项对账） | 0 / 1 |
+| `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（8 项对账） | 0 / 1 |
 
 ## 逐个说明
 
@@ -54,8 +54,8 @@ python tools/check_comments.py --strict wreader/vocab.py   # 限定文件，适�
 ```
 
 项目约定「每条逻辑语句上方都要有一行口语化中文注释」，但**这是个很严的字面规则**：
-2026-09-22 实测 `wreader/` + `tests/` 仍有 **2197** 条语句上方没有紧邻注释行
-（`reader.py` 385、`test_reader.py` 398、`translator.py` 189 …）。
+2026-09-22 实测 `wreader/` + `tests/` 仍有 **2260** 条语句上方没有紧邻注释行
+（`test_reader.py` 447、`reader.py` 399、`translator.py` 189 …）。
 所以默认模式**只报告、不判定**；要拿它当门禁就加 `--strict`，并配合文件参数一次啃一个。
 
 > ⚠️ 历史坑：这个脚本早先的版本把 `tokenize.NEWLINE` 也放进了「跳过」集合，
@@ -100,11 +100,14 @@ python tools/verify_mouse.py     # 期望：RESULT: 全部通过
 鼠标这套东西**单元测试盖不到底**：「终端有没有把事件送进来」取决于 curses / terminfo /
 终端模拟器三者。所以这个脚本自己开一个真 pty、跑一次阅读器、灌标准 SGR 鼠标序列，
 再读 `library.json` 里的进度对账 —— 键盘基准、滚轮上一格、向上拖 4 行、向下拖 3 行、
-`touch_scroll=false` 拖动无效、步长=5、`page_overlap=0` 时键盘翻整屏，共 **7 项**。
+`touch_scroll=false` 拖动无效、步长=5、`page_overlap=0` 时键盘翻整屏、**长段落里翻页停在原行**，
+共 **8 项**。
 ⚠️ 各项是**顺序累积**的：上一项退出的位置就是下一项的起点，所以改翻页步长 / 重叠时，
 后面所有期望值都要跟着平移。
 ⚠️ 键盘翻页的基准是**pty 的真实高度**（40 行 → 正文区 38 行），不是 `reader.page_height`：
 翻页现在按屏幕行算。改 pty 尺寸或改成按屏幕行推进的逻辑，① 及之后全部期望值都要重算。
+⚠️ 第 ⑧ 项用另一本**第一行两万汉字**的书，验证"一屏装不下的长段落会停在段内继续翻"：
+段内偏移只影响显示、**不落库**，所以两次 `j` 之后 `current_line` 仍然是 **0**（旧逻辑会变成 2）。
 
 > ⚠️ 两个前提，别随便改：
 > 1. 它固定用 **`TERM=xterm-1006`**。实测：macOS 上 `xterm-256color` 的 terminfo **没有 `XM` 能力**，
