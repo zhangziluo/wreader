@@ -1,0 +1,62 @@
+[
+  {
+    "id": "first_book",
+    "name": "📖 开卷有益",
+    "desc": "第一次打开一本书",
+    "condition": "books_read >= 1"
+  },
+  {
+    "id": "first_hour",
+    "name": "⏱️ 初窥门径",
+    "desc": "累计阅读满1小时",
+    "condition": "total_time >= 3600"
+  },
+  {
+    "id": "ten_hours",
+    "name": "🎓 学富五车",
+    "desc": "累计阅读满10小时",
+    "condition": "total_time >= 36000"
+  },
+  {
+    "id": "night_owl",
+    "name": "🌙 深夜书虫",
+    "desc": "凌晨0-4点阅读超1小时",
+    "condition": "night_time >= 3600"
+  },
+  {
+    "id": "streak_7",
+    "name": "🔥 七日不断",
+    "desc": "连续7天每天阅读30分钟",
+    "condition": "streak >= 7"
+  },
+  {
+    "id": "streak_30",
+    "name": "🗿 铁血读者",
+    "desc": "连续30天每天阅读",
+    "condition": "streak >= 30"
+  },
+  {
+    "id": "book_finished",
+    "name": "🏁 完本达人",
+    "desc": "读完第一本书",
+    "condition": "finished >= 1"
+  },
+  {
+    "id": "vocab_100",
+    "name": "📝 词汇积累",
+    "desc": "生词本满100个",
+    "condition": "vocab_count >= 100"
+  },
+  {
+    "id": "translator",
+    "name": "🌍 双语者",
+    "desc": "首次使用翻译功能",
+    "condition": "translations >= 1"
+  },
+  {
+    "id": "marathon",
+    "name": "🧘 专注模式",
+    "desc": "单次连续阅读超2小时",
+    "condition": "single_session >= 7200"
+  }
+]

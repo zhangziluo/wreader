@@ -1,0 +1,62 @@
+# wreader -- a terminal novel reader.
+#
+# Build/install (editable):  pip install -e .
+# Console script afterwards:  wreader --help
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wreader"
+version = "0.1.0"
+description = "A terminal novel reader with translation, vocabulary notebook, reading statistics and achievements."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+keywords = ["reader", "novel", "epub", "txt", "terminal", "translation"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Topic :: Text Processing",
+]
+# NOTE: `curses` ships with the Python standard library on macOS/Linux, so it is
+# intentionally NOT listed as a dependency here. Windows needs the extra below:
+#   pip install -e ".[windows]"
+dependencies = [
+    "chardet",
+    "rich",
+    "deep-translator",
+    "requests",
+]
+
+[project.optional-dependencies]
+windows = ["windows-curses"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+wreader = "wreader.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["wreader*"]
+
+[tool.setuptools.package-data]
+wreader = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+# Static type checking: `npx pyright` (or `python -m pyright`) reads this section,
+# so a fresh clone reproduces the same 0-diagnostic result in CI.
+# NOTE: the Pylance extension ignores [tool.pyright] -- VS Code is pointed at the
+# same virtualenv through .vscode/settings.json instead.
+[tool.pyright]
+include = ["wreader", "tests"]
+exclude = [".venv", "build", "dist", "*.egg-info"]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
