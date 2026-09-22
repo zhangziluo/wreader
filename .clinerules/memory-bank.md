@@ -66,12 +66,20 @@
 
 ## 本项目的特殊提醒
 
-- **工作目录不是 git 仓库**（没有 `.git`）。因此"这次只改了注释、没动逻辑"这类说法
-  **无法用 diff 证明**，只能靠 `py_compile` + 全量 `pytest` + 注释覆盖检查兜底；
-  大范围改动前要格外谨慎，并尽早推动 `git init`（见 `progress.md` 待办 #1）。
+- **工作目录已是 git 仓库**（2026-09-22 起）：分支 `main`，远端 `origin` =
+  `https://github.com/zhangziluo/wreader`。所以"这次只改了注释、没动逻辑"这类说法
+  **必须用 `git diff` 证明**，别再靠 `py_compile` 猜；动手前先确认工作区干净
+  （`git status`），做完及时 commit + push。`memory-bank/` 与 `.clinerules/` 都在版本控制内。
+- **`book/` 永不上传**：那是开发用的真实电子书样例（367 MB，单文件最大 147 MB），
+  已被 `.gitignore` 忽略，**不要 `git add -f`**——GitHub 单文件硬上限 100 MB，推上去必失败。
+- **推送认证方式**：HTTPS + macOS Keychain（系统级 `/usr/local/etc/gitconfig` 里
+  `credential.helper=osxkeychain`），`git push` 无需交互。`~/.ssh/id_ed25519` 这把钥匙
+  **没有**注册到 GitHub 账号，改用 SSH 会 `Permission denied (publickey)`。
+  全局另有 `http.proxy` / `https.proxy = http://127.0.0.1:7897`，代理没开时 push 会失败，
+  可临时用 `git -c http.proxy= push` 绕过。自动化推送时设 `GIT_TERMINAL_PROMPT=0` 避免卡住。
 - **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会变成
   `-qq`，此时只输出 `文件: 数量`、不打印 `N passed`。想看到汇总就少加一个 `-q`。
 - **改动必须先实测验证**：跑 `py_compile`、`pytest tests/`、`npx pyright`；
   涉及阅读器宽度/绘制时，还应跑 `/tmp/verify_wrap.py` 与 `/tmp/verify_draw.py`
-  （若这两个脚本已被系统清理，见 `progress.md` 待办 #4，考虑搬进仓库）。
+  （若这两个脚本已被系统清理，见 `progress.md` 待办 #3，考虑搬进仓库）。
 - 会话结束前务必让 `activeContext.md` 反映真实现状，好让下个会话无缝接手。

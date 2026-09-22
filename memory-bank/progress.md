@@ -11,7 +11,7 @@
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations** |
 | 注释覆盖 | `/tmp/check_comments.py` 对 16 个 Python 文件 → **TOTAL: 0** |
 | 文档 | `README.md`（中文主文档，37 KB）、`README.en.md`（40 KB）、`使用指南.md`（31 KB） |
-| 版本控制 | **无 git 仓库**（最大工程风险，见下） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），首个提交 `7ecc3eb` |
 | CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
 | 编译 | `py_compile` 全部 16 个文件通过 |
 
@@ -69,13 +69,14 @@
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置。
 - 16 个 Python 文件**逐条逻辑语句上方都有口语化中文注释**（2026-09）。
 - 三个临时校验脚本（存于 `/tmp`）：`check_comments.py`、`verify_wrap.py`、`verify_draw.py`。
+- **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
+  `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
+  从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
 
 ## 待办
 
 ### 高优先级
-1. **`git init` + 初始提交**。当前没有任何版本控制，注释改造这种大范围改动
-   无法用 diff 复核，也无法回退。强烈建议立刻补上，并把 `memory-bank/` 一并纳入。
-2. **更正 `README.md` / `README.en.md` 的过期信息**：
+1. **更正 `README.md` / `README.en.md` 的过期信息**：
    - 测试总数 474 → **494**；`test_reader.py` 95 → **115**
    - "项目结构"里 8 个源码文件的旧行数（`cli.py` 811→1006、`config.py` 779→985、
      `library.py` 826→1077、`reader.py` 1412→1948、`translator.py` 1048→1305、
@@ -83,26 +84,27 @@
    - 补记：阅读区自动换行、宽度按显示列数、配色跟随终端背景 三项修复
 
 ### 中优先级
-3. **实现 `reader.theme`**（当前是预留项，改了没效果）：在 `_init_colors()` 之后
+2. **实现 `reader.theme`**（当前是预留项，改了没效果）：在 `_init_colors()` 之后
    按主题 `init_pair()`，并把正文/状态栏/书签/高亮的属性改为 `color_pair(N) | A_*`。
    注意保持 `use_default_colors()` 带来的透明背景能力（正文背景建议用 `-1`）。
-4. **把 `/tmp` 里的校验脚本搬进仓库**（如 `tools/` 或 `tests/`），`/tmp` 会被系统清理。
+3. **把 `/tmp` 里的校验脚本搬进仓库**（如 `tools/` 或 `tests/`），`/tmp` 会被系统清理。
    其中 `check_comments.py`（注释覆盖）可以直接变成一条 CI 断言。
+   仓库已 git 化并推送到 GitHub，搬进来后就能真正挂 CI。
 
 ### 低优先级
-5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
-6. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
+4. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
+5. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
    但只能手改 `library.json` 才能加标签。
-7. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
+6. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
    因为消费方都用 `int(...)` 兜住），但不会被自动改回数字。可考虑在 `save_library` 时规整。
-8. 译文缓存文件名固定 `_en` 后缀是历史包袱（容器里装的是 `target_language` 的结果），
+7. 译文缓存文件名固定 `_en` 后缀是历史包袱（容器里装的是 `target_language` 的结果），
    未来若加 `zh-CN` 以外目标语言可考虑改名为 `ch{N}_<lang>.txt`，但需要迁移逻辑。
 
 ## 已知问题（当前版本真实限制）
 
 | 问题 | 影响 | 备注 |
 | --- | --- | --- |
-| 无 git 仓库 | 无法 diff / 回退 / 协作 | 见待办 #1 |
+| 样例书 `book/` 不在版本控制里 | 新克隆下来没有现成的样书可导入 | 实测 367 MB、单文件最大 147 MB，超 GitHub 单文件 100 MB 硬上限，已 `.gitignore` |
 | `reader.theme` 未实现 | 改了没效果 | 文档已标注"预留" |
 | 无 CLI 加标签入口 | 只能手改 `library.json` | 搜索已支持 `#tag` |
 | EPUB 内置提取器有损 | 图片/脚注/复杂排版丢失 | 装了 Calibre 则用 `ebook-convert` |
@@ -126,3 +128,6 @@
 | **2026-09-22** | 全仓加逐行中文注释 | 提升可读性与可维护性；逻辑零改动 |
 | **2026-09-22** | 阅读区自动换行，宽度全部改按显示列数 | 窄终端/长句原先被静默截断；CJK 用 `len()` 一定算错 |
 | **2026-09-22** | 加 `_init_colors()`（`start_color` + `use_default_colors`） | 原先从未初始化颜色，正文背景被锁成不透明黑底 |
+| **2026-09-22** | `git init -b main` + 首个提交 `7ecc3eb`，推送到 GitHub `zhangziluo/wreader` | 补上版本控制：注释改造这类大范围改动此后可用 `git diff` 证明，并具备回退能力 |
+| **2026-09-22** | `.gitignore` 忽略 `book/` | 367 MB 真实电子书样例，单文件最大 147 MB 超 GitHub 单文件 100 MB 上限，且不属于分发包 |
+| **2026-09-22** | 远端走 HTTPS 而非 SSH | 本机 SSH key 未注册到 GitHub，而 Keychain 里已有 `github.com` 凭证，HTTPS 零交互可推 |

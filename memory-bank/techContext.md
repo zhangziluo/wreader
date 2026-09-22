@@ -72,7 +72,8 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | `pyproject.toml` | 打包、依赖、`[project.scripts]`、`[tool.pytest]`、`[tool.pyright]` |
 | `README.md` / `README.en.md` / `使用指南.md` | 中文主文档 / 英文文档 / 小白教程（**结构一节尚未同步**） |
 | `.vscode/settings.json` | 把 Pylance 与终端指向 `.venv` |
-| `.gitignore` | Python / venv / 工具缓存（**不排除** `memory-bank/` 与 `.clinerules/`） |
+| `.gitignore` | Python / venv / 工具缓存 / `.DS_Store` / `*.log` / **`book/`**（**不排除** `memory-bank/` 与 `.clinerules/`） |
+| `.git/` + 远端 | git 仓库本体（2026-09-22 建）。`origin` = `https://github.com/zhangziluo/wreader`，`main` 为默认分支 |
 | `LICENSE` | MIT |
 
 ## 常用命令
@@ -88,6 +89,15 @@ wreader vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page
 wreader stats [--json]
 wreader achievements
 wreader config [<section.key> [value]] [--path] [--reset]
+
+# 版本控制（2026-09-22 起，仓库已在 GitHub 上）
+git status                                    # 动手前先看工作区是否干净
+git diff                                      # "只加注释、没动逻辑"必须靠它证明，别再靠猜
+git add -A && git commit -m "..."             # 提交
+git push                                      # 推 origin/main；HTTPS + Keychain，不弹密码
+git -c http.proxy= push                       # 本机代理 127.0.0.1:7897 没开时绕过
+GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败就立刻报错，不卡住
+git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
 pytest                                        # 494 项，约 5 秒

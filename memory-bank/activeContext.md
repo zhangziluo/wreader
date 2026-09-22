@@ -5,7 +5,8 @@
 ## 当前状态一句话
 
 代码库处于**干净、全绿**状态：`494 passed`、`pyright 0 errors / 0 warnings`、
-注释覆盖检查 `TOTAL: 0`。本会话完成的三件事（中文注释、自动换行、背景跟随终端）都已落地并验证。
+注释覆盖检查 `TOTAL: 0`，且**已 git 化并推送到 GitHub**（`main` → `origin/main`，首个提交 `7ecc3eb`）。
+本会话完成的三件事（中文注释、自动换行、背景跟随终端）都已落地并验证。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -20,8 +21,10 @@
 - 过程中**误改过 2 处代码并已还原**：
   - `config._unknown_path` 的 `hint` 曾被误加 `.rstrip("\n")`
   - `config._flatten` 的 `name = "{}.{}".format(prefix, key)` 曾被误改成 `"{}.{}\n".format(...).rstrip("\n")`
-- 注：工作目录**不是 git 仓库**，因此无法用 diff 证明"零逻辑改动"，只能靠
-  `py_compile` + 全量 pytest + 注释覆盖检查兜底。
+- 注：做这件事时工作目录**还不是 git 仓库**，因此无法用 diff 证明"零逻辑改动"，只能靠
+  `py_compile` + 全量 pytest + 注释覆盖检查兜底。**这个隐患已在会话末尾解决**（见 ⑦）。
+  ⚠️ 但要清醒：首个提交 `7ecc3eb` 里**就已经包含**这批注释改动，
+  它**不是**"改注释之前"的基线 —— 真正能用 `git diff` 对比的起点是 `7ecc3eb` 之后。
 
 ### ② 修复"终端阅读时没有自动换行"
 **根因**：`reader.py` 完全没有折行逻辑。每个源行被当作一条屏幕行，直接
@@ -92,7 +95,31 @@ def _init_colors() -> None:
   `/tmp/demo_colors_baseline.py`，在 `/tmp` 下 `npx pyright` → `1 error:
   Import "wreader" could not be resolved (reportMissingImports)`；加回注释 → `0 errors`。
 - 想**彻底**不写忽略注释，就把脚本搬进仓库（如 `tools/demo_colors.py`），
-  正好对应 `progress.md` 待办 #5（`/tmp` 会被系统清理）。
+  正好对应 `progress.md` 待办 #3（`/tmp` 会被系统清理）。
+
+### ⑦ 项目 git 化并上传 GitHub（2026-09-22）
+- `git init -b main` → 首个提交 **`7ecc3eb`**（32 文件 / 15,843 行），
+  `origin` = `https://github.com/zhangziluo/wreader`，`git push -u origin main` 成功；
+  远端 `main` 与本地 `HEAD` 同一 SHA，`git rev-list --left-right --count origin/main...main`
+  返回 `0 0`。
+- **`.gitignore` 新增**（原有 Python / venv / 缓存条目全部保留）：
+  `book/`（开发用真实电子书样例，实测 367 MB，单文件最大 147 MB → 远超 GitHub 单文件 100 MB 硬限制）、
+  `.DS_Store`、`._*`、`*.log`。
+- 入库：`wreader/`（8 模块 + `data/achievements.json`）、`tests/`（8 文件，494 项）、
+  `memory-bank/`（6 状态文件 + 索引）、`.clinerules/memory-bank.md`、三份文档、
+  `pyproject.toml`、`LICENSE`、`.vscode/settings.json`。
+  **未**入库：`book/`、`.venv/`、`.pytest_cache/`、`wreader.egg-info/`、`__pycache__/`、
+  两个 `.DS_Store`。提交前实测：staged 合计 **704 KB**，最大单文件 76 KB（`reader.py`）。
+- **认证踩点（重要）**：本机**没有 `gh` CLI**；`~/.ssh/id_ed25519` **未注册**到 GitHub
+  （`ssh -T git@github.com` → `Permission denied (publickey)`）；
+  但系统级 `/usr/local/etc/gitconfig` 里有 `credential.helper=osxkeychain`，
+  Keychain 里存着 `github.com` / 账号 `71907942` 的凭证 →
+  **走 HTTPS 直接 push 成功，全程零交互**。所以远端 URL 必须用 HTTPS，不要改 SSH。
+- 全局另有 `http.proxy` / `https.proxy` = `http://127.0.0.1:7897`；代理没开时 push 会失败，
+  可临时 `git -c http.proxy= push` 绕过。
+- 顺带清掉散落文档里的"无 git 仓库"过期说法：`.clinerules/memory-bank.md`（含新增的
+  `book/` 禁上传、认证方式提醒）、`projectbrief.md`、`progress.md`、`techContext.md`、
+  `activeContext.md`；`progress.md` 的待办序号因删掉第一项而整体前移一位。
 
 ## 本会话的验证证据（全部通过）
 
@@ -108,6 +135,14 @@ def _init_colors() -> None:
 | `/tmp/demo_colors.py`（修复前后对照） | 修复前 `init_pair() returned ERR`；修复后 OK |
 | `/tmp/demo_colors.py`（修 Pylance 报错后复测） | `npx pyright` 在**仓库内**与**`/tmp` 下**各跑一次均 `0 errors`；去掉忽略注释的对照文件则报 1 个 `reportMissingImports`；`py_compile` OK；真 pty（`script -q /dev/null`）运行 exit=0，输出仍是"修复前 FAIL / 修复后 OK" |
 | `/tmp/demo_wrap.py`（可视化） | 80/40/24/20 列的终端下折行与状态栏渲染均正确 |
+| `git init -b main` + 首个提交 | `32 files changed, 15843 insertions(+)`，提交 `7ecc3eb` |
+| `git push -u origin main` | `* [new branch] main -> main`，退出码 0 |
+| `git ls-remote origin` | `refs/heads/main` = `7ecc3eb38ebbca5f186ffc321c22b80e51ccfab1` = 本地 `HEAD` |
+| `git status --short --branch` | `## main...origin/main`（工作区干净，无未跟踪文件） |
+| `git rev-list --left-right --count origin/main...main` | `0 0`（本地与远端完全同步） |
+| GitHub REST API 复核 | 默认分支 `main`；根目录 11 项（5 目录 + 6 文件）与本地一致；`book/` 未上传 |
+| `git check-ignore -v` | `book/`、`.DS_Store`（×2）、`.venv/`、`.pytest_cache/`、`*.egg-info/` 全部命中 `.gitignore` |
+| staged 体积审计 | 32 个文件共 **704 KB**，最大单文件 76 KB（`reader.py`），无 >1 MB 文件 |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
@@ -133,19 +168,17 @@ def _init_colors() -> None:
 
 ## 待办 / 下一步
 
-按优先级：
+按优先级（本会话已完成的"git 化"一项已移除，序号整体前移）：
 
-1. **没有 git 仓库**：建议 `git init` 并做一次初始提交，否则今后再也无法用 diff 证明
-   "只加注释、不动逻辑"，也无法回退。这是目前最大的工程风险。
-2. **更新 `README.md` 的过期内容**：
+1. **更新 `README.md` 的过期内容**：
    - "项目结构"一节的源码行数（`cli.py` 811→1006、`reader.py` 1412→1948 等）
    - 测试数量 474 → **494**，以及 `test_reader.py` 95 → 115
    - "已知问题"里可以补一条：状态栏/弹窗宽度已改为按显示列数（原为字符数）
-3. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
+2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
    `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
-4. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
-5. 可选：把本会话写在 `/tmp` 的校验脚本（注释覆盖、折行属性、绘制越界）搬进
-   `tests/` 或 `tools/`，因为 `/tmp` 会被系统清理。
+3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
+4. 可选：把本会话写在 `/tmp` 的校验脚本（注释覆盖、折行属性、绘制越界）搬进
+   `tests/` 或 `tools/`，因为 `/tmp` 会被系统清理；仓库已 git 化，搬进来即可挂 CI。
 
 ## 已知会话级注意事项
 
@@ -158,3 +191,6 @@ def _init_colors() -> None:
   变成 `-qq`，只输出 `文件: 数量`。想看到 `N passed` 就别再加 `-q`。
 - **macOS 终端透明背景**：如果 `use_default_colors()` 之后背景依旧纯黑、透不出壁纸，
   那是终端模拟器自己的设置（如 iTerm2「在备用屏幕里禁用透明度」），应用层无法绕过。
+- **git 提交要连 memory-bank 一起**：协议要求"每完成一段工作就更新 `activeContext.md`"，
+  所以收尾时 `git status` 应当干净；文档改动和代码改动一起 commit + push，别攒着。
+  推之前留意别把 `book/`（已忽略）或临时脚本加进去。
