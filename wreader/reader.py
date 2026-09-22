@@ -89,6 +89,27 @@ _TICK_MS = 1000
 # 书签在行首显示的符号
 _BOOKMARK_MARK = "★"
 
+# 滚轮事件在终端里就是「button4 / button5 按下」（xterm 的约定）：滚轮上 = button4，滚轮下 = button5。
+#
+# ⚠️ 实测记录（2026-09-22，在真 pty 里灌 SGR 鼠标序列得到，详见 memory-bank/activeContext.md ⑫）：
+#   - 灌 button4（滚轮上）→ curses 报 bstate=0x80000 = BUTTON4_PRESSED ✅
+#   - 灌 button5（滚轮下）→ curses 只报 0x8000000（位置报告），**这套 Python/curses 根本没有
+#     BUTTON5 这个概念**（`dir(curses)` 里没有任何 BUTTON5_*，mousemask 也报不出该位）。
+#   所以这里**不做位移猜测**：拿得到 BUTTON5_PRESSED 就用（Termux / Linux 的 ncurses 有），
+#   拿不到就是 0 —— 该平台上滚轮下不生效，而不是拿别的位去凑（那样会把 BUTTON_SHIFT 误判成滚轮）。
+#   `bstate & 0` 恒为 0，所以下面的判断天然安全，不需要额外分支。
+_WHEEL_UP = int(getattr(curses, "BUTTON4_PRESSED", 0))
+_WHEEL_DOWN = int(getattr(curses, "BUTTON5_PRESSED", 0))
+
+# 「按住拖动」时可能被报告为按下的按钮位；触摸屏通常是 button1
+_DRAG_PRESSED = (
+    int(getattr(curses, "BUTTON1_PRESSED", 0))
+    | int(getattr(curses, "BUTTON2_PRESSED", 0))
+    | int(getattr(curses, "BUTTON3_PRESSED", 0))
+)
+# 纯位置报告位：有些终端拖到一半就不再报按键位，只发这个；此时只要还在拖动就继续算位移
+_MOUSE_MOTION = int(getattr(curses, "REPORT_MOUSE_POSITION", 0))
+
 # 三种阅读视图
 MODE_ZH = "zh"
 MODE_EN = "en"
@@ -439,6 +460,10 @@ class Pager:
         streak: int = 0,
         # 翻页键一次走几屏
         page_scroll_step: float = 1.0,
+        # 滚轮/触摸一格滚几行
+        wheel_scroll_step: int = 1,
+        # 触摸拖动即滚动（手机终端）
+        touch_scroll: bool = True,
         # 状态栏片段格式
         status_bar_format: str = DEFAULT_STATUS_FORMAT,
         # 自动保存间隔（秒），0 = 关闭
@@ -468,6 +493,12 @@ class Pager:
         #: how many pages the page keys move (``reader.page_scroll_step``)
         # 翻页步长（屏数），不能为负
         self.page_scroll_step = max(0.0, float(page_scroll_step))
+        #: lines one wheel tick moves (``reader.wheel_scroll_step``)
+        # 滚轮/触摸一格滚几行，至少 1 行（否则滚了等于没滚）
+        self.wheel_scroll_step = max(1, int(wheel_scroll_step))
+        #: drag the finger to scroll the text (``reader.touch_scroll``)
+        # 触摸拖动即滚动
+        self.touch_scroll = bool(touch_scroll)
         #: the segments of the first status row (``reader.status_bar_format``)
         # 状态栏格式串（空值退回默认）
         self.status_bar_format = str(status_bar_format or DEFAULT_STATUS_FORMAT)
@@ -1788,6 +1819,111 @@ def _init_colors() -> None:
         pass
 
 
+class _DragScroll:
+    """把连续的「按住拖动」事件换算成滚动行数（触摸拖动即滚动）。
+
+    终端只报告手指的纵向位置，所以这里按「一个字符行 = 一行正文」1:1 换算；
+    方向与手机阅读一致：**手指往上滑 = 往后翻（读下一屏）**，往下滑 = 往前翻。
+    """
+
+    def __init__(self) -> None:
+        #: the last reported finger row; ``None`` while nothing is held down
+        # 上一次报告的手指所在行；None 表示当前没有按住
+        self._last_y: Optional[int] = None
+
+    @property
+    def active(self) -> bool:
+        """``True`` while a press is being dragged."""
+        # 只要 last_y 还在，就说明手指按着
+        return self._last_y is not None
+
+    def press(self, y: int) -> None:
+        """Start a drag at row *y*."""
+        # 记下起点（本次拖动的基准行）
+        self._last_y = int(y)
+
+    def release(self) -> None:
+        """End the drag."""
+        # 抬手：忘掉起点
+        self._last_y = None
+
+    def move(self, y: int) -> int:
+        """Move to row *y*; return how many lines to scroll (positive = read on)."""
+        # 没按住就忽略：既不滚动，也不会被误当成"拖动开始"
+        if self._last_y is None:
+            return 0
+        # 手指上滑时 y 变小 → 位移为正 → 往后翻
+        delta = self._last_y - int(y)
+        self._last_y = int(y)
+        return delta
+
+
+def _mouse_scroll_delta(pager: Pager, bstate: int, y: int, drag: _DragScroll) -> int:
+    """把一次鼠标事件换算成滚动行数（``0`` = 这次事件不动正文）。
+
+    ``bstate`` 与 ``y`` 直接来自 :func:`curses.getmouse`，但这里用参数传进来，
+    好让测试不依赖真终端也能驱动这套换算。
+    """
+    # 滚轮优先：上滚 = 往回看，下滚 = 往后读
+    if bstate & _WHEEL_UP:
+        return -pager.wheel_scroll_step
+    if bstate & _WHEEL_DOWN:
+        return pager.wheel_scroll_step
+    # 触摸拖动被关掉：顺便清掉拖动状态，别留着半截状态
+    if not pager.touch_scroll:
+        drag.release()
+        return 0
+    # 按住（触摸屏通常是 button1）：第一次只记起点，之后按纵向位移滚
+    if bstate & _DRAG_PRESSED:
+        if not drag.active:
+            drag.press(y)
+            return 0
+        return drag.move(y)
+    # 有些终端拖到一半就不再报按键位、只发位置报告：只要还在拖动就继续算位移
+    if drag.active and (bstate & _MOUSE_MOTION):
+        return drag.move(y)
+    # 其余情况（抬手、点一下、纯移动）都当作结束拖动
+    drag.release()
+    return 0
+
+
+def _enable_mouse() -> None:
+    """请终端把鼠标/触摸事件报过来（滚轮与拖动都靠它）。
+
+    不开这个，终端根本不会发 ``KEY_MOUSE`` —— 这正是 Termux 上触摸滑动
+    "完全没反应"的原因。不支持鼠标的终端会抛 :class:`curses.error`，
+    这里静默降级：没有鼠标功能，键盘照常用。
+    """
+    try:
+        # 关掉 ncurses 的「点一下 / 双击 / 三击」判定窗口。
+        # ⚠️ 实测（2026-09-22，真 pty 灌 SGR 序列）：默认的判定窗口会把**按下事件扣住**，
+        #    等它判断完才上报；结果「按住拖动」时拖动状态来不及建立，
+        #    后面来的位置报告全被当成普通移动丢掉 —— 拖动因此完全失效。
+        #    设成 0 之后按下事件立即上报，拖动才跟得上手指。注意它返回的是旧值，忽略即可。
+        curses.mouseinterval(0)
+    except curses.error:
+        # 个别终端/curses 实现没有这个函数：忽略，滚轮与键盘仍然可用
+        pass
+    try:
+        # 全套鼠标事件 + 位置报告：位置报告是「拖动即滚动」的前提
+        curses.mousemask(curses.ALL_MOUSE_EVENTS | _MOUSE_MOTION)
+    except curses.error:
+        # 老终端不支持鼠标：算了，不影响键盘阅读
+        pass
+
+
+def _mouse_event_delta(pager: Pager, drag: _DragScroll) -> int:
+    """读一条排队的鼠标事件，返回该滚几行。"""
+    try:
+        # getmouse 返回 (id, x, y, z, bstate)
+        _id, _x, y, _z, bstate = curses.getmouse()
+    except curses.error:
+        # 事件已经被别的地方消费掉：当作什么都没发生
+        return 0
+    # 真正的换算交给纯函数，便于单测
+    return _mouse_scroll_delta(pager, int(bstate), int(y), drag)
+
+
 def _run(stdscr: Any, pager: Pager) -> None:
     """curses main loop: repaint on a tick, act on keys, never block forever."""
     # 让 curses 解析方向键等特殊键序列
@@ -1799,6 +1935,10 @@ def _run(stdscr: Any, pager: Pager) -> None:
         pass
     # 用终端自己的配色，别把正文糊成固定的黑底
     _init_colors()
+    # 请终端上报鼠标/触摸事件（滚轮与拖动都靠它；不支持的终端自动降级）
+    _enable_mouse()
+    # 触摸拖动用的状态机：记住手指上一次在哪一行
+    drag = _DragScroll()
     # get_wch 最多等 1 秒：这样时钟和状态栏能持续刷新
     stdscr.timeout(_TICK_MS)
     # 上次自动保存的时刻
@@ -1824,6 +1964,14 @@ def _run(stdscr: Any, pager: Pager) -> None:
             return
         # 终端尺寸变化：不处理按键，直接重画
         if key == curses.KEY_RESIZE:
+            continue
+        # 鼠标 / 触摸事件：滚轮一格滚 wheel_scroll_step 行，按住拖动按位移滚
+        if key == curses.KEY_MOUSE:
+            delta = _mouse_event_delta(pager, drag)
+            # 真的滚动了才走后续流程（比如进章自动翻译）
+            if delta:
+                pager.scroll(delta)
+                _maybe_auto_translate(stdscr, pager)
             continue
         # 交给按键处理器；它返回 False 表示要退出
         if not handle_key(stdscr, pager, key):
@@ -1898,6 +2046,10 @@ def open_reader(book_id: str) -> int:
             (document.get("stats") or {}).get("daily_read_time") or {}
         ),
         page_scroll_step=float(reader_settings.get("page_scroll_step") or 1.0),
+        # 滚轮/触摸一格滚几行（移动端；Pager 里还会兜底成至少 1 行）
+        wheel_scroll_step=int(reader_settings.get("wheel_scroll_step") or 1),
+        # 触摸拖动即滚动（移动端，默认开）
+        touch_scroll=bool(reader_settings.get("touch_scroll", True)),
         status_bar_format=str(
             reader_settings.get("status_bar_format") or DEFAULT_STATUS_FORMAT
         ),

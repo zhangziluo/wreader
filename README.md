@@ -372,6 +372,8 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | `q` / `Q` / `Ctrl-C` | 退出阅读器（会保存进度、书签、本次时长） |
 | `j` / `空格` / `回车` / `↓` / `PageDown` | 往下翻页（翻页量由 `reader.page_scroll_step` 决定） |
 | `k` / `↑` / `PageUp` | 往上翻页 |
+| 滚轮下 · 手指向上滑 | 往后**逐行**滚动（一行一行往下读；一格滚几行由 `reader.wheel_scroll_step` 决定） |
+| 滚轮上 · 手指向下滑 | 往前**逐行**滚动（回看上文） |
 | `g` | 跳到指定行号（提示 `跳到行号 (1-281):`，输入数字回车；`Esc` 取消） |
 | `G` | 跳到全书最后一行 |
 | `[` | 跳到上一章开头 |
@@ -387,6 +389,12 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 
 几个实用细节：
 
+- **手机上读（Termux 等）**：手指按住上下拖动 = 逐行滚动 —— **向上滑往后读**（下一屏方向）、
+  **向下滑往前看**，一格滚几行由 `reader.wheel_scroll_step` 决定；
+  不想用拖动就设 `reader.touch_scroll false`。
+  滚轮同理（下滚往后、上滚往前）。
+  ⚠️ 有个终端限制：terminfo 里缺 `XM` 能力的终端（**macOS 自带终端**就是）只能上报"滚轮上"，
+  滚轮下不会触发；那种环境下用方向键或拖动即可，功能不受影响。
 - **底部两行是状态栏**：倒数第二行由 `reader.status_bar_format` 拼成（反色显示），
   最后一行是提示栏——平时显示按键清单，有临时消息（"已加入生词本：xxx = 承认"之类）时优先显示消息。
 - **每行最左边一列是书签栏**：有书签的行显示 `★`，其余行留空。
@@ -408,6 +416,8 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `page_scroll_step` | `1` | 每次翻页滚几屏。`0.5` = 半屏（更细腻），`2` = 两屏 |
+| `wheel_scroll_step` | `1` | 滚轮一格 / 触摸拖动一格滚几行（移动端建议 1~3） |
+| `touch_scroll` | `true` | 触摸拖动即滚动（手机终端）；设 `false` 只留滚轮与键盘 |
 | `status_bar_format` | 状态栏显示 `time`、`chapter`、`duration` 三段 | 选状态栏显示哪几段，多段用竖线分隔（详见下表） |
 | `auto_save_interval` | `60` | 自动保存进度间隔（秒），`0` = 关闭 |
 | `page_height` | `24` | 每屏显示的行数（也是翻页量的基准） |
@@ -632,19 +642,19 @@ wreader/
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（18 行）
 │   ├── cli.py               argparse 定义 + 各子命令处理函数（1006 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（985 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（987 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1077 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏（1948 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2100 行）
 │   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   494 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   514 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
-    ├── test_config.py       49 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
+    ├── test_config.py       50 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      116 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索
-    ├── test_reader.py       115 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行与显示宽度
+    ├── test_reader.py       134 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮与触摸
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
     ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
@@ -697,7 +707,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 494 项，约 5 秒
+pytest                      # 514 项，约 5 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -823,7 +833,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **494 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **514 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
   `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，

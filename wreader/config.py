@@ -193,6 +193,8 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
     # 阅读界面相关
     "reader": (
         ("page_scroll_step", 1.0, "每次翻页行数（默认1页）"),
+        ("wheel_scroll_step", 1, "滚轮/触摸一格滚几行（移动端）"),
+        ("touch_scroll", True, "触摸拖动即滚动（手机终端）"),
         ("status_bar_format", "time|chapter|duration", ""),
         ("auto_save_interval", 60, "自动保存进度间隔（秒），0 = 关闭"),
         ("page_height", 24, "每屏显示的行数"),

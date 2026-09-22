@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 21 项
-    assert len(paths) == 21
+    # 当前 schema 共 23 项
+    assert len(paths) == 23
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:
@@ -29,6 +29,15 @@ def test_schema_has_a_default_for_every_path() -> None:
         assert path in config.DEFAULT_FLAT, path
         # default_for 与 DEFAULT_FLAT 保持一致
         assert config.default_for(path) == config.DEFAULT_FLAT[path]
+
+
+def test_mobile_scrolling_settings_are_declared() -> None:
+    # 移动端滚动：滚轮/触摸一格滚 1 行，拖动即滚动默认开
+    assert config.DEFAULT_FLAT["reader.wheel_scroll_step"] == 1
+    assert config.DEFAULT_FLAT["reader.touch_scroll"] is True
+    # 类型按默认值推断：一个是整数、一个是布尔
+    assert config.coerce_value("reader.wheel_scroll_step", "3") == 3
+    assert config.coerce_value("reader.touch_scroll", "off") is False
 
 
 def test_settings_paths_follow_nr_home(isolated_home) -> None:

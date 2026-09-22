@@ -20,6 +20,7 @@ python tools/check_docs.py
 | `verify_wrap.py` | `reader._wrap_line` 折行：不超宽、不丢字符、不产空行（约 4 万次属性检查） | 0 / 1 |
 | `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 × 3 视图 = 420 组） | 0 / 1 |
 | `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
+| `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（6 项对账） | 0 / 1 |
 
 ## 逐个说明
 
@@ -89,3 +90,22 @@ script -q /dev/null python tools/verify_colors.py && cat /tmp/wreader_colors.txt
 必须借 `script` 开一个 pty（macOS / Linux 自带；Windows 请另找办法），
 结果写进文件是为了不让终端转义序列污染输出。它验证「背景跟随终端主题 / 透明」的前提：
 `_init_colors()` 不抛异常、`use_default_colors()` 之后 `-1` 默认色对可用、`A_NORMAL` 不带颜色位。
+
+### `verify_mouse.py`
+
+```bash
+python tools/verify_mouse.py     # 期望：RESULT: 全部通过
+```
+
+鼠标这套东西**单元测试盖不到底**：「终端有没有把事件送进来」取决于 curses / terminfo /
+终端模拟器三者。所以这个脚本自己开一个真 pty、跑一次阅读器、灌标准 SGR 鼠标序列，
+再读 `library.json` 里的进度对账 —— 键盘基准、滚轮上一格、向上拖 4 行、向下拖 3 行、
+`touch_scroll=false` 拖动无效、步长=5 共 **6 项**。
+
+> ⚠️ 两个前提，别随便改：
+> 1. 它固定用 **`TERM=xterm-1006`**。实测：macOS 上 `xterm-256color` 的 terminfo **没有 `XM` 能力**，
+>    curses 只开 `?1000h`，SGR 序列会被当成普通按键收进来 —— 换别的 TERM 会**假失败**。
+> 2. 必须给 pty 设一个正常尺寸（不设就是 0x0）。
+>
+> 它的价值已经被验证过：抓出了一个"拖动完全失效"的真 bug —— `curses.mouseinterval` 默认的
+> 点击判定窗口会把**按下事件扣住**，导致拖动状态建立不起来。单测发现不了这个。

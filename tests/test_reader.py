@@ -1223,6 +1223,180 @@ def test_open_reader_needs_the_file(isolated_home) -> None:
     assert "book text is missing" in str(excinfo.value)
 
 
+# ------------------------------------------- 鼠标滚轮 / 触摸拖动（移动端翻页）
+def test_drag_scroll_reads_on_when_the_finger_moves_up() -> None:
+    # 手指往上滑（y 变小）= 往后翻，和手机阅读习惯一致
+    drag = reader._DragScroll()
+    drag.press(10)
+    assert drag.move(7) == 3
+
+
+def test_drag_scroll_goes_back_when_the_finger_moves_down() -> None:
+    # 手指往下滑（y 变大）= 往前翻
+    drag = reader._DragScroll()
+    drag.press(10)
+    assert drag.move(13) == -3
+
+
+def test_drag_scroll_is_one_line_per_row() -> None:
+    # 拖一行 = 滚一行：连续各挪一行，位移依次是 -1 / -1 / -1
+    drag = reader._DragScroll()
+    drag.press(0)
+    assert [drag.move(step) for step in (1, 2, 3)] == [-1, -1, -1]
+
+
+def test_drag_scroll_ignores_moves_without_a_press() -> None:
+    # 没按住就忽略：既不滚动，也不会被误当成"拖动开始"（桌面端移动鼠标不该翻页）
+    drag = reader._DragScroll()
+    assert drag.move(5) == 0
+    assert drag.active is False
+
+
+def test_drag_scroll_forgets_the_anchor_after_a_release() -> None:
+    # 抬手之后再移动，不应该接着算位移
+    drag = reader._DragScroll()
+    drag.press(10)
+    drag.release()
+    assert drag.active is False
+    assert drag.move(20) == 0
+
+
+def test_pager_defaults_for_mobile_scrolling(pager_factory) -> None:
+    # 默认：滚轮一格 1 行、拖动即滚动开着
+    pager = pager_factory()
+    assert pager.wheel_scroll_step == 1
+    assert pager.touch_scroll is True
+
+
+def test_pager_clamps_a_zero_wheel_step(pager_factory) -> None:
+    # 步长写成 0 会兜底成 1，否则滚了等于没滚
+    assert pager_factory(wheel_scroll_step=0).wheel_scroll_step == 1
+
+
+def test_wheel_constants_come_from_curses() -> None:
+    # 滚轮位直接取 curses 的常量：拿得到就用真的
+    assert reader._WHEEL_UP == int(getattr(curses, "BUTTON4_PRESSED", 0))
+    assert reader._WHEEL_DOWN == int(getattr(curses, "BUTTON5_PRESSED", 0))
+
+
+def test_mouse_wheel_scrolls_by_the_configured_step(monkeypatch, pager_factory) -> None:
+    # 滚轮下 = 往后翻、滚轮上 = 往回翻，一格走 wheel_scroll_step 行。
+    # 这里把滚轮位换成哨兵位：并非所有平台都导出 BUTTON5_PRESSED（macOS 实测就没有），
+    # 用哨兵位才能在任意平台上稳定地验证"方向 + 步长"这段逻辑。
+    monkeypatch.setattr(reader, "_WHEEL_UP", 1 << 28)
+    monkeypatch.setattr(reader, "_WHEEL_DOWN", 1 << 29)
+    pager = pager_factory(wheel_scroll_step=3)
+    drag = reader._DragScroll()
+    assert reader._mouse_scroll_delta(pager, reader._WHEEL_DOWN, 5, drag) == 3
+    assert reader._mouse_scroll_delta(pager, reader._WHEEL_UP, 5, drag) == -3
+
+
+def test_mouse_wheel_scrolls_one_line_by_default(monkeypatch, pager_factory) -> None:
+    # 默认一格就是 1 行
+    monkeypatch.setattr(reader, "_WHEEL_UP", 1 << 28)
+    monkeypatch.setattr(reader, "_WHEEL_DOWN", 1 << 29)
+    pager = pager_factory()
+    drag = reader._DragScroll()
+    assert reader._mouse_scroll_delta(pager, reader._WHEEL_DOWN, 0, drag) == 1
+    assert reader._mouse_scroll_delta(pager, reader._WHEEL_UP, 0, drag) == -1
+
+
+def test_mouse_drag_scrolls_by_the_finger_movement(pager_factory) -> None:
+    # 按下那一下只记起点（不滚动），继续拖才按位移滚
+    pager = pager_factory()
+    drag = reader._DragScroll()
+    assert reader._mouse_scroll_delta(pager, curses.BUTTON1_PRESSED, 20, drag) == 0
+    # 手指从第 20 行滑到第 16 行：往上滑 4 行 → 往后翻 4 行
+    assert reader._mouse_scroll_delta(pager, curses.BUTTON1_PRESSED, 16, drag) == 4
+
+
+def test_mouse_drag_is_ignored_when_touch_scrolling_is_off(pager_factory) -> None:
+    # 关掉 touch_scroll 后拖动不动正文，而且不会残留拖动状态
+    pager = pager_factory(touch_scroll=False)
+    drag = reader._DragScroll()
+    assert reader._mouse_scroll_delta(pager, curses.BUTTON1_PRESSED, 20, drag) == 0
+    assert drag.active is False
+
+
+def test_mouse_motion_without_a_button_does_not_scroll(pager_factory) -> None:
+    # 桌面端单纯移动鼠标（没有按键）不该翻页
+    pager = pager_factory()
+    drag = reader._DragScroll()
+    assert reader._mouse_scroll_delta(pager, reader._MOUSE_MOTION, 20, drag) == 0
+    assert drag.active is False
+
+
+def test_mouse_release_ends_the_drag(pager_factory) -> None:
+    # 抬手事件（只有 RELEASED 位）要结束拖动，免得下次移动接着算位移
+    pager = pager_factory()
+    drag = reader._DragScroll()
+    reader._mouse_scroll_delta(pager, curses.BUTTON1_PRESSED, 20, drag)
+    assert drag.active is True
+    reader._mouse_scroll_delta(pager, curses.BUTTON1_RELEASED, 20, drag)
+    assert drag.active is False
+
+
+def test_mouse_drag_keeps_working_on_motion_reports_alone(pager_factory) -> None:
+    # 有些终端拖到一半就不再报按键位、只发位置报告：只要还在拖就继续滚
+    pager = pager_factory()
+    drag = reader._DragScroll()
+    reader._mouse_scroll_delta(pager, curses.BUTTON1_PRESSED, 20, drag)
+    assert reader._mouse_scroll_delta(pager, reader._MOUSE_MOTION, 18, drag) == 2
+
+
+def test_enable_mouse_asks_for_position_reports(monkeypatch) -> None:
+    # 必须把「位置报告」一起请上，否则拖动根本不会产生事件
+    seen: dict[str, int] = {}
+
+    def record_mask(mask: int) -> tuple[int, int]:
+        # 记下掩码；真 curses 返回的是 (availmask, oldmask) 元组
+        seen["mask"] = mask
+        return mask, 0
+
+    monkeypatch.setattr(curses, "mousemask", record_mask, raising=False)
+    monkeypatch.setattr(curses, "mouseinterval", lambda value: 0, raising=False)
+    reader._enable_mouse()
+    assert seen["mask"] & reader._MOUSE_MOTION
+
+
+def test_enable_mouse_disables_the_click_window(monkeypatch) -> None:
+    # 关键回归：必须把 ncurses 的「点击判定窗口」设成 0。
+    # 实测（真 pty 灌 SGR 序列）默认窗口会把按下事件扣住，拖动状态建立不起来，
+    # 后面的位置报告全被当成普通移动丢掉 —— 拖动会完全失效。
+    seen: dict[str, int] = {}
+
+    def record_interval(value: int) -> int:
+        # 记下传入的间隔；真 curses 返回旧值
+        seen["interval"] = value
+        return 166
+
+    monkeypatch.setattr(curses, "mouseinterval", record_interval, raising=False)
+    monkeypatch.setattr(curses, "mousemask", lambda mask: (mask, 0), raising=False)
+    reader._enable_mouse()
+    assert seen["interval"] == 0
+
+
+def test_enable_mouse_tolerates_a_missing_mouseinterval(monkeypatch) -> None:
+    # 个别 curses 实现没有 mouseinterval：抛错也必须被吞掉，不能把阅读器弄崩
+    def boom(_value: int) -> int:
+        # 模拟不支持这个调用
+        raise curses.error("no mouseinterval")
+
+    monkeypatch.setattr(curses, "mouseinterval", boom, raising=False)
+    monkeypatch.setattr(curses, "mousemask", lambda mask: (mask, 0), raising=False)
+    reader._enable_mouse()
+
+
+def test_enable_mouse_survives_a_terminal_without_mouse_support(monkeypatch) -> None:
+    # 不支持鼠标的终端会抛 curses.error：必须吞掉，不能把阅读器弄崩
+    def boom(*_args: object) -> None:
+        # 模拟老终端：一开鼠标上报就报错
+        raise curses.error("no mouse here")
+
+    monkeypatch.setattr(curses, "mousemask", boom, raising=False)
+    reader._enable_mouse()
+
+
 
 
 

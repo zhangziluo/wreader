@@ -205,6 +205,31 @@ def _init_colors() -> None:
 - `check_comments.py` 因此**默认只报告不判定**（否则 CI 直接全红），
   要门禁就加 `--strict`，并可配合文件参数一次啃一个。
 
+### ⑫ 鼠标滚轮 / 触摸拖动逐行滚动（Termux 适配）
+- **需求**：用户在安卓 Termux 上反馈"上下翻页不适配，往下触屏翻页看不到上下文"，
+  要求"上下滑动翻上下行，或音量键翻页"。拍板口径：滚轮一格 **1 行**、触摸拖动一起做、
+  **向上滑 = 往后读**、向下滑 = 往前看。
+- **实现**（`wreader/reader.py`，含注释约 +150 行）：
+  - `_enable_mouse()`：`mouseinterval(0)` + `mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION)`
+  - `_DragScroll`：纯状态机，把连续的位置报告换算成滚动行数（1 行 = 1 行）
+  - `_mouse_scroll_delta()`：纯函数，把 `(bstate, y)` 换算成滚动行数（滚轮 / 拖动 / 忽略）
+  - `_mouse_event_delta()`：薄胶水，负责读 `curses.getmouse()`
+  - `_run()`：新增 `KEY_MOUSE` 分支 → `pager.scroll(delta)` → `_maybe_auto_translate`
+  - `Pager` 新增 `wheel_scroll_step` / `touch_scroll`；`config.SCHEMA` 同名两项（**21 → 23 键**）
+- ⚠️ **这一路我错了两次，都是靠真 pty 实验纠正的**（单测发现不了）：
+  1. 第一版把滚轮下的位猜成 `_WHEEL_UP << 6`。实测灌 button5 只得到位置报告 ——
+     这套 Python/curses **根本没有 BUTTON5 概念**；而猜出来的值**正好等于 `BUTTON_SHIFT`**，
+     会把 shift+点击误判成滚轮。已改成"拿不到真常量就不支持该方向"。
+  2. 拖动一开始怎么都不动。加探针才看清：**按下事件压根没被上报** ——
+     `curses.mouseinterval` 默认的点击判定窗口把它扣住了，拖动状态建立不起来，
+     之后的位置报告全被当成普通移动丢掉。设 `mouseinterval(0)` 后立刻正常。
+- **排错过程本身也有坑**：最初用 `TERM=xterm-256color` 灌 SGR 序列，全被当成普通按键 ——
+  macOS 这份 terminfo **没有 `XM` 能力**，curses 只开 `?1000h`、不开 SGR(1006)。
+  换成机器上确实存在的 **`xterm-1006`** 才测出真实结果。
+- **工具补上**：新增 `tools/verify_mouse.py`（真 pty 端到端 6 项对账），校验脚本共 **7 个**。
+- **音量键翻页**：阅读器本来就认 `↑` / `↓` / `PageUp` / `PageDown`，所以在 Termux 设置里把
+  音量键映射过去即可，**无需改代码**；已写进《使用指南.md》的「场景 E：在手机上读」。
+
 ## 本会话的验证证据（全部通过）
 
 | 检查 | 结果 |
@@ -251,6 +276,11 @@ def _init_colors() -> None:
 | 换目录运行（`cd /tmp` 后跑绝对路径） | `verify_draw` 420、`check_docs` OK、`check_doc_numbers` ALL OK → 仓库根自解析有效 |
 | `npx pyright`（include 加入 `tools` 之后） | **0 errors, 0 warnings, 0 informations** |
 | `pytest tests/` | **494 passed in 3.15s**（`tools/` 不在 testpaths 里，不会被当测试收集） |
+| **`tools/verify_mouse.py`**（真 pty，`TERM=xterm-1006`） | 6 项全 OK：键盘 `j`=24、滚轮上一格=23、上拖 4 行=27、下拖 3 行=24、`touch_scroll=false` 拖动不动=24、步长 5=19 |
+| **`mouseinterval` 修复前后对照** | 同一串拖动（带正常 pty 尺寸）：修复前 = **0**（按下事件根本没上报）；修复后 = **4** ✅ |
+| 拖动探针日志（修复后） | press→`0x2` y=19 active=True；motion→`0x8000000` y=15 **delta=4**；release→`0x1` active=False |
+| 灌 SGR 序列的真实解码表 | wheel-up(64)→`0x80000`=BUTTON4_PRESSED；wheel-down(65)→`0x8000000`（**本平台没有该位**）；press b1→`0x2`；motion→`0x8000000`；release→`0x1` |
+| **本轮（⑫）回归** | `pytest tests/` → **514 passed**（覆盖上面那行旧的 494）；`npx pyright` → **0 errors / 0 warnings**；`tools/check_doc_numbers.py` → **ALL OK**；`tools/check_docs.py` → 三份文档 OK；`tools/verify_wrap.py` → 40077；`tools/verify_draw.py` → 420；`tools/verify_mouse.py` → 全部通过 |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
