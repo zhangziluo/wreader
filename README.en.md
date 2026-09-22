@@ -67,6 +67,37 @@ and `requests` (DeepSeek translation).
 
 ## Installation
 
+### Three commands (recommended)
+
+You need **Python 3.11+** and `git`:
+
+```bash
+git clone https://github.com/zhangziluo/wreader.git
+cd wreader
+./install.sh
+```
+
+`./install.sh` takes care of everything else: it creates the `.venv` virtual environment,
+installs the four dependencies, **sets up the `wreader` alias** (appended to `~/.bashrc` or
+`~/.zshrc` — running it twice will not add a second line) and finally checks the version:
+
+```bash
+wreader --version        # wreader 0.1.0
+```
+
+Follow its last line (`source ~/.zshrc`, or simply open a new terminal) and you are done.
+
+| Flag | What it does |
+| --- | --- |
+| `./install.sh --dev` | Also install `pytest` (only needed to hack on the code or run the tests) |
+| `./install.sh --no-alias` | Leave `~/.bashrc` / `~/.zshrc` alone; use the full path instead |
+| `./install.sh --help` | Show usage |
+
+### Manual installation (if the script cannot run, or you prefer doing it yourself)
+
+<details>
+<summary><b>Expand for the manual steps (Windows users go here)</b></summary>
+
 From the project root (the folder holding `pyproject.toml` and `wreader/`):
 
 ```bash
@@ -94,12 +125,18 @@ wreader --version
 # wreader 0.1.0
 ```
 
+</details>
+
 ### Using wreader in a new terminal
 
 `wreader` lives inside the project's own `.venv`, and `.venv/bin` is not on `PATH` by
 default. So **after you close the terminal and open a new one, typing `wreader` fails
 with `command not found`** — that is expected, and it does not mean the install is broken.
-Pick whichever of these three you prefer:
+
+**If you installed with `./install.sh` you are already covered**: it wrote the alias into
+`~/.bashrc` / `~/.zshrc` for you, so a new terminal simply works (the only thing you might
+still need is `source ~/.zshrc`). The table below is for people who passed `--no-alias` or
+installed by hand — pick whichever of the three you prefer:
 
 | Option | What you type each time | Notes |
 | --- | --- | --- |
@@ -123,6 +160,9 @@ same name in `$PROFILE`.
 > That does make `wreader` work, but it also turns `python3` and `pip` in every new
 > terminal into this virtualenv's copies, which will confuse you in other Python
 > projects. An alias adds one command and nothing else.
+>
+> `install.sh` follows the same rule: it always installs through `.venv/bin/python -m pip`
+> and **never** adds `.venv/bin` to `PATH`.
 
 > **Just passing through?** You can skip all of the above and write
 > `python -m wreader.cli xxx` wherever this document says `wreader xxx` — the two are
@@ -702,6 +742,7 @@ wreader/
 ├── README.md                中文说明 (Chinese)
 ├── README.en.md             this file
 ├── 使用指南.md               step-by-step beginner guide (Chinese only)
+├── install.sh               one-shot installer: venv, dependencies, wreader alias (idempotent)
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
@@ -817,8 +858,10 @@ exit code 0 = pass, 1 = something to look at. See [tools/README.md](tools/README
 
 **Q: After opening a new terminal, `wreader` says command not found?**
 The most common report — and **not** a broken install: `wreader` lives in the project's own `.venv`,
-whose `bin` directory is not on `PATH` by default. Add one alias to `~/.zshrc` and forget about it
-(see [Using wreader in a new terminal](#using-wreader-in-a-new-terminal)); or call
+whose `bin` directory is not on `PATH` by default. If you installed with `./install.sh` the alias is
+already in place, so just run `source ~/.zshrc` (or `~/.bashrc`) or open another terminal; if it still
+fails you either passed `--no-alias` or installed by hand — see
+[Using wreader in a new terminal](#using-wreader-in-a-new-terminal). Alternatively call
 `<project>/.venv/bin/wreader` directly, run `source .venv/bin/activate` first, or simply write
 `python -m wreader.cli xxx` instead of `wreader xxx`.
 

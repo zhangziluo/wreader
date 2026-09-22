@@ -67,6 +67,37 @@
 
 ## 安装
 
+### 三条命令装好（推荐）
+
+需要 **Python 3.11+** 和 `git`：
+
+```bash
+git clone https://github.com/zhangziluo/wreader.git
+cd wreader
+./install.sh
+```
+
+`./install.sh` 会自动把剩下的活全干完：建 `.venv` 虚拟环境 → 装 4 个依赖 →
+把 `wreader` 命令**配好别名**（写进 `~/.bashrc` 或 `~/.zshrc`，重复运行不会写第二遍）→ 自检版本号。
+按它最后的提示 `source ~/.zshrc`（或干脆重开一个终端）就能用了：
+
+```bash
+wreader --version        # wreader 0.1.0
+```
+
+装的时候可以加参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `./install.sh --dev` | 额外装上 `pytest`（要改代码 / 跑测试时才需要） |
+| `./install.sh --no-alias` | 不动 `~/.bashrc` / `~/.zshrc`，之后用完整路径调用 |
+| `./install.sh --help` | 看用法 |
+
+### 手动安装（脚本跑不动、或想自己来）
+
+<details>
+<summary><b>展开看手动步骤（Windows 用户走这条）</b></summary>
+
 在项目根目录（也就是 `pyproject.toml` 和 `wreader/` 所在的那一层）执行：
 
 ```bash
@@ -94,11 +125,17 @@ wreader --version
 # wreader 0.1.0
 ```
 
+</details>
+
 ### 新开一个终端后怎么用 wreader
 
-`wreader` 装在**项目自己的 `.venv`** 里，而 `.venv/bin` 默认不在系统的 `PATH` 上，
-所以**关掉终端再新开一个窗口，直接敲 `wreader` 会报 `command not found`**——
-这很正常，不代表装坏了。三种办法，任选一种：
+`wreader` 装在**项目自己的 `.venv`** 里，而 `.venv/bin` 默认不在系统的 `PATH` 上 ——
+所以**关掉终端再新开一个窗口，直接敲 `wreader` 会报 `command not found`**。
+这不是装坏了，是正常的。
+
+**用 `./install.sh` 装的话不用管这一步**：它已经往 `~/.bashrc` / `~/.zshrc` 写好别名了，
+重开终端就能直接用（唯一可能要做的只是 `source ~/.zshrc`）。
+下面这张表是给「当初用了 `--no-alias`」或「手动装的」人看的：
 
 | 办法 | 每次要敲什么 | 说明 |
 | --- | --- | --- |
@@ -119,6 +156,9 @@ wreader --version                     # 验证：应输出 wreader 0.1.0
 > ⚠️ **不要把 `.venv/bin` 前置进 `PATH`**（`export PATH=".../.venv/bin:$PATH"`）。
 > 那样 `wreader` 确实能用了，但新终端里的 `python3` 和 `pip` 也会一起变成这个虚拟环境的版本，
 > 会干扰你在其它 Python 项目上的工作；别名只多一条命令，没有这个副作用。
+>
+> `install.sh` 也守着这条：它始终用 `.venv/bin/python -m pip` 装东西，
+> **从不**把 `.venv/bin` 加进 `PATH`。
 
 > **只是临时用一下？** 也可以完全不配置，直接把 `wreader xxx` 换成
 > `python -m wreader.cli xxx`——本文档里两种写法等价。
@@ -667,6 +707,7 @@ wreader/
 ├── README.md                中文说明（本文件）
 ├── README.en.md             English README
 ├── 使用指南.md               小白手把手教程（第一次用看这个）
+├── install.sh               一键安装：建 venv、装依赖、配好 wreader 别名（幂等）
 ├── tools/                   开发期校验脚本：文档锚点/数字对拍/折行/绘制/配色（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
@@ -777,7 +818,8 @@ script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
 
 **Q：新开终端后敲 `wreader` 提示 command not found？**
 这是最常见的报错，**不是装坏了**：`wreader` 装在项目自己的 `.venv` 里，而 `.venv/bin` 默认不在 `PATH` 上。
-推荐在 `~/.zshrc` 里配一行别名一劳永逸，见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)；
+用 `./install.sh` 装的话别名已经写好了 —— 先 `source ~/.zshrc`（bash 换成 `~/.bashrc`）或重开终端；
+还是不行就说明当初用了 `--no-alias` 或手动装的，见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)。
 临时也可以用 `<项目路径>/.venv/bin/wreader`、先 `source .venv/bin/activate`，
 或者干脆把 `wreader xxx` 写成 `python -m wreader.cli xxx`。
 

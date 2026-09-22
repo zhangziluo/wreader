@@ -16,6 +16,7 @@
 | 许可证 | MIT（`LICENSE`，`pyproject.toml` 里 `license = "MIT"`） |
 | Python | **>= 3.11** |
 | 入口 | console script `wreader` → `wreader.cli:main` |
+| 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
 | 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **40 个跟踪文件**，工作区干净且与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |

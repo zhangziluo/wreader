@@ -11,7 +11,7 @@
 本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
-**新增 `wreader continue` 列"最近打开阅读的三本书"（⑰）**。
+新增 `wreader continue` 列"最近打开阅读的三本书"（⑰）、**安装压成三行命令 `./install.sh`（⑱）**。
 
 ## 最近改动（2026-09-22，按时间顺序）
 
@@ -516,6 +516,64 @@ wreader read f1ba2379642f
 **没踩到的坑（记录一下幸运之处）**：全程没碰落库格式、没碰行号坐标、没动阅读器绘制，
 所以「行号坐标唯一」「CJK 宽度」两条硬约束都不受影响 —— `verify_wrap` / `verify_draw` 数字不变即为证。
 
+## ⑱ 新增 `./install.sh`，安装压成三行命令
+
+**用户诉求**：「简化安装流程到三行命令，git clone URL，cd wreader，把剩下的安装过程全塞进 ./install.sh」。
+
+**改法**：新建 `install.sh`（**219 行** bash，已 `chmod +x`，git 记为 100755），做六件事：
+1. 找 `python3`/`python` 中 **>= 3.11** 的（`sys.version_info` 判断，找不到就报错并给各平台安装提示）；
+2. `.venv` 不存在才建 —— 判据是 **`-x .venv/bin/python`** 而不是 `-d .venv`
+   （创建被中断会留下空目录，那种情况要重建）；
+3. 用 **`.venv/bin/python -m pip`** 装：`--upgrade pip`（**只在新建 venv 时**）+ `pip install -e .`
+   （`--dev` 则 `-e ".[dev]"`）。**全程不 activate**，守住"不污染 PATH"这条既有约定；
+4. 自检 `wreader --version`，跑不起来就当失败；
+5. **写别名**：按 `${SHELL}` 选 `~/.bashrc` / `~/.zshrc`（认不出来两个都写），
+   `grep -q "^alias wreader="` 判重 + `grep -Fxq` 比对整行；指向别的路径时**只警告、不擅自改**用户文件；
+6. 打印总结 + 下一步（`wreader continue` / `wreader list`）。
+
+**选项**：`--dev` / `--no-alias` / `--help`。用 `sh install.sh` 跑会自动 `exec bash "$0" "$@"` 转交
+（脚本用了数组等 bash 特性）。
+
+### 踩到的两个坑
+
+1. **全角字符紧跟变量名 → `unbound variable`**。首跑直接炸在
+   `ok "虚拟环境已存在，跳过创建（$VENV）"`：bash 在非 UTF-8 locale 下会把 `（` 的字节
+   当成变量名的一部分，于是去找名叫 `VENV（` 的变量。**修法**是改成 `${VENV}`。
+   同类问题在 `die "...：$arg（试 ...）"` 里也有一处 —— 写了个正则
+   `\$[A-Za-z_]\w*(?=[^\x00-\x7f])` 一次全扫出来，改完复扫 **0 处**。
+   ⚠️ **写 shell 脚本时，中文/全角标点紧跟在 `$VAR` 后面一律要加花括号。**
+2. **提示硬编码 `source ~/.bashrc`**，但脚本实际可能写的是 `~/.zshrc`（本机 `$SHELL` 就是 zsh）。
+   改成打印真正写过的 `${ALIAS_RCS[0]}`。
+
+### 验证证据（2026-09-22 实测）
+
+| 项 | 结果 |
+| --- | --- |
+| `bash -n install.sh` | 通过 |
+| **全新克隆**（`git clone` → `/tmp/wreader-clone`，无 `.venv`） | `HOME=<假家> SHELL=/bin/bash` 下 **exit 0**：venv 建好、15 个包装上、`[ok] 自检通过：wreader 0.1.0`、别名写进假 `~/.bashrc` |
+| 别名真的可用 | `env HOME=<假家> bash -ic 'source ~/.bashrc; wreader --version'` → `wreader 0.1.0` |
+| 幂等（同一 HOME 跑两次） | 第二次 `[ok] 别名已存在`，`grep -c 'alias wreader='` 仍为 **1** |
+| `--no-alias` | exit 0，且假 HOME 里**没有任何 rc 文件** |
+| `--dev` | exit 0，`pytest 9.1.1` 已满足 |
+| `--help` / `sh install.sh --help` | 均 exit 0（后者靠 `exec bash` 转交） |
+| 错误参数 `--bogus` | exit 1 + 中文提示（`${arg}` 修好后的路径） |
+| 回归 | `pytest` **545 passed**；`npx pyright` **0/0**；`check_docs` **OK**；`check_doc_numbers` **ALL OK** |
+
+> ⚠️ 测试让仓库 `.venv` 的 pip 从 25.1.1 升到了 26.2.1（首版每次跑都升级 pip）；
+> 现已改成**只在新建 venv 时**升级，重复跑不再联网。测试全程用**假 HOME**，没碰真实 `~/.zshrc`。
+
+### 文档
+
+- `README.md` / `README.en.md`：安装节换成「三条命令」+ 参数表，原手动三步折进 `<details>`
+  （Windows 走这条）；「新开一个终端后怎么用 wreader」与 FAQ 改成"install.sh 已配好别名，
+  只需 `source` 或重开终端"；`PATH` 警告旁补一句"install.sh 也守着这条"；项目结构加 `install.sh`。
+- `使用指南.md`：第 2 步改成 `git clone` 为主 / ZIP 为辅；第 3 步改成 `./install.sh` 一条命令
+  （打印样例照抄真实输出），手动四步折进 `<details>`；速查卡、报错急救表（+2 行：
+  `Permission denied`、`需要 Python 3.11 或更高版本`）、术语小词典（+「一键安装脚本」）、
+  「关掉终端之后」（顶部加"可跳过"提示）全部同步。
+- 顺带修掉一个目录锚点：`#第-3-步安装4-条命令` → `#第-3-步安装一条命令`
+  （**`tools/check_docs.py` 抓出来的**，说明这个守卫真的在干活）。
+
 ## 待办 / 下一步
 
 按优先级（本会话已完成的"git 化"一项已移除，序号整体前移）：
@@ -532,6 +590,9 @@ wreader read f1ba2379642f
 6. 可选（产品取舍，先问再做）：`wreader continue` 只"列 id"，不做交互选择。
    若哪天想省掉"抄 id"这一步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+
    无参时续读最近一本 —— 但那会让程序替用户猜要读哪本，需先确认。
+7. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照
+   README 的手动步骤来（`pip install -e ".[windows]"` + 在 `$PROFILE` 里加函数）。
+   要补的话就写一个 `install.ps1`，做同样六件事（PowerShell 版的别名是 function 而不是 alias）。
 
 ## 已知会话级注意事项
 

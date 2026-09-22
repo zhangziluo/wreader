@@ -84,6 +84,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 路径 | 说明 |
 | --- | --- |
 | `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
+| `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `wreader` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
 | `tests/` | 8 个测试文件（含 `conftest.py`），545 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
@@ -99,6 +100,11 @@ Windows 数据目录：`%APPDATA%\wreader`。
 ## 常用命令
 
 ```bash
+# 安装（别的机器上复现时用；install.sh 幂等，重复跑安全）
+git clone https://github.com/zhangziluo/wreader.git && cd wreader && ./install.sh
+./install.sh --dev                            # 额外装 pytest（要跑测试时）
+./install.sh --no-alias                       # 不改 ~/.bashrc / ~/.zshrc
+
 # 启动（新终端里 `wreader` 来自 ~/.zshrc 的别名，见「开发环境」一节）
 wreader --version                             # wreader 0.1.0
 .venv/bin/wreader list                        # 没配别名 / 没激活 venv 时的等价写法

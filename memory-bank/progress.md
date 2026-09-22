@@ -11,7 +11,7 @@
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
 | 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2279** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**40 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**41 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
 | 编译 | `py_compile` 全部 **23 个** .py 通过（wreader 8 + tests 8 + tools 7） |
 | 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过 |
@@ -80,6 +80,11 @@
 - 旧数据目录 `~/.nr` 首次运行时整体搬迁到 `~/.wreader`。
 
 ### 工程质量
+- **一键安装脚本 `install.sh`**（2026-09-22 新增，**219 行** bash）：`git clone` → `cd` → `./install.sh`
+  三条命令装完。脚本幂等（用 `-x .venv/bin/python` 判断 venv 是否可用，坏了会重建；别名按行判重不重复追加），
+  全程用 `.venv/bin/python -m pip` 而**不 activate**（守住"不污染 PATH"这条约定），
+  并自动往 `~/.bashrc` / `~/.zshrc` 写别名 —— 装完重启终端即可用。
+  选项：`--dev`（多装 pytest）/ `--no-alias`（不碰 rc）/ `--help`；用 `sh install.sh` 跑会自动 `exec bash` 转交。
 - 474 → **545** 项自动化测试（全离线、每测试独立 `tmp_path`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
 - `wreader/` 8 个 + `tests/` 8 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
@@ -171,3 +176,4 @@
 | **2026-09-22** | `reader.page_height` 降级为"拿不到终端尺寸时的回退值" | 翻页基准改成真实正文区高度后它不再参与真实路径；保留它是为了不破坏旧配置与既有测试，但文档必须讲清楚它已不是翻页基准 |
 | **2026-09-22** | 屏顶坐标升级为 `(源行号, 段内偏移)`：`Pager.line_offset` 只作**显示态**，`current_line` 仍只写源行号 | 只记源行号时，一屏中途被折行截断的"半截段落"在下一页会被整个跳过（现象：段落突然少了半页）。改成两元组后长段落能被一屏一屏完整读完。**不落库**是为了守住「行号坐标唯一」这条硬约束（书签 / 章节 / 翻译缓存都依赖它），代价是重开书从行首开始 |
 | **2026-09-22** | 新增 `wreader continue` 列"最近打开阅读的三本书" | 用户诉求是「重启之后一到两行就能开 wreader 看书」：原先必须 `wreader list` 找 id 再 `wreader read`。`progress.last_read` 其实**早就在退出阅读器时写好了**，缺的只是一个入口。**故意只"列 id"、不自动打开第一本** —— 最近读的不一定是此刻想读的，程序不该替用户猜；而且"列 id + 抄 id"正好就是用户要的「一到两行」 |
+| **2026-09-22** | 新增 `./install.sh`，把安装压成「三行命令」（clone → cd → install.sh） | 用户诉求：简化安装流程。原先要 `venv` → `activate` → `pip install -e .` 三步，且"重启后能用 wreader"还得**另外**配别名（散在两节文档里）。脚本把这些串成**一条幂等命令**。别名写入做成**自动但可跳过**（`--no-alias`），而不是不做 —— 用户明确选了"自动写入、装完重启即可用"；同时保留"手动安装"作为 Windows / 脚本跑不动时的退路 |
