@@ -39,6 +39,8 @@ wreader --version                # wreader 0.1.0
   数据（`~/.wreader`、`~/novels`）与 `.venv` 无关，所以换环境不会丢书和进度。
   没有别名时的两种等价写法：`.venv/bin/wreader ...`，或
   `cd <项目> && source .venv/bin/activate` 之后再敲 `wreader`。
+  这三种办法与"为什么新终端找不到 wreader"已写进面向用户的文档
+  **《使用指南.md》的「关掉终端之后：下次怎么打开 wreader」一节**（2026-09-22）。
 
 ## 环境变量
 
