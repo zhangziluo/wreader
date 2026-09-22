@@ -45,9 +45,13 @@
   **纯函数 + 普通数据**，可脱离终端单独测试或复用。
 - **测试纪律**：绝不联网（翻译走注入的 `RecordingBackend`）、绝不碰真实数据
   （autouse fixture 把 `$WREADER_HOME`/`$WREADER_NOVELS_DIR` 指向 `tmp_path`）。
-- **静态检查**：`npx pyright` 必须 **0 errors / 0 warnings**（`wreader/` 与 `tests/` 都纳入）。
+- **静态检查**：`npx pyright` 必须 **0 errors / 0 warnings**（`wreader/`、`tests/`、`tools/` 都纳入）。
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
-  保留原有 docstring 与英文注释。2026-09 起全仓 16 个 Python 文件已统一。
+  保留原有 docstring 与英文注释。
+  ⚠️ **实测校正（2026-09-22）**：这条目前是**目标**而非既成事实 ——
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻注释行
+  （`reader.py` 357 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
+  实际遵循的风格是"一段逻辑配一段中文注释"。
 
 ## 明确的非目标
 

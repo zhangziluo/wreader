@@ -1,0 +1,91 @@
+# tools/ —— 开发期的校验脚本
+
+这些脚本**不参与打包**（`[tool.setuptools.packages.find]` 只收 `wreader*`），也不需要额外安装。
+用项目虚拟环境里的 Python 跑就行：
+
+```bash
+source .venv/bin/activate       # 或者直接用 .venv/bin/python 调
+python tools/check_docs.py
+```
+
+它们都从 `__file__` 推算仓库根目录，所以**在哪个目录下运行都可以**。
+除 `verify_colors.py` 需要 pty（退出码含义见下）外，其余脚本统一是
+**0 = 通过、1 = 发现问题**，可以直接接到 CI 上。
+
+| 脚本 | 检查什么 | 退出码 |
+| --- | --- | --- |
+| `check_docs.py` | Markdown 的文内锚点能否解析、代码围栏是否配对 | 0 / 1 |
+| `check_doc_numbers.py` | README 里写的源码行数、测试项数是否与真实情况一致 | 0 / 1 |
+| `check_comments.py` | 有没有「上方没有紧邻注释行」的逻辑语句（默认只报告） | 见下 |
+| `verify_wrap.py` | `reader._wrap_line` 折行：不超宽、不丢字符、不产空行（约 4 万次属性检查） | 0 / 1 |
+| `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 × 3 视图 = 420 组） | 0 / 1 |
+| `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
+
+## 逐个说明
+
+### `check_docs.py`
+
+```bash
+python tools/check_docs.py              # 检查仓库根下所有 .md
+python tools/check_docs.py README.md    # 只检查一个文件
+```
+
+锚点规则照 GitHub：小写 → 丢掉标点（保留字母 / 数字 / 下划线 / 连字符 / CJK）→ 空格换连字符。
+新增章节、改标题之后顺手跑一下，就不会留下点不动的目录链接。
+
+### `check_doc_numbers.py`
+
+```bash
+python tools/check_doc_numbers.py
+```
+
+把 `README.md` / `README.en.md` 的「项目结构」里写的「（N 行）」与「N 项」，
+跟**真实文件行数**、**pytest 实际收集数**逐项对拍。改了代码就顺手跑一次，防止文档悄悄过期。
+
+> 注意：它内部会调用 pytest 来数测试项，所以**不要**把它放进 `tests/` 当测试跑（会递归）。
+
+### `check_comments.py`
+
+```bash
+python tools/check_comments.py              # 只报告 wreader/ 与 tests/
+python tools/check_comments.py --strict     # 有遗漏就返回退出码 1
+python tools/check_comments.py --strict wreader/vocab.py   # 限定文件，适合逐个改善
+```
+
+项目约定「每条逻辑语句上方都要有一行口语化中文注释」，但**这是个很严的字面规则**：
+2026-09-22 实测 `wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻注释行
+（`reader.py` 357、`translator.py` 189、`library.py` 163 …）。
+所以默认模式**只报告、不判定**；要拿它当门禁就加 `--strict`，并配合文件参数一次啃一个。
+
+> ⚠️ 历史坑：这个脚本早先的版本把 `tokenize.NEWLINE` 也放进了「跳过」集合，
+> 于是「一条语句结束」这个信号永远不会触发，**每个文件只检查了第 1 行**，
+> 却一直输出 `TOTAL: 0` —— 一个假绿的检查。2026-09-22 修正后才看到真实数字。
+
+### `verify_wrap.py`
+
+```bash
+python tools/verify_wrap.py     # 期望输出：OK: 40077 checks passed
+```
+
+固定随机种子的属性检查（约 4 万次），专治「汉字占 2 列」这类宽度 bug。
+断言里带着原文与宽度，出问题能原地复现。
+
+### `verify_draw.py`
+
+```bash
+python tools/verify_draw.py     # 期望输出：OK: 420 draw checks passed
+```
+
+用记录型假窗口接住每次 `addstr`，断言「起始列 + 显示宽度 ≤ 终端宽度」。
+真实 curses 对越界写入会报错、而阅读器会把错误吞掉 —— 后果是**整行文字静默消失**，
+所以这条断言很值钱。改 `_draw` / 状态栏 / 折行之后务必跑它。
+
+### `verify_colors.py`
+
+```bash
+script -q /dev/null python tools/verify_colors.py && cat /tmp/wreader_colors.txt
+```
+
+必须借 `script` 开一个 pty（macOS / Linux 自带；Windows 请另找办法），
+结果写进文件是为了不让终端转义序列污染输出。它验证「背景跟随终端主题 / 透明」的前提：
+`_init_colors()` 不抛异常、`use_default_colors()` 之后 `-1` 默认色对可用、`A_NORMAL` 不带颜色位。

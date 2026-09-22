@@ -54,7 +54,7 @@ addopts = "-q --strict-markers"
 # NOTE: the Pylance extension ignores [tool.pyright] -- VS Code is pointed at the
 # same virtualenv through .vscode/settings.json instead.
 [tool.pyright]
-include = ["wreader", "tests"]
+include = ["wreader", "tests", "tools"]
 exclude = [".venv", "build", "dist", "*.egg-info"]
 pythonVersion = "3.11"
 venvPath = "."

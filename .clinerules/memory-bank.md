@@ -60,9 +60,14 @@
 - 除 `reader.py` 的 curses 前端与 `cli.py` 的输出渲染外，模块保持**纯函数 + 普通数据**。
 - 测试绝不联网、绝不碰真实数据；阅读器测试用 `FakeStdscr`，需要输入时 monkeypatch
   `reader._prompt` / `_confirm`。
-- `npx pyright` 保持 **0 errors / 0 warnings**。
+- `npx pyright` 保持 **0 errors / 0 warnings**（`wreader/`、`tests/`、`tools/` 都纳入）。
 - 每条逻辑语句上方保留一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"），
   同时保留原有 docstring 与英文注释。
+  ⚠️ **实测校正（2026-09-22）**：这条是**目标**，不是既成事实 ——
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻
+  注释行（`reader.py` 357、`translator.py` 189、`library.py` 163 …）。
+  早先记录的 "TOTAL: 0" 是脚本 bug 造成的假绿，别再引用它。
+  实务上遵循的是"一段逻辑配一段中文注释"的风格，别执行到每条 `return` / `assert` 都单独加。
 
 ## 本项目的特殊提醒
 
@@ -80,6 +85,10 @@
 - **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会变成
   `-qq`，此时只输出 `文件: 数量`、不打印 `N passed`。想看到汇总就少加一个 `-q`。
 - **改动必须先实测验证**：跑 `py_compile`、`pytest tests/`、`npx pyright`；
-  涉及阅读器宽度/绘制时，还应跑 `/tmp/verify_wrap.py` 与 `/tmp/verify_draw.py`
-  （若这两个脚本已被系统清理，见 `progress.md` 待办 #3，考虑搬进仓库）。
+  涉及阅读器宽度/绘制时，还应跑 `tools/verify_wrap.py` 与 `tools/verify_draw.py`
+  （2026-09-22 已从 `/tmp` 搬进仓库，见 `tools/README.md`）。
+- **`tools/` 是开发期校验脚本的家**（不参与打包）：`check_docs.py`（文档锚点/围栏）、
+  `check_doc_numbers.py`（README 数字对拍）、`check_comments.py`（注释覆盖，默认只报告）、
+  `verify_wrap.py` / `verify_draw.py` / `verify_colors.py`。改完对应代码顺手跑一下，
+  它们都自己推算仓库根，在哪个目录运行都行，退出码 0 = 通过。
 - 会话结束前务必让 `activeContext.md` 反映真实现状，好让下个会话无缝接手。

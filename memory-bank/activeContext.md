@@ -179,13 +179,39 @@ def _init_colors() -> None:
 - 后果：`progress.md` 待办 #1 与 `activeContext.md` 待办 #1 都已标记完成；
   `techContext.md`、`memory-bank/README.md` 里"README 尚未同步"的提示也一并改掉了。
 
+### ⑪ 把 `/tmp` 里的校验脚本搬进仓库 `tools/`（+ 抓出一个假绿 bug）
+- **搬进来 6 个脚本 + 一份 `tools/README.md`**：`check_docs.py`（文档锚点/围栏）、
+  `check_doc_numbers.py`（README 数字对拍）、`check_comments.py`（注释覆盖）、
+  `verify_wrap.py`、`verify_draw.py`、`verify_colors.py`。
+- **统一改造**：都从 `__file__` 推算仓库根（**任意目录都能运行**，实测在 `/tmp` 下跑也 OK）；
+  退出码 0/1（可接 CI）；带逐行中文注释与类型标注；把 `tools` 加进 `[tool.pyright]` 的 include
+  （pyright 仍 **0 errors / 0 warnings**）。
+- ⚠️ **意外收获：原 `check_comments.py` 是个假绿的检查**。
+  它把 `tokenize.NEWLINE` 也放进了「跳过」集合，于是
+  「一条语句结束 → 下一条语句开始」这个判断**永远不会触发**，
+  `expect_new` 只在一开始为 True —— 结果是**每个文件只检查了第 1 行**。
+  实测对照：`wreader/cli.py` 里该函数只找到 **1** 个语句起点（第 1 行），
+  修正 NEWLINE 处理后找到 **405** 个。
+  也就是说，此前记录的「注释覆盖 TOTAL: 0 / 无遗漏注释的逻辑语句」**什么也没证明**。
+- **修正后的真实数字**：`wreader/` + `tests/` 共 **2054** 条语句上方没有紧邻注释行
+  —— `reader.py` 357、`translator.py` 189、`library.py` 163、`test_reader.py` 286、
+  `test_library.py` 158、`test_config.py` 135 …
+  （分布是合理的：表头 `table.add_column(...)` 一整组、函数里的 `return`/`assert` 一串，
+  通常共享一段块级注释，而不是每条都单独注释。）
+- **因此做了三处诚实校正**：`projectbrief.md` 的「注释规范」、`.clinerules/memory-bank.md` 的
+  同名约束、`progress.md` 的待办 —— 都把口径从「16 个文件已统一、TOTAL: 0」改成
+  「这是**目标**，实测还有 2054 条差距；实际风格是"一段逻辑配一段中文注释"」。
+  是否全量补齐、还是改成增量门禁，留作 `progress.md` 待办 #4 供拍板（我倾向不补齐）。
+- `check_comments.py` 因此**默认只报告不判定**（否则 CI 直接全红），
+  要门禁就加 `--strict`，并可配合文件参数一次啃一个。
+
 ## 本会话的验证证据（全部通过）
 
 | 检查 | 结果 |
 | --- | --- |
 | `py_compile wreader/*.py tests/*.py` | 通过 |
 | `pytest tests/` | **494 passed**（426→474 基线 + 本会话新增 20） |
-| `/tmp/check_comments.py`（16 个文件） | **TOTAL: 0**（无遗漏注释的逻辑语句） |
+| ~~`/tmp/check_comments.py`（16 个文件）~~ | ~~**TOTAL: 0**（无遗漏注释的逻辑语句）~~ ⚠️ **此条已作废**：该脚本是假绿的，真实数字是 **2054**，见 ⑪ |
 | `npx pyright` | **0 errors, 0 warnings, 0 informations** |
 | `/tmp/verify_wrap.py` | **40,077** 次随机属性检查：不丢字符、不超宽、不产生空行 |
 | `/tmp/verify_draw.py` | **420** 次绘制检查（10~120 列 × 4~40 行 × 3 视图）：任何 `addstr` 都不越界，状态栏两行必有内容 |
@@ -218,6 +244,13 @@ def _init_colors() -> None:
 | `/tmp/check_guide.py` 跑三份文档 | `README.md` 68 / `README.en.md` 68 / `使用指南.md` 84 围栏行（均偶数），**MISSING 锚点：无** → 三份都 `RESULT: OK`（含新增的两处章节锚点） |
 | 旧数字全面复查 | `474` / `811 行` / `826 行` / `1048 行` / `1412 行` / `298 行` / `655 行` / `779 行` / `95 项` / `16 行` / `六条` 在 README 两版里 **0 命中** |
 | 回归（纯文档改动，代码未动） | `pytest` → **494 passed in 4.65s**、`pyright` → **0 errors, 0 warnings** |
+| 旧 `check_comments.py` 的 bug 对照实验 | 同一实现逻辑对 `wreader/cli.py`：**旧版只找到 1 个语句起点**（第 1 行），修正 `NEWLINE` 处理后找到 **405 个** → 旧检查是假绿 |
+| 修正后全量注释覆盖 | `tools/check_comments.py` → **TOTAL: 2054**（旧脚本报的是 0） |
+| 6 个脚本逐个实跑 | `check_docs` → `RESULT: OK`（3 个文档）；`check_doc_numbers` → `ALL OK`；`verify_wrap` → `OK: 40077 checks passed`；`verify_draw` → `OK: 420 draw checks passed`；`verify_colors`（真 pty）→ `has_colors=True` / `COLORS=256` / `default colour pair usable: yes (-1/-1)` |
+| 退出码核对（不经管道，避免取到 `tail` 的退出码） | 报告模式 `0`；`--strict` 有遗漏时 `1`；`check_docs` / `check_doc_numbers` 通过时 `0` |
+| 换目录运行（`cd /tmp` 后跑绝对路径） | `verify_draw` 420、`check_docs` OK、`check_doc_numbers` ALL OK → 仓库根自解析有效 |
+| `npx pyright`（include 加入 `tools` 之后） | **0 errors, 0 warnings, 0 informations** |
+| `pytest tests/` | **494 passed in 3.15s**（`tools/` 不在 testpaths 里，不会被当测试收集） |
 
 ## 本会话新增的测试（20 项，全在 `tests/test_reader.py`）
 
@@ -246,7 +279,7 @@ def _init_colors() -> None:
 按优先级（本会话已完成的"git 化"一项已移除，序号整体前移）：
 
 1. ~~更新 `README.md` 的过期内容~~ → **已完成（2026-09-22）**，详见下方 ⑩；
-   两份 README 的数字都用 `/tmp/verify_readme_numbers.py` 逐项核过（`ALL OK`）。
+   两份 README 的数字都用 `tools/check_doc_numbers.py` 逐项核过（`ALL OK`）。
 2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
    `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
 3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。

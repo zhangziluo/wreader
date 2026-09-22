@@ -25,8 +25,12 @@
 ## 本目录现状
 
 - 建立于 **2026-09-22**，由当时的会话依据实际代码与测试结果生成。
-- 数据来源：源码实测行数、`pytest --collect-only`、`npx pyright` 输出、
-  `/tmp/check_comments.py` 覆盖检查，以及 `README.md` / `使用指南.md` 中仍然有效的部分。
+- 数据来源：源码实测行数、`pytest --collect-only`、`npx pyright` 输出，
+  以及 `README.md` / `使用指南.md` 中仍然有效的部分。
+- ⚠️ **一处已作废的证据**：建库时用作"注释覆盖"依据的 `/tmp/check_comments.py`
+  后来被发现是**假绿**的（每个文件只检查第 1 行，见 `activeContext.md` ⑪），
+  所以早期"16 个文件注释全覆盖"的说法**不再成立**。
+  现行口径与处置见 `projectbrief.md` 的「注释规范」与 `progress.md` 待办 #4。
 - **已同步（2026-09-22）**：`README.md` / `README.en.md` / `使用指南.md` 三个文档的数字与内容
   都已跟上实际代码（源码行数、494 项测试、以及"新终端怎么打开"一节）。
   校验手段见 `techContext.md`「当前测试规模」一节的说明。

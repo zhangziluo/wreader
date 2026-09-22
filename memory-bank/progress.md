@@ -9,7 +9,7 @@
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
 | 测试 | **494 passed**，全离线、不碰真实数据，约 4~7 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations** |
-| 注释覆盖 | `/tmp/check_comments.py` 对 16 个 Python 文件 → **TOTAL: 0** |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2054** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，37 KB）、`README.en.md`（40 KB）、`使用指南.md`（31 KB） |
 | 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），首个提交 `7ecc3eb` |
 | CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
@@ -68,7 +68,9 @@
 - 474 → **494** 项自动化测试（全离线、每测试独立 `tmp_path`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置。
 - 16 个 Python 文件**逐条逻辑语句上方都有口语化中文注释**（2026-09）。
-- 三个临时校验脚本（存于 `/tmp`）：`check_comments.py`、`verify_wrap.py`、`verify_draw.py`。
+- 校验脚本已从 `/tmp` 搬进 **`tools/`**（2026-09-22）：`check_docs.py`、`check_doc_numbers.py`、
+  `check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py` + `tools/README.md`。
+  统一从 `__file__` 推算仓库根（任意目录可跑）、退出码 0/1（可接 CI），并纳入 `[tool.pyright]`。
 - **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
   `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
   从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
@@ -88,17 +90,27 @@
 2. **实现 `reader.theme`**（当前是预留项，改了没效果）：在 `_init_colors()` 之后
    按主题 `init_pair()`，并把正文/状态栏/书签/高亮的属性改为 `color_pair(N) | A_*`。
    注意保持 `use_default_colors()` 带来的透明背景能力（正文背景建议用 `-1`）。
-3. **把 `/tmp` 里的校验脚本搬进仓库**（如 `tools/` 或 `tests/`），`/tmp` 会被系统清理。
-   其中 `check_comments.py`（注释覆盖）可以直接变成一条 CI 断言。
-   仓库已 git 化并推送到 GitHub，搬进来后就能真正挂 CI。
+3. ~~把 `/tmp` 里的校验脚本搬进仓库~~ → **已完成（2026-09-22）**：6 个脚本住进 `tools/`
+   （`check_docs.py` / `check_doc_numbers.py` / `check_comments.py` /
+   `verify_wrap.py` / `verify_draw.py` / `verify_colors.py`），外加 `tools/README.md`。
+   全部改成从 `__file__` 推算仓库根（任意目录可运行）、退出码 0/1（可接 CI），
+   并把 `tools` 加进了 `[tool.pyright]` 的 include。
+   ⚠️ 过程中发现一个**旧脚本的 bug**，见 #4。
 
 ### 低优先级
-4. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
-5. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
+4. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，需要拍板）：
+   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **2054** 条不满足
+   （`reader.py` 357、`translator.py` 189、`library.py` 163 …）。三个选项：
+   (a) 把约定口径改成"一段逻辑配一段中文注释"，不再声称 100%
+   —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条）；
+   (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
+   (c) 全量补齐 2054 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
+5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
+6. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
    但只能手改 `library.json` 才能加标签。
-6. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
+7. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
    因为消费方都用 `int(...)` 兜住），但不会被自动改回数字。可考虑在 `save_library` 时规整。
-7. 译文缓存文件名固定 `_en` 后缀是历史包袱（容器里装的是 `target_language` 的结果），
+8. 译文缓存文件名固定 `_en` 后缀是历史包袱（容器里装的是 `target_language` 的结果），
    未来若加 `zh-CN` 以外目标语言可考虑改名为 `ch{N}_<lang>.txt`，但需要迁移逻辑。
 
 ## 已知问题（当前版本真实限制）
@@ -131,3 +143,6 @@
 | **2026-09-22** | `git init -b main` + 首个提交 `7ecc3eb`，推送到 GitHub `zhangziluo/wreader` | 补上版本控制：注释改造这类大范围改动此后可用 `git diff` 证明，并具备回退能力 |
 | **2026-09-22** | `.gitignore` 忽略 `book/` | 367 MB 真实电子书样例，单文件最大 147 MB 超 GitHub 单文件 100 MB 上限，且不属于分发包 |
 | **2026-09-22** | 远端走 HTTPS 而非 SSH | 本机 SSH key 未注册到 GitHub，而 Keychain 里已有 `github.com` 凭证，HTTPS 零交互可推 |
+| **2026-09-22** | 校验脚本从 `/tmp` 搬进 `tools/`，并纳入 `[tool.pyright]` | `/tmp` 会被系统清理；进仓库才可能挂 CI、也才有人看得见 |
+| **2026-09-22** | 把"注释全覆盖"从**事实**改成**目标**（口径：一段逻辑配一段中文注释） | 严格测量发现 `wreader/`+`tests/` 还有 2054 条差距；早先的 `TOTAL: 0` 是脚本 bug 造成的假绿，留着旧说法会误导下个会话 |
+| **2026-09-22** | 文档（README / 使用指南）开始有**自动守卫**：锚点、数字都有脚本对拍 | 手写数字必然漂移，这次就一次抓到 6 处陈旧数字 |

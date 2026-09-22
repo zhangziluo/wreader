@@ -29,6 +29,8 @@
 - [开发说明](#开发说明)
 - [常见问题](#常见问题)
 - [已知问题](#已知问题)
+- [许可](#许可)
+- [相关文档](#相关文档)
 
 ---
 
@@ -625,6 +627,7 @@ wreader/
 ├── README.md                中文说明（本文件）
 ├── README.en.md             English README
 ├── 使用指南.md               小白手把手教程（第一次用看这个）
+├── tools/                   开发期校验脚本：文档锚点/数字对拍/折行/绘制/配色（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（18 行）
@@ -711,6 +714,22 @@ pytest -k "streak or heatmap" -q          # 按名字筛选
 - **不需要终端**：阅读器用 `tests/test_reader.py` 里的 `FakeStdscr`（实现了阅读器真正用到的那部分
   curses API）；需要输入的地方 monkeypatch `wreader.reader._prompt` / `_confirm`。
   唯一"注定失败"的路径是 `open_reader` 的 tty 检查，正好拿来断言那条报错。
+
+### 其它校验脚本
+
+`tools/` 下还有几个开发期用的检查（**不参与打包**）。改完对应代码顺手跑一下：
+
+```bash
+python tools/check_docs.py            # 文档锚点与代码围栏（改过 README / 使用指南 之后）
+python tools/check_doc_numbers.py     # README 里的行数、测试项数是否还和代码一致
+python tools/check_comments.py        # 注释覆盖情况（默认只报告；加 --strict 才是门禁）
+python tools/verify_wrap.py           # 折行属性（期望 OK: 40077 checks passed）
+python tools/verify_draw.py           # 绘制不越界（期望 OK: 420 draw checks passed）
+script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
+```
+
+它们都自己推算仓库根目录，所以**在哪个目录下运行都行**；退出码 0 = 通过、1 = 有问题。
+详见 [tools/README.md](tools/README.md)。
 
 ---
 

@@ -29,6 +29,7 @@ the next launch resumes exactly where you stopped.
 - [FAQ](#faq)
 - [Known issues](#known-issues)
 - [License](#license)
+- [Related documents](#related-documents)
 
 ---
 
@@ -659,6 +660,7 @@ wreader/
 ├── README.md                中文说明 (Chinese)
 ├── README.en.md             this file
 ├── 使用指南.md               step-by-step beginner guide (Chinese only)
+├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
 │   ├── __init__.py          __version__ and the module map (18 lines)
@@ -749,6 +751,23 @@ A few conventions the suite follows, which are worth knowing before you change c
   which implements exactly the slice of the curses API the reader touches, and the keys that would
   prompt for input have `wreader.reader._prompt` / `_confirm` monkeypatched. The one path that *must*
   fail — `open_reader`'s tty check — is asserted as an error.
+
+### Other check scripts
+
+`tools/` holds a few development-time checks (**not shipped in the package**). Run the relevant
+one after changing the matching code:
+
+```bash
+python tools/check_docs.py            # doc anchors and code fences (after editing README / 使用指南)
+python tools/check_doc_numbers.py     # are the line/test counts in the READMEs still true?
+python tools/check_comments.py        # comment coverage (report only; add --strict to gate)
+python tools/verify_wrap.py           # wrapping invariants (expects OK: 40077 checks passed)
+python tools/verify_draw.py           # nothing drawn past the edge (expects OK: 420 draw checks passed)
+script -q /dev/null python tools/verify_colors.py   # colours (needs a pty)
+```
+
+Each one works out the repository root itself, so it can be run from any directory;
+exit code 0 = pass, 1 = something to look at. See [tools/README.md](tools/README.md).
 
 ---
 
