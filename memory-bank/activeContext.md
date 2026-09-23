@@ -1288,4 +1288,6 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
   只能 `pkill git-remote-https`）—— 直连 GitHub 在这台机器上是不通的，
   所以**别把"绕过代理"当成万能解**。判据：先
   `curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x http://127.0.0.1:7897 https://github.com`，
-  200 才推得动；两个提交留在本地也不影响任何验证（测试/pyright/工具全离线可跑）。
+  返回 200 就能推（代理一开，`git push` 立刻成功）。
+  反过来，**代理没开也不会挡住任何验证工作**：测试、`pyright`、`tools/` 全部离线可跑，
+  提交先留在本地、等代理起来再推即可。
