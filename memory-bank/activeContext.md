@@ -9,10 +9,11 @@
 （`main` 跟踪 `origin/main`）。
 ⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3164** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
-⚠️ IDE 里还飘着**幽灵告警**（现已两见）：`cli.py:24: 未定义"Optional"`（㉔）与
-`cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`（㉕）。实测**都无法复现**，
-来源是仓库根那个野生 `cli.py`（㉒ 坑 #1 里 `editor` 假成功写出的**143 行**碎片，早已删除）留下的
-陈旧诊断 —— 下次再看到**别去改代码**，先 `ls` 报错指向的那个路径。
+⚠️ IDE 里飘的**幽灵告警已侦破**（同一份 **143 行**野生 `cli.py` 碎片，见 ㉔ / ㉕）：
+`cli.py:24: 未定义"Optional"` 与 `cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`
+都出自它。⚠️ 且它**会回来**：2026-09-23 本次会话中途（15:20）它被 IDE 写回了仓库根，
+已读完对账并**再次删除**（`wreader/cli.py` **一行未改**）。
+再看到时照 ㉕ 的判据走：**先 `ls` 报错指向的那个路径**，别照报错改代码。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
@@ -923,11 +924,13 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 **它还会在 IDE 里留下指向不存在文件的告警**。以后看到"某文件某行未定义 X"，
 先 `ls` 那个路径、再 `grep` 真实文件，**别直接照报错改代码**。
 
-### ㉕ 第二次幽灵告警：`cli.py:143` 返回类型 `int` —— 还是那份野生碎片，零代码改动（2026-09-23）
+### ㉕ 第二次幽灵告警：`cli.py:143` 返回类型 `int` —— 碎片自己现身，删掉即可（2026-09-23）
 
 **报告**：Pylance 说 `cli.py` 第 143 行「所声明的返回类型为"int"的函数必须在所有代码路径上返回值；
-`None` 不可分配给 `int`」。**结论：现盘代码没有这个错误** —— 报错对象**仍是** ㉒ 坑 #1 / ㉔ 里那份
-**仓库根的野生 `cli.py`**（**143 行**、当时已删），路径是工作区根，**该文件不存在**。
+`None` 不可分配给 `int`」。**结论：`wreader/cli.py` 一行都没错**；报错对象是 ㉒ 坑 #1 / ㉔ 里那份
+**仓库根的野生 `cli.py`** —— 而它**在这次会话中途（15:20）自己回到了磁盘上**（IDE 把陈旧的脏缓冲区落了盘），
+于是"路径不存在、告警无法复现"这次变成了"**文件真在、告警名副其实**"。
+**已逐行读完、对账、再次删除**（原件留了一份在 `/tmp/ghost_cli_fragment_143lines.py` 供本会话追溯）。
 
 **本次实测证据**：
 
@@ -941,27 +944,56 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 | 143 行窗口扫描（脚本：在 `wreader/cli.py` 里找"相对第 24 行含 `Optional`、相对第 143 行是 `def … -> int:`"的窗口） | **0 命中** —— 碎片**不是**现盘文件的连续切片（它是编辑中途的 `new_text`，行号无法用现文件复原） |
 | VS Code `workspaceStorage/cdd18f67a9633099378310d8bbff10f6/state.vscdb`（**先 `cp` 到 `/tmp` 再用 `sqlite3` 读**，不锁真库） | **搜到该路径 3 处痕迹**：`history.entries`（`file:///…/wreader/cli.py`，`"forceFile":true`）、`memento/workbench.parts.editor`、`memento/workbench.editors.files.textFileEditor` |
 
-**为什么能指认"最后一行的函数头"**：`textFileEditor` 里那条记录的 `cursorState` 是
-**第 143 行、列 45–48、且处于选中态** —— 143 正好是那份碎片的**总行数**。列 45–48 落在
-`def xxx(args: argparse.Namespace) -> int:` 这种行的 `int:` 上（例：`cmd_read` 那一行共 47 列，
-45–47 = `nt:`，48 = 行尾之后的插入位）。把"143 = 文件最后一行"与"该行是带 `-> int` 的函数头"
-合起来只剩一种解释：**`editor` 那次长替换把文件截断在函数头处**，函数**没有函数体**，
-于是 Pylance 报"所有代码路径都必须 return"。症状与报错**逐字吻合**。
+**碎片真容（它是自己送上门的，所以下面全是实测，不再靠推测）**：
+
+| 检查 | 结果 |
+| --- | --- |
+| 行数 / 体积 | **143 行 / 5860 字节**，第 **143 行就是最后一行** |
+| 第 **143** 行 | `def cmd_config(args: argparse.Namespace) -> int:` —— **光有函数头、没有函数体**（文件到此截断）→ 与"所有代码路径都必须 return"**逐字吻合** |
+| 第 **24** 行 | `def _choose_translate_engine(current: str) -> Optional[str]:` —— 用了 `Optional` 而整个碎片**一行 import 都没有** → 与 ㉔ 的"`Optional` 未定义"**逐字吻合** |
+| 有没有 import | **0 行**（`grep -n '^import\|^from'` 无输出）。连 `console` / `config` / `translate` 都没导入，**根本不可能跑起来** |
+| 与 `wreader/cli.py` 的关系 | 它是 **`wreader/cli.py` 第 404–546 行那一段的"早期草稿"**：121 行非空行中 **94 行与现盘逐字相同**，余 27 行是同一批函数的**旧写法**（例：`values[key] = answer if answer else existing` vs 现盘 `_prompt_line(label, default)`；`return names[index - 1] if 1 <= index <= len(names) else None` vs 现盘的 if / return 两行；docstring 措辞也不同） |
+| 由此推断 | 因为它是**草稿**而不是现盘文件的切片，上表那条"143 行窗口扫描 **0 命中**"正是**期望结果**，不构成矛盾 |
+| `git status` 里的样子 | **`?? cli.py`** —— 协议要求每次收尾看 `git status`，这次就是靠它抓到的；`git check-ignore` 显示它**不**被忽略 → 一个 `git add -A` 就会把垃圾提交进去 |
+| 有没有人引用它 | `grep -rn 'import cli' tests tools` 只命中 `tests/test_cli.py: from wreader import cli, …` —— **根目录这个无人引用** |
+
+**它为什么会在 15:20 回来**：`textFileEditor` 里那条 `cursorState`（第 143 行、列 45–48、选中态）
+说明 IDE 一直把它当"打开着的文件"记着；窗口一旦把脏缓冲区落盘，它就又出现在仓库根。
+**所以关掉那个标签页（或 Reload Window）才算真的清完** —— 光删磁盘文件会被它再写回来。
+
+⇒ **同一个碎片解释了两次幽灵告警**：第 24 行缺 `Optional` 是 ㉔，最后一行缺函数体是 ㉕。
+㉔ 当初"症状逐字吻合"的推断，这次拿到了实物证据。
 
 **㉔ 的一处更正**：㉔ 写"`workspaceStorage` 里已搜不到该路径的痕迹"，**现在搜得到**（见上表）。
 判据：`grep -rl 'Downloads/wreader/cli.py' ~/Library/Application\ Support/Code/User/{workspaceStorage,History} .../Backups`
 命中 `state.vscdb`。所以那条陈旧诊断**不只在当时的 Pylance 内存里** ——
 编辑器的"最近打开 / 标签页视图状态"也在把它一遍遍带回来。
 
-**给用户的处置（零代码改动）**：关掉那个指向仓库根 `cli.py` 的标签页，然后
-**Developer: Reload Window**（或 `Python: Restart Language Server`）。
-若关掉后还自动恢复，就**完全退出 VS Code**（关窗口不等于退出），
-那条 `state.vscdb` 记录才会随状态落盘消失。
+**处置（本次已执行 = 这次"修 bug"的全部动作）**：`rm cli.py` 删掉那份碎片。
+**`wreader/cli.py` 一行都不用改** —— 碎片里的东西在那份文件里都有，而且是更成熟的一版
+（碎片从未被任何人 import，删除不影响任何行为）。
+⚠️ 但**只删磁盘文件不够**：IDE 那个标签页还会把它写回来（15:20 就是这么发生的），
+所以还要在 IDE 里**关掉那个标签页 + Developer: Reload Window**
+（或 `Python: Restart Language Server`）。若还自动冒出来，就**完全退出 VS Code**（关窗口 != 退出）。
 
-**教训（同一个坑累积到第二次）**：文案换了、行号变了，**判据没变** ——
-「**报错指向的文件不存在**」比「报错的文案像不像真问题」可靠得多：
-先 `ls` 报错路径，再 `git log/ls-files` 看它有没有进过版本库，最后才轮到看代码。
-项目侧的答案始终是 `npx pyright` + `pytest` 双绿。
+**实测证据（删完之后复跑）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `git status --short --branch` | 只有 `## main...origin/main`，**无未跟踪文件** |
+| `npx pyright`（全仓） | **0 errors / 0 warnings / 0 informations** |
+| `pytest tests/` | **654 passed** |
+
+**教训（同一个坑累积到第二次，这次钉死）**：
+1. 「**报错指向的文件是不是真的存在**」永远先查，**而且别只查一次**：
+   本次 15:18 查是"不存在"，15:20 它就被 IDE 写回来了 —— **下结论前重查一遍**。
+2. 幽灵告警的"文案像不像真问题"完全不可信：**同一条 143 行碎片**先后产出两种看起来都很像
+   真问题的告警（`Optional` 未定义 / 返回类型不匹配），先后骗过两次。
+3. 判据优先级：`ls` 报错路径 → `git ls-files` / `git status` 看它有没有进版本库 → **最后**才看代码；
+   项目侧的答案永远是 `npx pyright` + `pytest` 双绿。
+4. **`git status` 是抓这类幽灵的唯一有效手段**（碎片是未跟踪文件，只有它显示 `?? cli.py`）。
+   因此**故意没**给 `.gitignore` 加 `/cli.py`：那样反而会让它悄悄消失、下次没人发现。
+   宁可让它继续在 `git status` 里显形，同时**永不用 `git add -A`**。
 
 ## 待办 / 下一步
 
