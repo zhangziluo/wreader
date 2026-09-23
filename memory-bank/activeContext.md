@@ -4,11 +4,16 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`727 passed`、`pyright 0 errors / 0 warnings`、
-`tools/` 的 **9** 个校验脚本全绿（新增 `verify_translate.py`），且**已 git 化并推送到 GitHub**
-（`main` 跟踪 `origin/main`）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3819** 条语句上方没有紧邻注释行
-（见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
+代码库处于**干净、全绿**状态：`832 passed`、`pyright 0 errors / 0 warnings`、
+`tools/` 的 **10** 个校验脚本全绿（新增 `verify_achievements.py`，真 pty 19 项）。
+**成就 Phase 2/3 已交付**：实时按键 / 终端尺寸事件 + 屏内 5 秒通知 + 阅读器帮助页 `?` +
+意外中断恢复流程 + `wreader/geo.py` 与 `wreader/env.py`；成就总数 **28 → 48**（见 ㉙）。
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **4513** 条语句上方没有紧邻注释行
+（本次会话把代码从 12.5k 行加到 14.9k 行，缺口自然变大；口径与处置见 ⑪ 与 `progress.md` 待办 #4）。
+⚠️ 本次会话开头**工作区是脏的**：`wreader/{achievements,cli,notes,reader}.py` 与三个测试文件带着
+上一会话未提交的改动（标记模式 `t` 翻译选区 + 笔记记章节/译文 + 「笔记达人」成就），
+其中 `tests/test_notes.py` 有一处**语法错误**（`editor` 工具留的伤：docstring 首行被吞）。
+已修好并在 ㉙ 里记录，全部改动与本会话的工作一起提交（见 ㉙ 的"接手时的状态"）。
 ⚠️ IDE 里飘的**幽灵告警已侦破**（同一份 **143 行**野生 `cli.py` 碎片，见 ㉔ / ㉕）：
 `cli.py:24: 未定义"Optional"` 与 `cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`
 都出自它。⚠️ 且它**会回来**：2026-09-23 本次会话中途（15:20）它被 IDE 写回了仓库根，
@@ -23,7 +28,8 @@ README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻�
 **笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑）**、
 **可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**、
 **成就引擎 Phase 1：`wreader/achievements.py` 事件驱动 + 28 个成就 + `~/.wreader/achievements.json`（㉖）**、
-**笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` 落盘成 markdown + `werd notes` 三条路径（㉘）**。
+**笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` 落盘成 markdown + `werd notes` 三条路径（㉘）**、
+**成就 Phase 2/3：实时按键 / 屏内 5 秒通知 / 帮助页 / 中断恢复 / 地理 / 环境（㉙）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1090,14 +1096,118 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 4. `flock` **不可重入**（同进程不同 fd 也会等自己）→ 内部已有锁时只能调不加锁的 `_write_index`。
 5. 编辑区内容 `_save_note` 与"中文草稿"两条路要**共用一个 `_commit_note`**，否则清空逻辑会各写一遍。
 
+### ㉙ 成就 Phase 2/3：实时事件 + 屏内 5 秒通知 + `geo.py` / `env.py`（2026-09-23）
+
+**接手时的状态（重要）**：工作区是脏的，`git status` 有 8 个改动文件、且 **跑不了测试**。
+前一个会话留下的未提交工作是一整块完整的功能（本会话把它一并交付，并补了文档）：
+- 标记模式里新增 `t`：把选中的这一段**翻译**好、暂存成 `Pager.note_translation`，
+  之后按 `o` 写笔记时连着引用一起落盘（`notes.save_note(translation_text=...)`）；
+- 笔记开始记**章节**（`> 章节: 第一章`，`notes._CHAPTER_RE` 解析）与**译文**（`译文：` 块），
+  `werd notes <id>` 也跟着显示；
+- 新增成就「笔记达人」（`notes_count >= 50`，指标**现数 markdown**，
+  经 `notes.total_note_count()` + 延迟导入的 `notes.check_note_achievements()` 上报 `note_add`）；
+- ⚠️ 但 `tests/test_notes.py` 里 `test_concurrent_writes_do_not_lose_notes` 的 **docstring 首行被吞**，
+  文件成了语法错误（`SyntaxError: invalid character '：'`），`pytest` 直接 collection error。
+  这是 `editor` 工具超长替换的**第三次同款事故**（另两次见坑 #21 与 ㉔/㉕）。
+  **对策再强调一遍：大改动拆小块、改完 `py_compile` 或跑一次测试、收尾 `git status` 扫一遍。**
+
+**本次交付的功能（规格见 `progress.md` 待办 0b，那一段就是当时能拿到的全部规格）**：
+
+1. **`EVENTS` 白名单 +7**：`key` / `resize` / `help` / `recover` / `env` / `name_egg` / `achievements_view`
+   （`geo_change` 是 Phase 1 就留着的，这一轮才真的有人调用它）。
+   载荷约定：`key` / `resize` / `session_end` 带 `{"deltas": {...}, "maxima": {...}, "width", "height"}`，
+   增量按 `COUNTER_METRICS` 累加、峰值按 `MAX_METRICS` 取 max，**白名单之外的名字一律丢弃**
+   （不让手写的载荷往状态文件里塞新键）。
+2. **阅读器实时记账**（`Pager.note_key` / `note_chapter_change` / `note_width`）：
+   空格连击、连续翻页、方向键怀旧、翻译键次数、窄屏秒数与窄屏读完的章数。
+   换章结算挂在 `_sync_chapter()` 这个**唯一**的换章点上。
+3. **屏内 5 秒通知**（规格要求）：`Pager.announce/current_notice` + `_draw_notice`，
+   画在**右上角三行反白块**（标题 / 成就名 / 脚注），**非阻塞**——不拦按键、不开子窗口、
+   不像 `t` 的译文弹窗那样等用户关。窗口太小（< 24 列或 < 6 行）时退到消息行（`_message_row(notice=...)`）。
+4. **「不为每次按键写盘」的关键设计**：`achievements.metric_thresholds()` 把定义文件里的门槛
+   解析成 `{指标: (数, ...)}`，`_prepare_achievements()` 在开书时取一次**基线**
+   （`achievements.session_metrics`），并把这些线里**基线就已达标**的全部预标记成 `fired`。
+   之后 `_achievement_tick` 只做**纯内存判断**（`achievements.crossed_thresholds`），
+   **只有刚好越过某条线时才** `check_achievements()` 一次。没撞线的增量攒着，
+   退出时随 `session_end` 一次性交账 → 一次会话的写盘次数 = 越线次数（通常 0~2 次）。
+5. **阅读器帮助页 `?`**（帮助迷）：`_HELP_LINES`（纯数据）+ `help_lines()` + `_help_layout` +
+   `_draw_help` + `_help_overlay`（模态小循环，`↑↓/j/k` 滚动，`q`/`Esc`/`回车` 关闭）。
+6. **意外中断恢复**：`reader.write_marker/read_marker/clear_marker`，
+   现场 = `~/.wreader/reading_session.json`（书 id、行号、段内偏移、一行预览、时间、pid）。
+   `_run` 开头问一句（`_confirm(..., hint=_RECOVER_HINT)`，`_confirm` 因此多了可选参数），
+   `save_position()` 每次自动保存顺手刷新现场，`open_reader` 在**正常退出**时删掉它。
+   → 恢复大师（`crash_recovers >= 3`）/ 我反悔（`recover_declined >= 1`）。
+7. **`wreader/geo.py`**（343 行）：ip-api 免费接口 + **一小时缓存**（`~/.wreader/geo.json`）+
+   国家代码→大洲表（7 洲）+ 世仇组合（第一条是**英法**，百年战争的出处）+ 注入式 `fetcher` 接缝。
+   **离线是正常状态**：没网且没缓存就返回 `{}`，调用方按"这次不记"处理；
+   查询失败但缓存过期 → 用旧的。`stats.geo_lookup = false` 时**一步网络都不发**。
+8. **`wreader/env.py`**（183 行）：云主机 / WSL / tmux / 可编辑安装四个信号，
+   全部**可注入**（`env` 映射、`release` 串、`direct_url.json` 文本），所以测试不看本机。
+9. **成就 28 → 48**：新增 操作彩蛋 5（手速达人 / 翻页永动机 / 方向键怀旧 / 翻译狂魔 / 帮助迷）、
+   难度挑战 4（极限尺寸 / 窄屏挑战 / 恢复大师 / 我反悔）、隐藏 10（环游亚欧非美大洋 / 世界公民 /
+   百年世仇 / 节日读者 / 名字彩蛋 / 成就猎人 / 云端书虫 / 穿越子系统 / 套娃终端 / 开发者模式）
+   + 笔记达人（Phase 3 联动，见上）。
+   `category` 顺序变成 5 类：阅读习惯 / 操作彩蛋 / 数据积累 / 难度挑战 / 隐藏。
+10. **名字彩蛋**：`werd werd` / `werd word` / `werd --werd` 三写法都通（`_word_egg`）。
+    为此把子命令容器改成 `required=False`，并在 `main()` 里自己 `parser.error(...)`
+    ——**用法提示与退出码 2 与以前逐字一致**（`test_a_command_is_required` 没动也过）。
+11. **`werd achievements` 改用 `achievements_view` 事件**（`check` 仍在白名单里、仍可用，
+    只是不再是它的调用方），成就猎人条件写成 `achievement_views > 10`。
+12. **新设置键**：`stats.geo_lookup`（默认 `true`）——`SCHEMA` 从 36 个键变 **37 个**（section 仍 7 个）。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest` | **832 passed**（727 + 新增 105：geo 31、env 14、achievements +16、reader +38、cli +6） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` | **RESULT: OK** |
+| `tools/check_doc_numbers.py` | **RESULT: ALL OK**（三份文档的行数/项数全部同步） |
+| `tools/verify_wrap.py` | `OK: 40077 checks passed`（未受影响） |
+| `tools/verify_draw.py` | `OK: 420 draw checks passed`（未受影响） |
+| `tools/verify_mouse.py` / `verify_notes.py` / `verify_translate.py` | `RESULT: 全部通过`（回归） |
+| `tools/verify_achievements.py` | **`RESULT: 全部通过`（19 项，新增）**：真 pty 里 `?` → 帮助页出现 → `q` 关掉 → 屏内出现「成就解锁／帮助迷」→ `q` 退出；造现场 → 「上次好像没有正常退出／上次读到第 13 行」→ `y` → 位置回到第 12 行、`crash_recovers=1`、现场被删；再开一次**不再问**；`werd --werd` 解锁「名字彩蛋」 |
+| `py_compile` | 全部 `.py` 通过 |
+
+**踩到的坑**：
+
+1. ⚠️ **`_confirm` 的默认提示是硬编码的"加入生词本"**：恢复流程复用同一个弹窗，
+   所以给它加了 `hint` 参数（默认值保持不变，老调用方一字未改）。
+2. ⚠️ **`Pager.viewport_width` 是"正文区宽度"（已扣掉书签列），不是终端列数**。
+   第一版把窄屏计时与 `terminal_width` 共用这个字段，结果 `_draw` 每帧都把它改写成 `width-1`
+   → 「≤60 列」的判定永远差一列。现在分成两个字段：`viewport_width`（排版用，`_draw` 写）
+   与 `terminal_width`（真实列数，`note_width` 写）。
+3. ⚠️ **测试里那个"平平无奇的中午"不平凡**：`test_achievements_lists_progress` 把 `cli._now`
+   钉在 `2026-01-01 12:00` —— 那是**元旦**，新加的「节日读者」当场解锁，断言 `已解锁 0/48` 翻车。
+   已把两个测试的固定时刻挪到 `2026-01-15`（周四、不过节），并在注释里写明"别挑节日"。
+   ⚠️ **凡是给 `daily_open` 钉时间的测试，都要同时避开 05:00-07:00 与节日表**。
+4. ⚠️ **`editor` 工具又吞了一行 `def`**：插入帮助页函数时把 `def _enter_mark(pager: Pager) -> None:`
+   整行替换掉了，`_enter_mark` 的 docstring 与函数体直接挂在 `_help_overlay` 后面 →
+   `pyright` 报 `Expected 3 positional arguments`、6 个标记模式测试 `NameError`。
+   已补回。**这是同一类事故的第四次**（#21、㉔/㉕ 的野生文件、test_notes.py 的 docstring）。
+   结论：**用 `editor` 做完插入，立刻 `pyright` + `pytest` 各跑一次**，别等到收尾。
+5. ⚠️ **`env.direct_url_text()` 会被源码树里的 `wreader.egg-info` 遮蔽**：
+   在仓库根运行时 `metadata.distribution("wreader")` 先找到 `wreader.egg-info`（没有
+   `direct_url.json`）而不是 site-packages 里的 `wreader-0.1.0.dist-info`，
+   于是"可编辑安装"探测在仓库根会误判为 `False`。改成 `metadata.distributions(name=...)`
+   **逐个尝试**，两种启动方式答案一致（已实测）。
+6. `?` 在标记模式下不会被 `note_key` 记账（`handle_key` 在标记模式里提前 return），
+   这是**故意**的：标记模式里的 `j/k/h/l` 是挪光标而不是翻页，不该算"连续翻页"或打断"方向键怀旧"。
+7. 帮助页在 10 行高的假窗口里只画出 8 行 → 断言要挑第一屏就有的文字，
+   或断言脚注里的 `还有 N 行`（`_draw_help` 会把剩余行数报出来）。
+
 ## 待办 / 下一步
 
-按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools""成就 Phase 1""笔记 Phase 3"五项已移除）：
+按优先级（本会话已完成的"成就 Phase 2/3"已从清单移除）：
 
-0. **成就 Phase 2/3**（实时按键事件 + 屏内 5 秒通知 + 地理 `geo.py` / 环境 `env.py`）——
-   规格与拆分见 `progress.md` 待办 **0b**；Phase 1 已落地的接口是
-   `achievements.check_achievements(event, data)` 与 `EVENTS` 白名单（`key` / `resize` 还没加）。
-
+0. **成就 Phase 2/3 的遗留小尾巴**（都已记进 README「已知问题」）：
+   - 农历节日表（`achievements.LUNAR_HOLIDAYS`）**只到 2030 年**，
+     2031 起春节 / 中秋需要有人按历书补日期（公历节日不受影响）；
+   - `geo.py` 用的是 **HTTP** 免费端点（ip-api 的 HTTPS 要付费），
+     换服务商或加个可选的上游都得同时改 `parse_response` 与测试；
+   - 「方向键怀旧」只认 4 个方向键，`PgUp` / `PgDn` 被算作"别的翻页方式"（刻意，但可以再讨论）；
+   - `EVENTS` 里的 `check` 现在**没有调用方**了（`werd achievements` 改发 `achievements_view`）；
+     保留是为了不打断老脚本，若确定没人用可以在下个大版本删掉。
 1. **笔记的小尾巴**（Phase 3 已交付，这两条是新发现的、当初没计划的）：
    - 编辑区仍**打不进中文**（`Textbox.do_command` 只认 `curses.ascii.isprint`），
      且 `gather()` 会把字符截成 7 位 → 要支持得自己接管插入与回读（见坑 #29）；
@@ -1129,7 +1239,7 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 ## 已知会话级注意事项
 
 - **数字的权威快照在 `memory-bank/README.md`**：「本目录现状」记着最近一次**全量复核**的实测值
-  （**727** 项测试 / **41** 个 `.py` / **59** 个跟踪文件 / 注释缺口 **3819** / `tools/` **9** 个脚本）。
+  （**832** 项测试 / **47** 个 `.py` / 注释缺口 **4513** / `tools/` **10** 个脚本）。
   写任何数字前先看那里，或直接重跑 `tools/check_doc_numbers.py` 与 `tools/check_comments.py` ——
   别凭记忆写"大概"。
 - **维护协议在 `.clinerules/memory-bank.md`**（对每次会话自动生效）：读取顺序、何时更新哪个
@@ -1161,3 +1271,14 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
   所以 README 的子包条目只写职责、不写行数；行数记在 `techContext.md`。
 - **测试替身必须复刻真函数的语义**：`cli._prompt_line` 的"空输入 = 用默认值"被替身漏掉后，
   "回车保留当前引擎"这条路径静默失去覆盖。
+- ⚠️ **`editor` 工具会静默吞掉锚点行**（2026-09-23 已是第四次）：把 `def xxx(...):` 当锚点做插入时，
+  如果 `new_text` 结尾忘了把这一行补回去，那个函数的 docstring 与函数体会**挂到上一个函数后面**，
+  `py_compile` 甚至可能还是过的。**对策**：插入类改动做完，立刻
+  `npx pyright` + `pytest` 各跑一次；改完 `grep -c '^def ' 文件` 对一下函数个数也很快。
+- **`importlib.metadata` 在仓库根会被 `wreader.egg-info` 遮蔽**：`distribution("wreader")` 先命中
+  源码树里那份（没有 `direct_url.json`），于是"可编辑安装"探测在仓库根误判。
+  `env.direct_url_text()` 改成遍历 `distributions(name=...)` 逐个尝试；以后凡是要读安装元数据，
+  都按这个写法。
+- **给 `daily_open` 钉时间的测试要避开节日**：现在有「节日读者」成就，`2026-01-01` 这种"看起来中立"
+  的日期会让它意外解锁。固定时刻用 `2026-01-15 12:00` 这类既不在 05:00-07:00、也不在
+  `achievements.HOLIDAYS` / `LUNAR_HOLIDAYS` 里的时间。

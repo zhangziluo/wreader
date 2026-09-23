@@ -18,7 +18,7 @@
 | 入口 | console script `werd` → `wreader.cli:main` |
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **59 个跟踪文件**，与远端同步 |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，**64 个跟踪文件**（2026-09-23 成就 Phase 2/3 后实测），与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求
@@ -36,8 +36,13 @@
 5. **生词本**：阅读中按 `v` 查词入库；命令行增删查、`--review` 复习、`--export anki`。
 6. **统计与成就**：阅读时长、热力图、连续天数；**事件驱动**的成就引擎
    （`wreader/achievements.py`）把 `daily_open` / `session_end` / `book_add` 等事件记进
-   `~/.wreader/achievements.json`；`wreader/data/achievements.json` 里 **28** 个成就定义
-   （Phase 1），条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
+   `~/.wreader/achievements.json`；`wreader/data/achievements.json` 里 **48** 个成就定义
+   （Phase 1 的 28 个 + 笔记联动 1 个 + Phase 2/3 的 19 个），条件写成 `指标 比较符 数字` 表达式，
+   用户可自行追加。Phase 2/3 补齐了规格里的"彩蛋"部分：阅读器**实时按键/终端尺寸事件**
+   （连击、连续翻页、方向键怀旧、窄屏、翻译键）、解锁时的**屏内 5 秒通知**、阅读器**帮助页** `?`、
+   **意外中断自动恢复**（`~/.wreader/reading_session.json` 现场 + 开书时问一句）、
+   以及 `wreader/geo.py`（位置，一小时缓存，可完全关掉联网）与 `wreader/env.py`
+   （云主机 / WSL / tmux / 可编辑安装）。命令行另有名字彩蛋 `werd werd` / `werd word` / `werd --werd`。
 7. **配置**：`~/.wreader/settings.toml`；`werd config <section.key> [value]` 读写，`--reset` 复原。
 8. **目录**：章节表由正则识别（`toc.patterns` 可加自定义正则），epub 优先用书自带的 `nav` / `toc`；
    阅读中按 `Tab` 呼出目录浮层（`/` 过滤、回车跳转），`werd toc <id> [--rebuild]` 可查看 / 重建；
@@ -65,7 +70,7 @@
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-23）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3819** 条语句上方没有紧邻注释行
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **4513** 条语句上方没有紧邻注释行
   （`test_reader.py`、`reader.py` 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"。
 

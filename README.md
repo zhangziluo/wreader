@@ -48,7 +48,7 @@
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
 | 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。笔记**落盘成 markdown**（`~/.wreader/notes/<book_id>.md`），`werd notes` 查看 / 导出；编辑区每 30 秒自动留一份草稿，掉电也不丢 |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
-| 🏆 成就 | 28 个成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音 |
+| 🏆 成就 | **48 个**成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音；阅读中按下 `?` 可以翻帮助页 |
 | ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
 
 ---
@@ -251,6 +251,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `werd achievements` | 成就清单与解锁进度 |
 | `werd toc <book_id>` | 查看某本书的目录（章节 + 进度百分比）；`--rebuild` 强制重解析 |
 | `werd notes [book_id]` | 笔记：不带参数列出有笔记的书；带 id 逐条翻看（空格翻页 / `q` 退出）；`--export` 导出 markdown |
+| `werd werd` / `werd word` / `werd --werd` | 名字彩蛋（顺手解锁「名字彩蛋」成就） |
 | `werd config` | 查看 / 修改设置 |
 
 退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）、
@@ -493,7 +494,7 @@ werd toc 3e027c4de949 --rebuild  # 忽略缓存，重新解析正文并覆写缓
 阅读器**底部提示栏默认就写着这排按键**（有临时消息时才临时被替换掉），所以不用背：
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 m标记 o笔记 l语言 t翻屏 T翻章 c中文
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 m标记 o笔记 l语言 t翻屏 T翻章 c中文 ?帮助
 ```
 
 | 按键 | 作用 |
@@ -517,7 +518,8 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `T` | 翻译并缓存**整章**，带进度条；下次再进这一章直接读缓存，不花钱 |
 | `v` | 查一个单词并收进生词本（输入框会预填当前行最长的英文单词） |
 | `m` | 进入**标记模式**：光标变成反色方块，用 `h` / `j` / `k` / `l`（或方向键）扩展选区；`y` 复制选中的文字，`Esc` 取消。标记模式下**不翻页**，只能在同一屏内选字 |
-| `o` | 展开 / 折叠**笔记面板**（占屏幕下方 25%，正文区相应缩小）：上半是**引用区**（只读，灰字，显示刚才 `y` 复制的文字，格式 `> …`），下半是**编辑区**（`curses` 文本框，回车换行、退格、左右光标）；`Tab` 在引用区 / 编辑区之间切焦点，`Ctrl+S` 保存，`Esc` 关闭面板 |
+| `o` | 展开 / 折叠**笔记面板**（占屏幕下方 25%，正文区相应缩小）：上半是**引用区**（只读，灰字，显示刚才 `y` 复制的文字，格式 `> …`），下半是**编辑区**（`curses` 文本框，回车换行、退格、左右光标）；`Tab` 在引用区 / 编辑区之间切焦点，`Ctrl+S` 保存，`Esc` 关闭面板。标记模式下按 `t` 还能把选中的这一段翻好、连着引用一起写进笔记 |
+| `?` | 打开**帮助页**（居中的浮层，`↑↓` / `j` / `k` 滚动，`q` / `Esc` / `回车` 关闭）：里面列了全部按键、章节 / 搜索 / 翻译 / 笔记的用法，以及设置文件在哪 |
 
 几个实用细节：
 
@@ -529,6 +531,9 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
   滚轮下不会触发；那种环境下用方向键或拖动即可，功能不受影响。
 - **底部两行是状态栏**：倒数第二行由 `reader.status_bar_format` 拼成（反色显示），
   最后一行是提示栏——平时显示按键清单，有临时消息（"已加入生词本：xxx = 承认"之类）时优先显示消息。
+- **阅读中解锁成就，会在右上角闪一块牌子**（`🏆 成就解锁 · <成就名>` + 一行说明），
+  停留 **5 秒**后自己消失，不拦任何按键、也不会打断你正在读的段落；
+  ⚠️ 窗口太小（宽 < 24 列、高 < 6 行）时会退到最下面那行提示栏里显示。
 - **每行最左边一列是书签栏**：有书签的行显示 `★`，其余行留空。
 - **搜索高亮**：当前跳到的命中行是反色，同一批的其他命中行是加粗。
 - **生词会有下划线**（`vocab.highlight_in_reader = true` 时）；关闭后就不打扰阅读。
@@ -541,6 +546,10 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
   4. 编辑区**每 30 秒自动存一份草稿**（`<book_id>.draft.md`）：崩溃、掉电或 `Ctrl-C` 关掉面板都不会丢字，下次打开面板自动捞回来。`Ctrl-C` 只留草稿不提交，`Esc` 才提交成正式笔记。
 - **读到很慢的章节**（同一章停留超过 30 分钟），提示栏会顺手建议你按 `c` 看看中文。
 - **中途 Ctrl-C** 不会丢进度：退出前同样会保存位置和本次时长。
+- **意外中断（崩溃 / 断电 / 被 `kill`）**：下次打开**同一本书**时，会先弹一个小窗问
+  `上次好像没有正常退出 · 上次读到第 N 行`，`y` 接着上次的位置读，其他键从头开始；
+  正常退出（`q` / `Ctrl-C`）之后不会再问。现场记在 `~/.wreader/reading_session.json`，
+  跟着 `reader.auto_save_interval` 一起刷新，删掉它只是少了这一次"接着读"，不影响书库里的进度。
 
 ---
 
@@ -653,6 +662,7 @@ werd config translate.baidu_secret 你的密钥
 | `daily_goal_minutes` | `60` | 每日阅读目标（分钟），`0` = 不显示目标 |
 | `show_heatmap` | `true` | `werd stats` 里是否显示 30 天热力图 |
 | `achievement_sound` | `true` | 解锁成就时是否响铃（`\a`）；嫌吵就改 `false` |
+| `geo_lookup` | `true` | 是否联网查所在位置（用于地理成就）。改成 `false` 就**完全离线**：连缓存都不刷新，地理成就自然也不再前进（缓存文件 `~/.wreader/geo.json` 仍可用） |
 
 ### `[vocab]`
 
@@ -682,6 +692,8 @@ werd config translate.baidu_secret 你的密钥
 | 设置 | `~/.wreader/settings.toml` | `$WREADER_HOME` |
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
 | 成就状态 | `~/.wreader/achievements.json` | `$WREADER_HOME` |
+| 阅读现场 | `~/.wreader/reading_session.json`（"我正在读这本书"的标记，正常退出时删除；崩溃后下次开书靠它问一句要不要接着读） | `$WREADER_HOME` |
+| 地理位置缓存 | `~/.wreader/geo.json`（ip-api 的结果，缓存 1 小时；删掉只是下次要重查一遍） | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
 | 笔记 | `~/.wreader/notes/<book_id>.md`（每本书一个 markdown）+ `index.json`（派生索引）+ `<book_id>.draft.md`（未提交草稿） | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch0_en.txt`、`ch0_bilingual.txt` | `translator.cache_dir` |
@@ -774,7 +786,23 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
     "days_opened": ["2026-09-21", "2026-09-22"],
     "early_open": 0,
     "weekend_seconds": { "2026-09-20": 10800 },
-    "words_read": 42000
+    "words_read": 42000,
+    "space_combo": 132,
+    "page_streak": 640,
+    "arrow_chapters": 2,
+    "translate_hits": 41,
+    "narrow_seconds": 0,
+    "narrow_chapters": 1,
+    "help_opens": 3,
+    "crash_recovers": 1,
+    "recover_declined": 0,
+    "achievement_views": 14,
+    "holidays": ["2026-01-01"],
+    "countries": ["CN", "JP"],
+    "continents": ["亚洲"],
+    "feuds": [],
+    "envs": ["tmux", "editable"],
+    "eggs": ["werd"]
   },
   "books": { "3e027c4de949": { "words": 42000, "counted": [[0, 812]] } },
   "progress": { "first_book": { "current": 2, "required": 1 } }
@@ -784,7 +812,9 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
 要点：
 
 - `unlocked` 是**解锁记录**（成就定义本身在包的 `data/achievements.json` 里）；
-- `counters` 是事件次数，`metrics` 是只有事件流才知道的数字（打开过几天、周末多少秒、读了多少字）；
+- `counters` 是事件次数，`metrics` 是只有事件流才知道的数字：打开过几天、周末多少秒、读了多少字，
+  以及**阅读器实时攒下的那些**（最长空格连击、最长连续翻页、窄屏秒数、翻译键次数、去过的国家与大洲……）；
+  计数型指标只增不减，连击那类只留最大的那一次（换一本书也不会把昨天的纪录清零）；
 - `books[].counted` 是**每本书已经统计过的行号区间**（半开区间 `[start, end)`），
   字数去重就靠它：同一段正文读第二遍不会再累加；
 - 手改坏了也不会让 `werd` 起不来：读不出来时会把坏文件改名成 `achievements.json.broken`，
@@ -824,40 +854,83 @@ ch0_bilingual.txt   第 1 章的中英段落对照（喂给阅读器的双语视
 
 ## 成就清单
 
-定义在 `wreader/data/achievements.json`，一共 **28** 个（Phase 1），分四类。
+定义在 `wreader/data/achievements.json`，一共 **48** 个（Phase 1 的 28 个 + 笔记联动的 1 个 +
+Phase 2/3 的 19 个），分五类。
 条件是简单的 `指标 比较符 数字` 表达式，可以自己加；**解锁状态**存在
 `~/.wreader/achievements.json`（纯 JSON，随便改、随便备份）。
 
-| 成就 | 名称 | 分类 | 条件 |
+### 数据积累（19）
+
+| 成就 | 名称 | 条件 |
+| --- | --- | --- |
+| `first_book` | 📖 开卷有益 | 第一次打开一本书 |
+| `book_finished` | 🏁 第一本 | 读完第一本书 |
+| `ten_books` | 📚 十本大关 | 累计读完 10 本书 |
+| `fifty_books` | 🎯 半百 | 累计读完 50 本书 |
+| `hundred_books` | 💰 百本富翁 | 累计读完 100 本书 |
+| `thousand_books` | 🏛️ 千本富豪 | 累计读完 1000 本书 |
+| `first_shelf` | 🗄️ 书库初成 | 书库里添加第 1 本书 |
+| `collector` | 📦 藏书家 | 书库里累计 50 本书 |
+| `mobile_library` | 🚚 移动图书馆 | 书库里累计 100 本书 |
+| `words_10k` | ✒️ 万字户 | 累计阅读 1 万字 |
+| `words_100k` | ⛰️ 十万大山 | 累计阅读 10 万字 |
+| `words_1m` | 💵 百万富翁 | 累计阅读 100 万字 |
+| `words_10m` | 🎩 千万俱乐部 | 累计阅读 1000 万字 |
+| `words_100m` | 👑 亿万富豪 | 累计阅读 1 亿字 |
+| `words_1b` | 🌌 十亿富豪 | 累计阅读 10 亿字 |
+| `vocab_100` | 📝 词汇积累 | 生词本满 100 个 |
+| `vocab_500` | 🧠 生词狂魔 | 生词本累计记录 500 个单词 |
+| `translator` | 🌍 双语者 | 首次使用翻译功能 |
+| `note_master` | 🖊️ 笔记达人 | 累计写下 50 条笔记（现数 markdown，手写的也算） |
+
+### 阅读习惯（10）
+
+| 成就 | 名称 | 条件 |
+| --- | --- | --- |
+| `first_hour` | ⏱️ 初窥门径 | 累计阅读满 1 小时 |
+| `ten_hours` | 🎓 学富五车 | 累计阅读满 10 小时 |
+| `night_owl` | 🌙 深夜书虫 | 凌晨 0-4 点阅读超 1 小时 |
+| `streak_7` | 🔥 七日不断 | 连续 7 天每天阅读 30 分钟 |
+| `streak_30` | 🗿 铁血读者 | 连续 30 天每天阅读 |
+| `hundred_days` | 🧱 百日筑基 | 连续 100 天打开 werd |
+| `early_bird` | 🌅 清晨第一眼 | 在 05:00-07:00 期间首次打开 |
+| `marathon` | 🏃 马拉松 | 单次会话阅读超过 2 小时 |
+| `ultra_marathon` | 🛌 超长待机 | 单次会话阅读超过 4 小时 |
+| `weekend_warrior` | ⚔️ 周末战士 | 周六或周日累计阅读 3 小时 |
+
+### 操作彩蛋（5）—— 阅读器里的手法
+
+| 成就 | 名称 | 条件 | 怎么触发 |
 | --- | --- | --- | --- |
-| `first_book` | 📖 开卷有益 | 数据积累 | 第一次打开一本书 |
-| `book_finished` | 🏁 第一本 | 数据积累 | 读完第一本书 |
-| `ten_books` | 📚 十本大关 | 数据积累 | 累计读完 10 本书 |
-| `fifty_books` | 🎯 半百 | 数据积累 | 累计读完 50 本书 |
-| `hundred_books` | 💰 百本富翁 | 数据积累 | 累计读完 100 本书 |
-| `thousand_books` | 🏛️ 千本富豪 | 数据积累 | 累计读完 1000 本书 |
-| `first_shelf` | 🗄️ 书库初成 | 数据积累 | 书库里添加第 1 本书 |
-| `collector` | 📦 藏书家 | 数据积累 | 书库里累计 50 本书 |
-| `mobile_library` | 🚚 移动图书馆 | 数据积累 | 书库里累计 100 本书 |
-| `words_10k` | ✒️ 万字户 | 数据积累 | 累计阅读 1 万字 |
-| `words_100k` | ⛰️ 十万大山 | 数据积累 | 累计阅读 10 万字 |
-| `words_1m` | 💵 百万富翁 | 数据积累 | 累计阅读 100 万字 |
-| `words_10m` | 🎩 千万俱乐部 | 数据积累 | 累计阅读 1000 万字 |
-| `words_100m` | 👑 亿万富豪 | 数据积累 | 累计阅读 1 亿字 |
-| `words_1b` | 🌌 十亿富豪 | 数据积累 | 累计阅读 10 亿字 |
-| `vocab_100` | 📝 词汇积累 | 数据积累 | 生词本满 100 个 |
-| `vocab_500` | 🧠 生词狂魔 | 数据积累 | 生词本累计记录 500 个单词 |
-| `translator` | 🌍 双语者 | 数据积累 | 首次使用翻译功能 |
-| `first_hour` | ⏱️ 初窥门径 | 阅读习惯 | 累计阅读满 1 小时 |
-| `ten_hours` | 🎓 学富五车 | 阅读习惯 | 累计阅读满 10 小时 |
-| `night_owl` | 🌙 深夜书虫 | 阅读习惯 | 凌晨 0-4 点阅读超 1 小时 |
-| `streak_7` | 🔥 七日不断 | 阅读习惯 | 连续 7 天每天阅读 30 分钟 |
-| `streak_30` | 🗿 铁血读者 | 阅读习惯 | 连续 30 天每天阅读 |
-| `hundred_days` | 🧱 百日筑基 | 阅读习惯 | 连续 100 天打开 werd |
-| `early_bird` | 🌅 清晨第一眼 | 阅读习惯 | 在 05:00-07:00 期间首次打开 |
-| `marathon` | 🏃 马拉松 | 阅读习惯 | 单次会话阅读超过 2 小时 |
-| `ultra_marathon` | 🛌 超长待机 | 阅读习惯 | 单次会话阅读超过 4 小时 |
-| `weekend_warrior` | ⚔️ 周末战士 | 阅读习惯 | 周六或周日累计阅读 3 小时 |
+| `space_combo` | 👏 手速达人 | `space_combo >= 100` | 一口气连按 100 次**空格**翻页，中间不碰别的键（换键即断） |
+| `page_streak` | 🌀 翻页永动机 | `page_streak >= 500` | 连续翻页 500 次（`j` / 空格 / 回车 / 方向键 / PgUp / PgDn 都算），中间做别的事就断 |
+| `arrow_chapters` | 🕹️ 方向键怀旧 | `arrow_chapters >= 1` | 一整章只用**方向键**翻完（章内至少按 5 下，且不碰 `j`/`k`/空格/回车/`[`/`]`/`Tab`） |
+| `translate_maniac` | 🔤 翻译狂魔 | `translate_hits >= 100` | 累计按 100 次翻译键（`t` 翻当前屏、`T` 翻整章） |
+| `help_fan` | ❓ 帮助迷 | `help_opens >= 1` | 在阅读器里按 `?` 打开帮助页 |
+
+### 难度挑战（4）
+
+| 成就 | 名称 | 条件 | 怎么触发 |
+| --- | --- | --- | --- |
+| `tiny_terminal` | 🪡 极限尺寸 | `narrow_seconds >= 300` | 把终端缩到 **≤ 40 列**，在这样的窗口里累计读满 5 分钟 |
+| `narrow_chapter` | 📐 窄屏挑战 | `narrow_chapters >= 1` | 在 **≤ 60 列** 的窄窗口里读完一章 |
+| `recovery_master` | 🧯 恢复大师 | `crash_recovers >= 3` | 被意外中断 3 次，每次都选 `y` 接着上次的位置读 |
+| `changed_mind` | 🙃 我反悔 | `recover_declined >= 1` | 中断之后选择不恢复，从头读起 |
+
+### 隐藏（10）—— 解锁前只显示"❓ 隐藏成就"
+
+| 成就 | 名称 | 条件 | 怎么触发 |
+| --- | --- | --- | --- |
+| `geo_continents` | 🌏 环游亚欧非美大洋 | `geo_continents >= 5` | 在 5 个大洲上都读过书（换城市 / 换网络出口就会换国家） |
+| `geo_citizen` | 🛂 世界公民 | `geo_countries >= 3` | 在 3 个以上的国家或地区读过书 |
+| `geo_feud` | 🏰 百年世仇 | `geo_feud >= 1` | 在英法两边都读过（`geo.py` 里还有中日、印巴等几对同类的组合） |
+| `holiday_reader` | 🎆 节日读者 | `holiday_opens >= 1` | 在节日里打开 werd（元旦 / 春节 / 中秋 / 圣诞……，见 `holidays` 指标） |
+| `name_egg` | 🥚 名字彩蛋 | `easter_eggs >= 1` | 敲一次 `werd werd` / `werd word` / `werd --werd` |
+| `achievement_hunter` | 🏹 成就猎人 | `achievement_views > 10` | 翻开 `werd achievements` 超过 10 次 |
+| `env_cloud` | ☁️ 云端书虫 | `env_cloud >= 1` | 在云主机（AWS / GCP / 阿里云……）上读书 |
+| `env_wsl` | 🪟 穿越子系统 | `env_wsl >= 1` | 在 Windows 的 WSL 里读书 |
+| `env_tmux` | 🧅 套娃终端 | `env_tmux >= 1` | 在 tmux / screen 里读书 |
+| `env_editable` | 🧑‍💻 开发者模式 | `env_editable >= 1` | 用 `pip install -e` 装的可编辑版本读书 |
 
 条件里可用的指标：
 
@@ -870,19 +943,38 @@ ch0_bilingual.txt   第 1 章的中英段落对照（喂给阅读器的双语视
 | `library_books` | 书库里一共几本书 | 书库索引 |
 | `words_read` | 累计读了多少字（**按行号区间去重**） | 成就状态 |
 | `days_opened` / `early_open` | 打开过 werd 的天数 / 是否在清晨打开过 | 成就状态 |
+| `notes_count` | 一共写过多少条笔记（现数 markdown 文件） | 笔记目录 |
+| `space_combo` / `page_streak` | 最长的空格连击 / 最长的一次连续翻页 | 成就状态（阅读器实时上报） |
+| `arrow_chapters` / `translate_hits` | 只用方向键读完的章数 / 按过多少次翻译键 | 成就状态（阅读器实时上报） |
+| `narrow_seconds` / `narrow_chapters` | 窄窗口（≤40 列）里读的秒数 / 窄窗口（≤60 列）里读完的章数 | 成就状态（阅读器实时上报） |
+| `help_opens` | 打开过几次阅读器帮助页 | 成就状态 |
+| `crash_recovers` / `recover_declined` | 意外中断后接着读 / 选择重来的次数 | 成就状态 |
+| `achievement_views` | 翻开 `werd achievements` 的次数 | 成就状态 |
+| `geo_countries` / `geo_continents` / `geo_feud` | 去过的国家数 / 大洲数 / 世仇组合是否凑齐 | 成就状态（位置探测） |
+| `holiday_opens` / `easter_eggs` | 在节日里打开过的天数 / 触发过的彩蛋数 | 成就状态 |
+| `env_cloud` / `env_wsl` / `env_tmux` / `env_editable` / `env_flags` | 是否在云主机 / WSL / tmux / 可编辑安装里读过（每个 0/1）与命中总数 | 成就状态（环境探测） |
 
 字数口径：**中文一字算一个，英文一个词算一个**，标点与数字不计。同一段正文读第二遍不再累加
 （靠每本书记下来的「已统计行区间」判断）。
 
 **事件驱动**：各模块调用 `achievements.check_achievements(事件名, 数据)`，事件有
-`daily_open`（每次启动 `werd`）、`session_end`（退出阅读，带时长与读过的行区间）、
-`book_add`（`werd import`）、`progress_update`、`book_finish`、`word_add`、
-`geo_change`（Phase 3）、以及不带任何累加的 `check`（只是"现在重算一遍"）。
+`daily_open`（每次启动 `werd`）、`session_end`（退出阅读，带时长、读过的行区间，
+以及本次攒下的按键 / 尺寸计数）、`book_add`（`werd import`）、`progress_update`、`book_finish`、
+`word_add`、`note_add`（写完一条笔记）、`key` / `resize`（阅读器里实时按键与终端尺寸）、
+`help`、`recover`（意外中断恢复）、`geo_change`（位置探测）、`env`（环境探测）、
+`name_egg`（名字彩蛋）、`achievements_view`（翻开成就页）、
+以及不带任何累加的 `check`（只是"现在重算一遍"，老脚本还在用它）。
 已解锁的成就不会重复触发；整个「读状态 → 记事件 → 判定 → 写回」在**文件锁**下进行，
 两个终端同时开也不会互相覆盖（Windows 没有 `flock`，退化成原子替换写入）。
 
+**阅读器不会为每一次按键写盘**：它自己攒着计数（`Pager.metric_values`），
+只在**刚好越过某条成就门槛**时才把增量交给引擎 —— 那一刻也正是该弹屏内通知的时候。
+没撞到门槛的那些计数会在退出时随 `session_end` 一次性交账，一条都不丢。
+门槛表来自定义文件本身（`achievements.metric_thresholds`），所以你新加的成就同样能实时触发。
+
 "连续天数"的判定：一天阅读 ≥ 30 分钟才算有效；当天永远算数（因为它正要变成事实）。
-解锁时会打印动画和横幅，`stats.achievement_sound = false` 可以关掉提示音。
+解锁时会打印动画和横幅，`stats.achievement_sound = false` 可以关掉提示音；
+阅读过程中解锁的会先闪一块屏内通知，退出时再补一次完整的庆祝动画。
 
 
 ---
@@ -901,13 +993,15 @@ wreader/
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（19 行）
-│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定与文件锁（715 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1450 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1007 行）
+│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1145 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1510 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1008 行）
+│   ├── env.py               环境探测：云主机 / WSL / tmux / 可编辑安装（183 行）
+│   ├── geo.py               地理位置：ip-api 查询 + 一小时缓存，国家→大洲、世仇组合（343 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
 │   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（81 行）
-│   ├── notes.py             笔记：每本书一个 markdown + 派生索引 + 草稿（558 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3515 行）
+│   ├── notes.py             笔记：每本书一个 markdown + 派生索引 + 草稿（786 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记、帮助页与成就通知（4478 行）
 │   ├── translator.py        章节缓存 / 分批 / 段落映射 + 引擎适配层（1199 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（785 行）
@@ -922,20 +1016,22 @@ wreader/
 │   │   ├── deepseek.py      DeepSeek chat completions（流式 SSE）
 │   │   └── local.py         本地 Argos Translate（离线，可选依赖）
 │   └── data/
-│       └── achievements.json  28 个成就的定义（198 行）
-└── tests/                   727 项测试，全部离线运行（见下方「运行测试」）
+│       └── achievements.json  48 个成就的定义（348 行）
+└── tests/                   832 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
-    ├── test_achievements.py 35 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定
+    ├── test_achievements.py 51 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定、实时门槛与地理/环境指标
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
+    ├── test_env.py          14 项 —— 云主机 / WSL / tmux / 可编辑安装探测（全部注入，不看本机）
+    ├── test_geo.py          31 项 —— 国家→大洲、世仇组合、ip-api 响应解析、缓存与离线降级
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
     ├── test_notes.py        30 项 —— markdown 追加、解析、派生索引、导出、草稿、并发文件锁
-    ├── test_reader.py       198 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
+    ├── test_reader.py       236 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板、帮助页、成就通知与恢复流程
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
     ├── test_translator.py   77 项 —— 语言识别、分批、章节缓存、引擎适配、错误映射
     ├── test_translate.py    49 项 —— 引擎注册表、各厂商签名/请求构造、错误与参数校验
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
     ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
-    └── test_cli.py          49 项 —— 参数解析、各子命令输出、退出码、笔记清单与分页、翻译引擎配置向导
+    └── test_cli.py          55 项 —— 参数解析、各子命令输出、退出码、笔记清单与分页、翻译引擎配置向导、名字彩蛋
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
@@ -984,7 +1080,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 545 项，约 5 秒
+pytest                      # 832 项，约 15 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -1012,6 +1108,10 @@ python tools/check_doc_numbers.py     # README 里的行数、测试项数是否
 python tools/check_comments.py        # 注释覆盖情况（默认只报告；加 --strict 才是门禁）
 python tools/verify_wrap.py           # 折行属性（期望 OK: 40077 checks passed）
 python tools/verify_draw.py           # 绘制不越界（期望 OK: 420 draw checks passed）
+python tools/verify_notes.py          # 真 pty：标记模式 + 笔记面板（期望 RESULT: 全部通过）
+python tools/verify_mouse.py          # 真 pty：滚轮 / 触摸拖动（期望 RESULT: 全部通过）
+python tools/verify_translate.py      # 真 pty：t 的未配置提示 + 配置向导落盘（不联网）
+python tools/verify_achievements.py   # 真 pty：帮助页、屏内 5 秒通知、意外中断恢复、名字彩蛋
 script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
 ```
 
@@ -1107,6 +1207,14 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   并且面板里的 `Ctrl+S` 要求终端没开 XON/XOFF 流控（阅读器启动时会尝试自动关掉 `IXON`，关不掉时保存键会到不了程序）。
   另外 `Textbox.gather()` 会把字符截成 7 位，所以**中文不能被填进编辑区**：草稿里的中文由引擎直接落盘，
   不会经过那个控件（见 `_restore_draft`）。
+- **地理成就要联网**（一个 HTTP 请求，缓存一小时）：查的是 `ip-api.com`，只取国家 / 城市 / 时区这类粗粒度信息。
+  不想联网就设 `stats.geo_lookup = false` —— 那时地理成就保持锁定，其余功能一切照常。
+  内网、代理拦截、断网都只会让它安静地跳过（不会拖慢开书以外的任何事）。
+- **「节日读者」的农历节日（春节 / 中秋）只列到 2030 年**：这两天的公历日期每年不同，
+  表是按官方公布的历书硬写的（`achievements.LUNAR_HOLIDAYS`）；2031 年及以后仍认元旦、圣诞这类公历节日，
+  但春节 / 中秋需要有人把新日期补进那张表。
+- **意外中断恢复只认"同一本书"**：现场文件里记着 book_id，换个书打开就直接覆盖掉，
+  不会拿别人的行号往里跳；现场文件本身也是**普通 JSON**（`~/.wreader/reading_session.json`），随手可以删。
 
 已经解决、不再属于已知问题的十条（留个记录，免得又被当成待办）：
 
@@ -1115,7 +1223,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
   换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **545 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **832 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
   `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，

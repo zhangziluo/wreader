@@ -65,6 +65,8 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 | 设置 | `~/.wreader/settings.toml` | `$WREADER_HOME` |
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
 | 成就状态 | `~/.wreader/achievements.json`（另有 `.lock` 锁文件；坏掉时被改名为 `.broken`） | `$WREADER_HOME` |
+| 阅读现场 | `~/.wreader/reading_session.json`（"我正在读这本书"的标记：正常退出时删除，崩溃后下次开书靠它问一句要不要接着读；写一半被 kill 会被当作不存在） | `$WREADER_HOME` |
+| 地理位置缓存 | `~/.wreader/geo.json`（ip-api 的结果缓存 1 小时；可随时删，删了下次重查一遍） | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
 | 笔记 | `~/.wreader/notes/<book_id>.md`（一本书一个 markdown）+ `index.json`（派生索引）+ `<book_id>.draft.md`（未提交草稿）+ `index.json.lock`（锁文件） | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch{N}_en.txt`、`ch{N}_bilingual.txt` | `translator.cache_dir` |
@@ -73,14 +75,14 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
-## settings.toml 的 7 个 section（共 36 个键）
+## settings.toml 的 7 个 section（共 37 个键）
 
 | section | 键 |
 | --- | --- |
 | `reader` | `page_scroll_step`=1.0、`page_overlap`=3、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true |
 | `translator` | `backend`=**`google`（旧字段：`engine` 为空时的回退）**、`batch_size`=3000、`cache_dir`、`deepseek_api_key`、`auto_translate_chapter`=false、`source_language`=`auto`、`target_language`=`zh-CN`、`deepseek_model`=`deepseek-chat`、`deepseek_url` |
 | `translate` | `engine`（**空 = 回退 `translator.backend`**）、`baidu_appid`、`baidu_secret`、`youdao_appid`、`youdao_secret`、`tencent_secret_id`、`tencent_secret_key`、`tencent_region`=`ap-beijing`、`deepseek_api_key`、`deepseek_model`、`deepseek_url` |
-| `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true |
+| `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true、`geo_lookup`=true（关掉 = 完全不联网，地理成就停住） |
 | `vocab` | `highlight_in_reader`=true、`auto_add_on_mark`=true |
 | `library` | `novels_dir`（留空 = `~/novels`） |
 | `toc` | `patterns`（**追加**的章节标题正则，多个用 `\|` 分隔；内置规则始终生效） |
@@ -92,10 +94,10 @@ Windows 数据目录：`%APPDATA%\wreader`。
 
 | 路径 | 说明 |
 | --- | --- |
-| `wreader/` | 包本体（9 个模块 + `data/achievements.json`） |
+| `wreader/` | 包本体（14 个模块 + `translate/` 7 个 + `data/achievements.json`） |
 | `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
-| `tests/` | 9 个测试文件（含 `conftest.py`），570 项 |
-| `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
+| `tests/` | **14 个测试文件**（含 `conftest.py`），**832** 项 |
+| `tools/` | **开发期校验脚本**（**10** 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标/笔记/翻译/成就；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
 | `book/` | 开发用真实电子书样例（体积极大，不属于分发包） |
@@ -135,6 +137,7 @@ werd toc <book_id> [--rebuild]  # 查看目录（章节表）；--rebuild 强制
 werd notes                        # 列笔记清单（有笔记的书 + 条数 + 最后修改）
 werd notes <book_id>              # 逐条翻看（空格看下一条，q 退出）
 werd notes <book_id> --export     # 导出到 ~/books/notes_<book_id>.md
+werd werd                        # 名字彩蛋（等同 werd word / werd --werd）
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
 git status                                    # 动手前先看工作区是否干净
@@ -146,7 +149,7 @@ GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败�
 git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
-pytest                                        # 727 项，约 3~25 秒
+pytest                                        # 832 项，约 14 秒
 python -m pytest tests/test_reader.py -q      # 单文件
 python -m pytest -k "streak or heatmap" -q    # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings
@@ -162,6 +165,7 @@ python tools/verify_colors.py                 # 需 pty（见 tools/README.md �
 python tools/verify_mouse.py                  # 真 pty 端到端验证滚轮/触摸拖动（期望 RESULT: 全部通过）
 python tools/verify_notes.py                  # 真 pty 端到端验证标记 + 笔记面板（期望 RESULT: 全部通过）
 python tools/verify_translate.py              # 真 pty 验证 t 的未配置提示 + 配置向导落盘（期望 RESULT: 全部通过）
+python tools/verify_achievements.py           # 真 pty：帮助页 / 屏内 5 秒通知 / 中断恢复 / 名字彩蛋（期望 RESULT: 全部通过）
 
 # 不污染真实数据做实验
 export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox/novels
@@ -188,26 +192,30 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 
 | 文件 | 项数 |
 | --- | --- |
-| `tests/test_achievements.py` | **35** |
-| `tests/test_cli.py` | 49 |
+| `tests/test_achievements.py` | **51** |
+| `tests/test_cli.py` | **55** |
 | `tests/test_config.py` | 51 |
+| `tests/test_env.py` | **14**（新） |
+| `tests/test_geo.py` | **31**（新） |
 | `tests/test_library.py` | 119 |
-| `tests/test_notes.py` | **30** |
-| `tests/test_reader.py` | **198** |
+| `tests/test_notes.py` | 30 |
+| `tests/test_reader.py` | **236** |
 | `tests/test_stats.py` | 70 |
 | `tests/test_toc.py` | 18 |
-| `tests/test_translate.py` | **49** |
-| `tests/test_translator.py` | **77** |
+| `tests/test_translate.py` | 49 |
+| `tests/test_translator.py` | 77 |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **727** |
+| **合计** | **832** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 笔记 Phase 3：
-> `notes.py` **558**、`lock.py` **81** 两个新模块，`cli.py` **1450**、`reader.py` **3515**、
-> `achievements.py` **715**（文件锁抽走后变短）、`test_notes.py` **30**、总数 **727**）。
+> **三份用户文档的结构数字已与代码同步**（最近一次：2026-09-23 成就 Phase 2/3：
+> 新模块 `geo.py` **343**、`env.py` **183**，`reader.py` **4478**、`achievements.py` **1145**、
+> `cli.py` **1510**、`config.py` **1008**、`notes.py` **786**、`achievements.json` **348**（48 条），
+> 新测试文件 `test_geo.py` **31** / `test_env.py` **14**，总数 **832**）。
 > 以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 > ⚠️ **子包里的文件不在它的校验范围内**（`wreader/translate/*` 的名字会跟包根撞车），
 > 所以那些行数只记在上面「模块职责与规模」里，README 中不写。
+> ⚠️ **`tools/` 的脚本也不在范围内**：它们的行数只写在 `tools/README.md` 里（若有）。
 
 ## 样例数据
 
