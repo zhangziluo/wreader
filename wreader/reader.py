@@ -50,6 +50,10 @@ from __future__ import annotations
 
 # 全屏终端界面（Unix 自带，Windows 需额外包）
 import curses
+# curses 的文本编辑控件：笔记面板的编辑区复用它现成的 Emacs 键绑定
+import curses.textpad
+# curses.ascii：判断可打印字符、取 NL 等控制码（自定义 validator 要用）
+import curses.ascii
 # 设置 locale，让 curses 正确显示中文宽字符
 import locale
 # 高亮生词、句子边界识别要用正则
@@ -164,14 +168,32 @@ _SEARCH_PROMPT = "搜索: "
 _WORD_PROMPT = "生词: "
 
 # 底部常驻的快捷键提示
-_HINT = "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文"
+_HINT = (
+    "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 "
+    "m标记 o笔记 l语言 t翻屏 T翻章 c中文"
+)
 
 # 目录浮层占屏幕宽度的比例（靠右显示），其余留给正文
 _TOC_WIDTH_RATIO = 0.4
 # 目录浮层底部的快捷键提示
 _TOC_HINT = "↑↓ 选择  Enter 跳转  / 过滤  q/Esc 关闭"
+# 笔记面板底部的快捷键提示
+_NOTE_HINT = "笔记  Tab 切换焦点  Ctrl+S 保存  Esc 关闭"
+# 笔记面板展开时占屏幕高度的比例（贴在下方），其余留给正文
+_NOTE_PANEL_RATIO = 0.25
+#: One selection may copy at most this many characters (``y`` truncates past it).
+# 一次标记最多复制多少字符，超出就截断并提示（别把整章塞进引用区）
+NOTE_MAX_CHARS = 2000
+# 引用区的引导符，跟 Markdown 引用一样
+_NOTE_QUOTE_PREFIX = "> "
+# 引用区还没有内容时显示的引导语
+_NOTE_QUOTE_EMPTY = "还没有引用：在正文里按 m 标记、y 复制"
 # Tab 键：get_wch 多数情况返回 "\t"，个别终端上报 KEY_TAB
 _TAB_KEYS = ("\t", int(getattr(curses, "KEY_TAB", 9)))
+# Esc：get_wch 一般返回 "\x1b"（字符串），个别终端上报 int 27，两种都认
+_ESCAPE_KEYS = ("\x1b", 27)
+# Ctrl+S：同样是"字符串 / 整数"两种上报；注意 IXON 流控会吞掉它，_run 里会先关流控
+_SAVE_KEYS = ("\x13", 19)
 # 抓拉丁单词（长度至少 3）用于"查词时默认选中的词"
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]{2,}")
 
@@ -575,6 +597,31 @@ class Pager:
         self.match_cursor = -1
         # 每章累计耗时（秒）
         self.chapter_seconds: Dict[int, float] = {}
+        # -- mark mode and the note panel (Phase 1+2: UI state only) ----------
+        #: mark mode is on: the cursor turns into a reverse video block
+        # 是否处于标记模式（m 进入；此模式只在一屏内选字，不翻页）
+        self.mark_mode = False
+        #: ``(screen row, column inside that row)`` where the selection starts
+        # 选区起点：屏幕行下标 + 该行内的字符下标（进入标记时落在当前屏首行行首）
+        self.mark_start: Optional[Tuple[int, int]] = None
+        #: ``(screen row, column)`` the selection currently reaches
+        # 选区终点；与 mark_start 一起决定高亮区间（尚未扩展时两者相同）
+        self.mark_end: Optional[Tuple[int, int]] = None
+        #: the text copied out of the last selection with ``y``
+        # 最近一次选中并复制的文字（y 写入），面板的引用区显示它
+        self.note_buffer = ""
+        #: notes saved this session: ``[{"quote", "text", "created"}, ...]``
+        # 本次会话已保存的笔记；Phase 1+2 只存内存，落盘留给后续阶段
+        self.notes: List[Dict[str, Any]] = []
+        #: the note panel is expanded (``o`` toggles it)
+        # 笔记面板是否展开（o 切换）；展开期间阅读区缩到上方
+        self.note_panel_open = False
+        #: which half of the open panel has the keyboard: ``"quote"`` or ``"edit"``
+        # 面板焦点：引用区还是编辑区（Tab 切换）
+        self.note_focus = "quote"
+        #: the rows ``_draw`` actually put on screen last frame
+        # 上一帧真正画出的可见行 ``[(源行号, 文本), ...]``；标记模式靠它定位与取词
+        self.viewport: List[Tuple[int, str]] = []
         # 临时消息及其过期时刻
         self.message = ""
         self.message_until = 0.0
@@ -1210,6 +1257,145 @@ def _wrap_line(text: str, width: int) -> List[str]:
     return [line.rstrip() for line in lines]
 
 
+def _mark_clamp(
+    rows: Sequence[Tuple[int, str]], row: int, col: int
+) -> Tuple[int, int]:
+    """Clamp a mark cursor ``(row, col)`` into the rows actually on screen.
+
+    *col* is a **character** index inside the row's text, not a display column, so
+    a CJK character and a Latin letter both count as one step -- the reverse video
+    highlight then covers the right cells because ``addstr`` knows the real width.
+    """
+    # 一屏都没有（空书或空屏）：光标钉在左上角
+    if not rows:
+        return 0, 0
+    # 行夹进 [0, 可见行数 - 1]
+    row = max(0, min(int(row), len(rows) - 1))
+    # 列夹进这一行 [0, 字符数 - 1]（空行只有第 0 列可选）
+    col = max(0, min(int(col), max(0, len(rows[row][1]) - 1)))
+    return row, col
+
+
+def _mark_move(
+    rows: Sequence[Tuple[int, str]], row: int, col: int, key: Any
+) -> Tuple[int, int]:
+    """Move the mark cursor one step for *key*, clamped to what is on screen.
+
+    Only h/j/k/l and the arrow keys move; every other key leaves the cursor where
+    it is.  Page keys are deliberately absent: mark mode never scrolls, so a
+    selection can only ever span the screen it started on.
+    """
+    # 先把起点夹合法，免得后面越界
+    row, col = _mark_clamp(rows, row, col)
+    # 左：h 或 ←
+    if key in ("h", curses.KEY_LEFT):
+        col -= 1
+    # 右：l 或 →
+    elif key in ("l", curses.KEY_RIGHT):
+        col += 1
+    # 上：k 或 ↑
+    elif key in ("k", curses.KEY_UP):
+        row -= 1
+    # 下：j 或 ↓
+    elif key in ("j", curses.KEY_DOWN):
+        row += 1
+    # 移完再夹一次：上下跨行时列可能落到新行长之外
+    return _mark_clamp(rows, row, col)
+
+
+def _mark_normalize(
+    start: Tuple[int, int], end: Tuple[int, int]
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    """Order two mark corners into ``(top, bottom)`` reading order.
+
+    Marking works in both directions, so every consumer normalises first: the
+    highlight, the extraction and the truncation then only deal with one order.
+    """
+    # 先比行号，行号相同再比列号；小的那个算"左上"
+    if (start[0], start[1]) <= (end[0], end[1]):
+        return start, end
+    return end, start
+
+
+def _mark_selection(
+    rows: Sequence[Tuple[int, str]],
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    limit: int = NOTE_MAX_CHARS,
+) -> Tuple[str, bool]:
+    """Return ``(text, truncated)`` for the screen range *start* .. *end*.
+
+    The rows are **screen** rows, so a wrapped paragraph arrives as several chunks.
+    Chunks that belong to the same source line are glued back together and a
+    newline is only inserted where the source line actually changes, which is what
+    makes the copied text read like the book rather than like the terminal.
+    *limit* caps the result (``0`` means no cap) and *truncated* says whether it bit.
+    """
+    # 没有可见行：没有可复制的内容
+    if not rows:
+        return "", False
+    # 排成左上 -> 右下，方向无关
+    (first_row, first_col), (last_row, last_col) = _mark_normalize(start, end)
+    # 行号夹进真实范围，防止越界切片
+    first_row = max(0, min(first_row, len(rows) - 1))
+    last_row = max(0, min(last_row, len(rows) - 1))
+    # 收集 (源行号, 片段)：同一源行的折行片段要接着拼，不能插换行
+    pieces: List[Tuple[int, str]] = []
+    for row in range(first_row, last_row + 1):
+        source_line, text = rows[row]
+        # 首尾同一行：只取中间那段（末列包含在内）
+        if row == first_row == last_row:
+            fragment = text[first_col : last_col + 1]
+        # 选区的第一行：从起点列取到行尾
+        elif row == first_row:
+            fragment = text[first_col:]
+        # 选区的最后一行：从行首取到终点列
+        elif row == last_row:
+            fragment = text[: last_col + 1]
+        # 中间行：整行都要
+        else:
+            fragment = text
+        # 上一段就是同一源行：直接接上（说明这是同一个段落的折行）
+        if pieces and pieces[-1][0] == source_line:
+            pieces[-1] = (source_line, pieces[-1][1] + fragment)
+        else:
+            pieces.append((source_line, fragment))
+    # 源行之间用换行连接（同源行的折行片段前面已经拼好）
+    text = "\n".join(fragment for _line, fragment in pieces)
+    # 超长就截断，并告诉调用方"截过了"
+    if limit and len(text) > limit:
+        return text[:limit], True
+    return text, False
+
+
+def _mark_row_span(
+    row: int, text: str, start: Tuple[int, int], end: Tuple[int, int]
+) -> Optional[Tuple[int, int]]:
+    """The ``(first, last)`` character indices to reverse on *row*, or ``None``.
+
+    ``None`` means this screen row is not part of the selection at all, so the
+    caller can fall back to the ordinary drawing path.  Indices are inclusive and
+    clamped to the row, so a selection that starts on a longer line still covers
+    the whole of a shorter one.
+    """
+    # 排好序
+    (first_row, first_col), (last_row, last_col) = _mark_normalize(start, end)
+    # 这一行完全在选区之外
+    if row < first_row or row > last_row:
+        return None
+    # 单行选区：只反色这一段
+    if first_row == last_row:
+        return first_col, last_col
+    # 选区的第一行：从起点列反色到行尾
+    if row == first_row:
+        return first_col, max(0, len(text) - 1)
+    # 选区的最后一行：从行首反色到终点列
+    if row == last_row:
+        return 0, last_col
+    # 中间行：整行反色
+    return 0, max(0, len(text) - 1)
+
+
 def _draw_text(
     stdscr: Any, row: int, column: int, text: str, attr: int, vocab_words: Set[str]
 ) -> None:
@@ -1240,6 +1426,60 @@ def _draw_text(
             return
 
 
+def _draw_marked_row(
+    stdscr: Any,
+    row: int,
+    column: int,
+    text: str,
+    attr: int,
+    span: Optional[Tuple[int, int]],
+    vocab_words: Set[str],
+) -> None:
+    """Draw one screen row, reversing the characters covered by *span*.
+
+    The row is written as up to three pieces (before / selected / after) so only
+    the marked part is reversed.  Offsets are counted in **terminal columns** with
+    :func:`_text_width`, which is what keeps the pieces lined up when the selection
+    starts after a run of double width CJK characters.
+    """
+    # 这一行不在选区里：走普通绘制
+    if span is None:
+        _draw_text(stdscr, row, column, text, attr, vocab_words)
+        return
+    # 按字符下标切三段（末列包含在选中段里）
+    first, last = span
+    before = text[:first]
+    selected = text[first : last + 1]
+    after = text[last + 1 :]
+    # 前段：正常属性（生词下划线照旧）
+    if before:
+        _draw_text(stdscr, row, column, before, attr, vocab_words)
+    # 选中段：反色。反色块本身就是那条"光标"，所以不用再去动真实光标
+    selected_column = column + _text_width(before)
+    if selected:
+        _addstr(stdscr, row, selected_column, selected, attr | curses.A_REVERSE)
+    # 后段：正常属性（从选中段之后接着写）
+    if after:
+        _draw_text(
+            stdscr,
+            row,
+            selected_column + _text_width(selected),
+            after,
+            attr,
+            vocab_words,
+        )
+
+
+def _note_status(pager: Pager) -> str:
+    """The folded note indicator: how many notes there are and how to open the panel.
+
+    Shown on the message row while the panel is closed, so the note count stays
+    visible without spending a third status row on it.
+    """
+    # 折叠状态：几条笔记 + 展开键（_HINT 里也还有一遍 o笔记）
+    return "📝 {}条笔记 | 按o展开".format(len(pager.notes))
+
+
 def _message_row(pager: Pager, room: int) -> str:
     """The bottom row: a transient message, else hints plus the long chapter nudge.
 
@@ -1254,7 +1494,8 @@ def _message_row(pager: Pager, room: int) -> str:
     # 否则显示"快捷键提示 [+ 长时间没换章的提醒]"
     nudge = pager.slow_chapter_hint()
     if not nudge:
-        return _pad_line(_HINT, room)
+        # 折叠的笔记面板：把"几条笔记 + 怎么展开"并进提示行（面板展开时另画自己的提示）
+        return _pad_line(_note_status(pager) + " · " + _HINT, room)
     # 空间够就两个都显示（按显示列数算：一个汉字占两列）
     if _text_width(_HINT) + _text_width(nudge) + 3 <= room:
         return _pad_line(_HINT + "   " + nudge, room)
@@ -1377,9 +1618,10 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
     stdscr.erase()
     # 上一条屏幕行属于哪个源行，用来判断"这是不是某个源行的第一屏行"
     previous_index: Optional[int] = None
-    for screen_row, (index, text) in enumerate(
-        pager.visible_rows(text_rows, text_width)
-    ):
+    # 这一帧真正要画出来的可见行，顺手记下来给标记模式定位光标与取词用
+    rows = pager.visible_rows(text_rows, text_width)
+    pager.viewport = list(rows)
+    for screen_row, (index, text) in enumerate(rows):
         # 换行就算"某源行自己的第一屏行"
         line_start = index != previous_index
         # 若整屏是从某源行中间续显示的，那第一条只是半截，别把书签误标在段落中间
@@ -1402,7 +1644,12 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
         elif index in pager.matches:
             attr = curses.A_BOLD
         # 第 1 列开始写正文（文本已在 visible_rows 里按宽度折好、Tab 也展开过）
-        _draw_text(stdscr, screen_row, 1, text, attr, words)
+        # 标记模式：把选中的那段反色画出来（反色块本身就是那条"光标"）
+        if pager.mark_mode and pager.mark_start and pager.mark_end:
+            span = _mark_row_span(screen_row, text, pager.mark_start, pager.mark_end)
+            _draw_marked_row(stdscr, screen_row, 1, text, attr, span, words)
+        else:
+            _draw_text(stdscr, screen_row, 1, text, attr, words)
         # 记下这条屏幕行属于哪个源行，供下一轮判断
         previous_index = index
     # 最后画状态栏两行
@@ -1837,6 +2084,311 @@ def _jump_via_toc(stdscr: Any, pager: Pager) -> None:
     )
 
 
+def _enter_mark(pager: Pager) -> None:
+    """``m``: start marking from the top left of the screen.
+
+    Marking is deliberately screen bound: the selection can never scroll past the
+    screen it started on, which keeps the coordinates plain ``(row, col)`` pairs
+    into :attr:`Pager.viewport` and the extraction a pure function over them.
+    """
+    # 一屏都没有可选中的文字（空书）：没法标
+    if not pager.viewport:
+        pager.say("这一屏没有可选中的文字")
+        return
+    # 进入标记模式，光标落在当前屏首行行首（反色方块就是它）
+    pager.mark_mode = True
+    pager.mark_start = (0, 0)
+    pager.mark_end = (0, 0)
+    pager.say("标记：h/j/k/l 或方向键选字 · y 复制 · Esc 取消")
+
+
+def _handle_mark_key(pager: Pager, key: Any) -> None:
+    """Act on one key while marking: move, copy or cancel -- never scroll."""
+    # Esc：取消标记，回阅读
+    if key in _ESCAPE_KEYS:
+        pager.mark_mode = False
+        pager.mark_start = None
+        pager.mark_end = None
+        pager.say("已取消标记")
+        return
+    # y：把选中的文字收进引用缓冲区，然后回阅读
+    if key == "y":
+        _copy_selection(pager)
+        return
+    # h/j/k/l 或方向键：移动光标扩展选区
+    if key in (
+        "h",
+        "j",
+        "k",
+        "l",
+        curses.KEY_LEFT,
+        curses.KEY_RIGHT,
+        curses.KEY_UP,
+        curses.KEY_DOWN,
+    ):
+        # 起点还没设（理论上不会发生）：先补一个再动
+        if pager.mark_end is None:
+            pager.mark_end = pager.mark_start or (0, 0)
+        pager.mark_end = _mark_move(pager.viewport, *pager.mark_end, key)
+
+
+def _copy_selection(pager: Pager) -> None:
+    """``y``: put the marked text into the quote buffer and leave mark mode."""
+    # 起点或终点缺失（理论上不会发生）：直接退出标记
+    if pager.mark_start is None or pager.mark_end is None:
+        pager.mark_mode = False
+        return
+    # 提取选区文字（超过上限会自动截断）
+    text, truncated = _mark_selection(
+        pager.viewport, pager.mark_start, pager.mark_end
+    )
+    # 去掉尾部换行与空白（选到下一行行首时会带出一个换行，引用里不需要它）
+    text = text.rstrip()
+    # 选区里全是空白：提示一句，留在标记模式等用户换一段
+    if not text:
+        pager.say("选中的是空白，换一段再按 y")
+        return
+    # 存进引用缓冲区并退出标记模式
+    pager.note_buffer = text
+    pager.mark_mode = False
+    pager.mark_start = None
+    pager.mark_end = None
+    # 明确告诉用户复制了多少字（被截断时也要说清楚）
+    if truncated:
+        pager.say(
+            "已复制 {} 字（超过 {} 已截断）· 按 o 打开笔记面板".format(
+                len(text), NOTE_MAX_CHARS
+            )
+        )
+    else:
+        pager.say("已复制 {} 字 · 按 o 打开笔记面板".format(len(text)))
+
+
+def _note_panel_layout(height: int, width: int) -> Optional[Tuple[int, int, int]]:
+    """Return ``(text_rows, quote_rows, edit_rows)`` for the note panel, or ``None``.
+
+    The panel takes the bottom quarter of the screen (never fewer than four rows),
+    keeps one row for its own hint, and splits what is left between the read only
+    quote area and the editor.  ``None`` means the screen cannot hold a usable panel
+    at all, so the caller just says so instead of drawing a mess.
+    """
+    # 太矮 / 太窄：连"引用 1 行 + 编辑 1 行 + 提示 1 行"都摆不下
+    if height < 8 or width < 8:
+        return None
+    # 面板高度 = 屏幕的 25%，再夹一层：正文至少留 3 行
+    panel_rows = max(4, int(round(height * _NOTE_PANEL_RATIO)))
+    panel_rows = min(panel_rows, max(4, height - 3))
+    # 正文区 = 总高 - 面板高度
+    text_rows = height - panel_rows
+    # 面板内容区：扣掉它自己那一行提示
+    inner = panel_rows - 1
+    # 引用区占一半（向下取整），编辑区拿剩下的（多一行，写起来舒服些）
+    quote_rows = max(1, inner // 2)
+    edit_rows = max(1, inner - quote_rows)
+    return text_rows, quote_rows, edit_rows
+
+
+def _sub_window(
+    stdscr: Any, nlines: int, ncols: int, begin_y: int, begin_x: int
+) -> Any:
+    """Create one of the note panel's sub windows.
+
+    ``curses.newwin`` is the real API -- a ``curses.window`` object has **no**
+    ``newwin`` method (only ``derwin``), which is why this indirection exists:
+    it is the module level call in production and a seam the tests can replace
+    with a fake window.
+    """
+    # 真终端上就是 curses 的模块级 newwin
+    return curses.newwin(nlines, ncols, begin_y, begin_x)
+
+
+def _note_panel(stdscr: Any, pager: Pager) -> None:
+    """``o``: write a note beside the text, quoting the copied selection.
+
+    A modal mini loop in the same style as the table of contents overlay: the screen
+    is repainted from the main thread, nothing is spawned and every key is read
+    here.  The bottom quarter holds a read only quote area and a
+    :class:`curses.textpad.Textbox`; ``Tab`` swaps the focus, ``Ctrl-S`` stores the
+    note and ``Esc`` closes the panel.
+    """
+    # 终端尺寸
+    height, width = stdscr.getmaxyx()
+    # 算面板布局；屏幕太小就干脆不弹
+    layout = _note_panel_layout(height, width)
+    if layout is None:
+        pager.say("屏幕太小，放不下笔记面板（至少 8 行 8 列）")
+        return
+    # 拆出三块高度
+    text_rows, quote_rows, edit_rows = layout
+    # 两个子窗口：上引用、下编辑（编辑区必须是真窗口，Textbox 要读写它的格子）
+    # 走 _sub_window 而不是直接 curses.newwin：留一个测试能替换的接缝
+    try:
+        quote_win = _sub_window(stdscr, quote_rows, width, text_rows, 0)
+        edit_win = _sub_window(stdscr, edit_rows, width, text_rows + quote_rows, 0)
+    except curses.error:
+        pager.say("屏幕太小，放不下笔记面板")
+        return
+    # 只借 Textbox 的"按键 -> 窗口内容"编辑动作，绝不调用它那个阻塞的 edit()
+    editor = curses.textpad.Textbox(edit_win)
+    # 面板展开期间，折叠提示让位给面板自己的提示
+    pager.note_panel_open = True
+    # 打开时焦点默认在编辑区（引用区只是只读展示）
+    pager.note_focus = "edit"
+    # 模态：阻塞等键；退出时在 finally 里恢复主循环的 1 秒轮询
+    stdscr.timeout(-1)
+    try:
+        while True:
+            # 重画面板这一帧
+            _draw_note_panel(stdscr, pager, quote_win, edit_win, text_rows)
+            try:
+                # 等一个按键（模态，一直等）
+                key = stdscr.get_wch()
+            except curses.error:
+                # 少见的瞬时错误：重画再等
+                continue
+            except KeyboardInterrupt:
+                # Ctrl-C：关面板回阅读
+                return
+            # Esc：关面板回阅读
+            if key in _ESCAPE_KEYS:
+                return
+            # Ctrl+S：把"引用 + 编辑区内容"存成一条笔记
+            if key in _SAVE_KEYS:
+                _save_note(pager, editor)
+                continue
+            # Tab：在引用区 / 编辑区之间切换焦点
+            if key in _TAB_KEYS:
+                pager.note_focus = "quote" if pager.note_focus == "edit" else "edit"
+                continue
+            # 焦点不在编辑区：只读的引用区不接受文字输入
+            if pager.note_focus != "edit":
+                continue
+            # 交给 Textbox：退格、左右光标、回车换行都由它的键绑定负责
+            code = _note_validate(key)
+            if code is None:
+                continue
+            editor.do_command(code)
+    finally:
+        # 恢复主循环的轮询间隔，否则关面板后界面会卡在阻塞读上
+        stdscr.timeout(_TICK_MS)
+        # 面板已折叠
+        pager.note_panel_open = False
+        # 交回两个子窗口（与 _confirm 里 del window 同款写法）
+        del quote_win, edit_win
+        # 子窗口盖住的正文要主窗口重画
+        try:
+            stdscr.touchwin()
+        except curses.error:
+            pass
+
+
+def _note_validate(key: Any) -> Optional[int]:
+    """Turn one ``get_wch`` result into the code :meth:`Textbox.do_command` expects.
+
+    This is the text box's *validator*: the stock widget maps ``Enter`` onto Ctrl-G,
+    which ends the edit and hands the text back, whereas here ``Enter`` becomes the
+    ``NL`` command so it starts a **new line** instead of submitting.  Saving is an
+    explicit key (``Ctrl-S``), so no editor keystroke can close the panel by
+    accident.  ``None`` means "a key the editor does not understand".
+    """
+    # 特殊键（方向键、Home 等）本来就是 int：直接用
+    if isinstance(key, int):
+        # 回车（终端可能报 KEY_ENTER / 10 / 13）：统一走 NL 分支，实现"回车换行"
+        if key in (curses.KEY_ENTER, 10, 13):
+            return curses.ascii.NL
+        return int(key)
+    # 单字符：换成码点（do_command 只认 int）
+    if isinstance(key, str) and len(key) == 1:
+        code = ord(key)
+        # \r（13）也算回车，落进同一个 NL 分支
+        if code == 13:
+            return curses.ascii.NL
+        return code
+    # 其它情况（不该出现的组合键字符串）：忽略
+    return None
+
+
+def _save_note(pager: Pager, editor: Any) -> None:
+    """Store the current quote plus whatever the editor holds as one note."""
+    # 收集编辑区内容（Textbox 自己按行拼好，会剥掉行尾空白）
+    try:
+        text = str(editor.gather()).strip("\n").strip()
+    except curses.error:
+        text = ""
+    # 既没有引用也没写正文：没什么可存的，提醒一句就好
+    if not text and not pager.note_buffer:
+        pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
+        return
+    # 存一条笔记：引用 + 正文 + 时间戳（时间戳格式与仓库其它地方一致）
+    pager.notes.append(
+        {"quote": pager.note_buffer, "text": text, "created": _iso(_now())}
+    )
+    # 存完清空引用与编辑区，方便接着写下一条
+    pager.note_buffer = ""
+    _clear_editor(editor)
+    pager.say("已保存（共 {} 条笔记）".format(len(pager.notes)))
+
+
+def _clear_editor(editor: Any) -> None:
+    """Blank the text box so the next note starts from an empty line."""
+    try:
+        # 清掉窗口内容并把光标放回左上角
+        editor.win.erase()
+        editor.win.move(0, 0)
+        editor.win.refresh()
+    except curses.error:
+        # 窗口已失效（比如正在 resize）：忽略
+        pass
+
+
+def _draw_quote(window: Any, quote: str) -> None:
+    """Paint the read only quote area: ``"> "`` plus the copied selection."""
+    # 子窗口尺寸
+    rows, cols = window.getmaxyx()
+    # 没有引用时给一句引导语，别留一片空白
+    text = quote if quote else _NOTE_QUOTE_EMPTY
+    # 折行按显示宽度算（汉字占 2 列），并给 "> " 和最后一列各留位置
+    width = max(1, cols - len(_NOTE_QUOTE_PREFIX) - 1)
+    lines = _wrap_line(text, width)
+    # 引用区放不下就只画前几行（Phase 1+2 不做引用区滚动）
+    for offset, line in enumerate(lines[:rows]):
+        _addstr(window, offset, 0, _NOTE_QUOTE_PREFIX + line, curses.A_DIM)
+
+
+def _draw_note_panel(
+    stdscr: Any, pager: Pager, quote_win: Any, edit_win: Any, text_rows: int
+) -> None:
+    """Repaint one frame of the panel: the text above, quote then editor below.
+
+    The main window is refreshed **before** the two sub windows: ``stdscr.erase``
+    touches the rows the panel covers, so painting the panel afterwards is what lets
+    it win over the blank cells underneath instead of being wiped by them.
+    """
+    # 主窗口尺寸
+    height, width = stdscr.getmaxyx()
+    # 正文区可用宽度（第 0 列留给书签位）
+    text_width = max(1, width - 1)
+    # 先清主窗口，再画缩小后的正文
+    stdscr.erase()
+    for screen_row, (_, text) in enumerate(
+        pager.visible_rows(max(1, text_rows), text_width)
+    ):
+        # 写笔记时正文不加任何高亮，专心看引用与编辑区
+        _addstr(stdscr, screen_row, 1, text, curses.A_NORMAL)
+    # 最后一行是面板自己的快捷键提示（留出最后一列，避开 curses 右下角限制）
+    room = max(0, width - 1)
+    if room > 0:
+        _addstr(stdscr, height - 1, 0, _pad_line(_NOTE_HINT, room), curses.A_DIM)
+    # 主窗口先刷；它那几行里被面板盖住的部分稍后由子窗口刷回来
+    stdscr.refresh()
+    # 引用区：只读灰字
+    quote_win.erase()
+    _draw_quote(quote_win, pager.note_buffer)
+    quote_win.refresh()
+    # 编辑区的内容由 Textbox 维护，这里只把它刷到屏幕上
+    edit_win.refresh()
+
+
 def _cycle_mode(stdscr: Any, pager: Pager) -> None:
     """``l``: cycle 中文 -> 英文 -> 双语对照, translating the screen as needed."""
     order = MODE_ORDER
@@ -2001,11 +2553,17 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     """Act on one key press; return ``False`` when the pager should quit.
 
     ``n`` follows the specification and moves to the next *search* hit, so
-    chapter hopping lives on ``[`` and ``]`` instead.
+    chapter hopping lives on ``[`` and ``]`` instead.  ``m`` starts mark mode and
+    ``o`` opens the note panel; while marking, every key goes to the selection, so
+    the screen never moves under the cursor.
     """
-    # q / Q / Ctrl-C：退出
+    # q / Q / Ctrl-C：退出（标记模式里也放行，免得用户被困在选区里出不来）
     if key in ("q", "Q", 3):
         return False
+    # 标记模式：只处理选字相关的按键，翻页一律不响应
+    if pager.mark_mode:
+        _handle_mark_key(pager, key)
+        return True
     # 向下翻页：j、空格、回车、下方向键、PageDown
     if key in ("j", " ", "\n", "\r", curses.KEY_DOWN, curses.KEY_NPAGE):
         pager.next_page()
@@ -2057,6 +2615,12 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     # v：查词并收藏
     elif key == "v":
         _mark_word(stdscr, pager)
+    # m：进入标记模式，在这一屏内选一段文字
+    elif key == "m":
+        _enter_mark(pager)
+    # o：展开 / 折叠笔记面板
+    elif key == "o":
+        _note_panel(stdscr, pager)
     # 每次按键后都看看要不要触发"进章自动翻译"
     _maybe_auto_translate(stdscr, pager)
     # True 表示继续阅读
@@ -2323,6 +2887,35 @@ def _enable_mouse() -> None:
         pass
 
 
+def _disable_flow_control() -> None:
+    """Turn off XON/XOFF so ``Ctrl-S`` reaches the app instead of freezing output.
+
+    :func:`curses.wrapper` only calls :func:`curses.cbreak`, which leaves software
+    flow control on: with IXON set, the terminal driver swallows ``Ctrl-S`` (XOFF)
+    and the note panel's save key would never arrive.  Best effort only -- Windows
+    has no :mod:`termios` and a non-tty stdin has nothing to tweak, in which case
+    the call simply does nothing.  ``endwin()`` puts the shell mode back the way
+    :func:`curses.initscr` found it, so nothing has to be undone by hand.
+    """
+    # Windows 没有 termios：直接跳过（那边只能靠别的确认方式）
+    try:
+        import termios
+    except ImportError:  # pragma: no cover - Windows only
+        return
+    try:
+        # 终端文件描述符（stdin 被重定向时它不是 tty，下面会失败）
+        fd = sys.stdin.fileno()
+        # 取出当前终端属性
+        attrs = termios.tcgetattr(fd)
+        # attrs[0] 是输入标志位：清掉 IXON（输出流控）与 IXOFF（输入流控）
+        attrs[0] &= ~(termios.IXON | termios.IXOFF)
+        # 立刻生效
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except (OSError, ValueError, termios.error):  # pragma: no cover - 终端不配合
+        # 拿不到 / 改不了终端属性：静默降级，别影响阅读
+        pass
+
+
 def _mouse_event_delta(pager: Pager, drag: _DragScroll) -> int:
     """读一条排队的鼠标事件，返回该滚几行。"""
     try:
@@ -2348,6 +2941,8 @@ def _run(stdscr: Any, pager: Pager) -> None:
     _init_colors()
     # 请终端上报鼠标/触摸事件（滚轮与拖动都靠它；不支持的终端自动降级）
     _enable_mouse()
+    # 关掉 XON/XOFF 流控，否则 Ctrl+S 会被终端吞掉（失败就静默降级）
+    _disable_flow_control()
     # 触摸拖动用的状态机：记住手指上一次在哪一行
     drag = _DragScroll()
     # get_wch 最多等 1 秒：这样时钟和状态栏能持续刷新

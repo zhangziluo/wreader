@@ -4,16 +4,18 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`570 passed`、`pyright 0 errors / 0 warnings`、
-`tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2565** 条语句上方没有紧邻注释行
+代码库处于**干净、全绿**状态：`595 passed`、`pyright 0 errors / 0 warnings`、
+`tools/` 的 **8** 个校验脚本全绿（新增 `verify_notes.py`），且**已 git 化并推送到 GitHub**
+（`main` 跟踪 `origin/main`）。
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2777** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
 新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
 **CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
-**目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**。
+**目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**、
+**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑；笔记暂存内存，落盘是下一步）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -691,25 +693,96 @@ werd read f1ba2379642f
    给浮层的"按键脚本"测试补了一个**预置按键队列**的 `get_wch`，队列空时抛 `KeyboardInterrupt`，
    保证测试**永不**卡在浮层的阻塞读里（否则会挂死）。
 
+### ㉑ 笔记功能 Phase 1+2：标记模式 + 笔记面板（2026-09-23）
+
+**需求**：给阅读器加"标记一段 → 写笔记"。规格给的键位 `v`（标记）与 `n`（笔记面板）
+**与既有功能冲突**（`v` = 查词入库、`n` = 下一个搜索命中），已让用户拍板：
+**保留现有键、新功能改用空闲键 `m`（标记）/ `o`（笔记面板）**，零破坏（规格里的
+"`j`/`Tab` 目录跳转"也是笔误 —— 实际 `j` = 下一页、`Tab` = 目录）。
+
+**`reader.py` 新增状态（都在 `Pager` 上，全是普通数据）**：`mark_mode` /
+`mark_start` / `mark_end`（`(屏幕行, 行内字符下标)` 二元组）/ `note_buffer` /
+`notes`（内存列表）/ `note_panel_open` / `note_focus`（`"quote"` | `"edit"`）/
+`viewport`（每帧由 `_draw` 填入的可见行 `[(源行, 文本), ...]`）。
+
+**纯函数（可脱离终端单测）**：`_mark_clamp`（夹进可见范围）、`_mark_move`（h/j/k/l + 方向键）、
+`_mark_normalize`（方向无关的左上/右下）、`_mark_selection`（**按源行分组拼接**：同一源行的折行碎片
+直接接上、跨源行才插换行；超 `NOTE_MAX_CHARS = 2000` 截断并返回 `truncated`）、
+`_mark_row_span`（某屏幕行要高亮的字符区间）、`_note_panel_layout`（正文/引用/编辑三块高度）、
+`_note_validate`（Textbox 的 validator，回车 → `curses.ascii.NL` 即"换行"，
+**没有任何键映射到 Ctrl-G**，所以回车绝不会意外提交）。
+
+**标记坐标为什么是「屏幕行 + 字符下标」**：`viewport` 就是 `visible_rows()` 的返回值，
+高亮/取词因此天然对齐折行与汉字 2 列宽（`_draw_marked_row` 用 `_text_width` 累加列偏移，
+把一行拆成 前段 / 反色选中段 / 后段 三块写）。**标记模式只在一屏内选字，绝不翻页**。
+
+**笔记面板 = 模态小循环**（与 `_toc_overlay` 同款，**不另开线程**）：下方 25% 两个子窗口，
+引用区（`A_DIM` 只读，`> ` 前缀 + `_wrap_line` 折行）+ 编辑区（`curses.textpad.Textbox`）。
+**刻意不调用 `Textbox.edit()`**（那是阻塞循环），改为在主循环里逐键喂 `do_command()`，
+这样 `Tab` / `Ctrl+S` / `Esc` 都能自己拦下来。
+
+**`_disable_flow_control()`（`_run` 里调用）**：`curses.wrapper` 只调 `cbreak()`，`IXON` 仍开着，
+行规程会把 `Ctrl-S`（XOFF）吃掉 → 保存键永远到不了程序。故尽力用 `termios` 清掉 `IXON|IXOFF`；
+Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` 会把 shell mode 还原，无需手工回滚。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest` | **595 passed**（570 + `test_reader` 新增 25） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` | **RESULT: OK** |
+| `tools/check_doc_numbers.py` | **RESULT: ALL OK**（`reader.py` **3112** 行、`test_reader.py` **191** 项、总数 **595** 已同步） |
+| `tools/verify_wrap.py` | `OK: 40077 checks passed` |
+| `tools/verify_draw.py` | `OK: 420 draw checks passed` |
+| `tools/verify_mouse.py` | `RESULT: 全部通过`（8 项，回归） |
+| `tools/verify_notes.py` | **`RESULT: 全部通过`（5 项，新增）**：真 pty 里 `m → ll → y → o → abc → Tab×2 → Ctrl+S → Esc → q`，对账引用区 `> …`、面板提示行、`Ctrl+S` 存成功、折叠提示 `按o展开`、无 traceback |
+| `py_compile` | 25 个 `.py` 全过 |
+
+**踩到的坑**：
+1. ⚠️ **`stdscr.newwin` 根本不存在**！第一版写成 `stdscr.newwin(...)`，单测**全绿**
+   （`FakeStdscr` 恰好实现了 `newwin`），但真 curses 的 `curses.window` 对象**只有 `derwin`** ——
+   真 pty 里立刻 `AttributeError: '_curses.window' object has no attribute 'newwin'`。
+   现改为 `reader._sub_window(stdscr, ...)` 这层间接（生产用 `curses.newwin`，测试 monkeypatch 掉）。
+   **教训：假窗口实现得太像真的，反而会掩盖真 API 的差异；UI 改动必须过一遍真 pty。**
+2. **面板的绘制顺序有讲究**：`stdscr.erase()` 会把面板覆盖的那几行也标脏，所以必须
+   **主窗口先 `refresh()`、两个子窗口后 `refresh()`**，否则面板会被主窗口的空白格擦掉。
+3. **`verify_notes.py` 必须显式给子进程一个 `TERM`**：非交互运行时 `TERM` 可能没设 → curses 起不来 →
+   子进程提前退出 → 写 pty 直接 `OSError: EIO`（`verify_mouse.py` 早就显式设了 `TERM`，第一版漏了）。
+4. 纯函数单测一开始把"同一源行折成两行"的样例写错（第二行的 `source_line` 其实是 0，
+   所以不该出现换行），断言立刻抓到；说明这类坐标/切片逻辑靠**纯函数 + 精确断言**很值钱。
+5. 选到"下一行行首"会带出一个换行 → `_copy_selection` 里先 `rstrip()` 掉尾部空白再判定空选区。
+
+**已知局限（同时写进了 README 两份的「已知问题」与「使用指南」场景 F）**：
+- 笔记**只存内存**（`Pager.notes`），退出阅读器就没了；落盘见待办 #1。
+- 编辑区基于 `curses.textpad.Textbox`，**中文输入依赖系统 IME**，实际以英文 / 拼音为主。
+- 引用区不做滚动（放不下只画前几行）。
+
 ## 待办 / 下一步
 
-按优先级（本会话已完成的"git 化"一项已移除，序号整体前移）：
+按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools"三项已移除）：
 
-1. ~~更新 `README.md` 的过期内容~~ → **已完成（2026-09-22）**，详见下方 ⑩；
-   两份 README 的数字都用 `tools/check_doc_numbers.py` 逐项核过（`ALL OK`；最近一次同步见 ⑰）。
+1. **笔记落盘（Phase 3）**——最高优先级的未完成功能。现在 `m` 标记 + `o` 面板已经能用，
+   但 `Ctrl+S` 存下的笔记只在 `Pager.notes`（内存）里，退出阅读器即消失。要做的事：
+   新增 `wreader/notes.py`（纯函数 + 纯文本存储，遵守硬约束），存到 `~/.wreader/notes/<book_id>.json`，
+   字段沿用 `{"quote", "text", "created"}` 再补 `line`（源行号，与书签/章节同一套坐标）；
+   `open_reader` 里加载、`save_session` 路径上写回；`werd notes <book_id>` 之类 CLI 入口可选。
+   ⚠️ 落盘时**只写源行号**（`mark_start` 的屏幕行会随终端宽度变化，不能当坐标存）。
 2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
    `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
 3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
-4. ~~把 `/tmp` 的校验脚本搬进 `tests/` 或 `tools/`~~ → **已完成（2026-09-22）**：
-   7 个脚本都在 `tools/` 里（见 `techContext.md` 的「命令」一节），`/tmp` 里已无依赖。
-5. 可选：`werd continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
+4. 可选：`werd continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
    走 `SCHEMA`（项目约定：阅读行为不写魔数）。
-6. 可选（产品取舍，先问再做）：`werd continue` 只"列 id"，不做交互选择。
+5. 可选（产品取舍，先问再做）：`werd continue` 只"列 id"，不做交互选择。
    若哪天想省掉"抄 id"这一步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+
    无参时续读最近一本 —— 但那会让程序替用户猜要读哪本，需先确认。
-7. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照
+6. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照
    README 的手动步骤来（`pip install -e ".[windows]"` + 在 `$PROFILE` 里加函数）。
    要补的话就写一个 `install.ps1`，做同样六件事（PowerShell 版的别名是 function 而不是 alias）。
+7. 可选：笔记编辑区的**中文输入**目前插不进去（`curses.textpad.do_command` 只认
+   `curses.ascii.isprint`，宽字符直接跳过）。要支持得自己接管插入 + 自己 gather
+   （`Textbox.gather()` 走 `curses.ascii.ascii(inch())`，宽字符会被截成 8 位）。
+   先记着，等用户真的抱怨再说。
 
 ## 已知会话级注意事项
 
@@ -725,3 +798,11 @@ werd read f1ba2379642f
 - **git 提交要连 memory-bank 一起**：协议要求"每完成一段工作就更新 `activeContext.md`"，
   所以收尾时 `git status` 应当干净；文档改动和代码改动一起 commit + push，别攒着。
   推之前留意别把 `book/`（已忽略）或临时脚本加进去。
+- **改 UI 一定要跑真 pty 验证**：`tools/verify_notes.py` 是新增的，它抓出了
+  `stdscr.newwin` 不存在（假窗口把它掩盖了）。**`FakeStdscr` 实现得越像真 curses，
+  越可能掩盖真 API 的差异** —— 只要动了子窗口 / Textbox / 鼠标 / 颜色，就跑一遍
+  `verify_notes.py` / `verify_mouse.py`（都要真 pty；非交互运行时记得给子进程显式设 `TERM`）。
+- **curses 子窗口的刷新顺序**：`stdscr.erase()` 会连带把子窗口覆盖的行标脏，
+  所以画叠窗时必须**先 `refresh()` 主窗口、再 `refresh()` 子窗口**，否则子窗口内容被擦掉。
+- **`Ctrl+S` 依赖 `_disable_flow_control()`**：面板的保存键走 `\x13`，终端 `IXON` 没关的话
+  会被行规程吞掉。改笔记面板的按键时，别把它当成"永远能收到"的普通键。

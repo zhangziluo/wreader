@@ -7,14 +7,14 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **570 passed**，全离线、不碰真实数据，约 4~25 秒 |
+| 测试 | **595 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2565** 条语句上方没有紧邻注释行（口径与处置见待办 #4；注释密度反而略升：2279/12491 ≈ 0.182 → 2565/15414 ≈ 0.166） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2777** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**43 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**44 个跟踪文件**（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 **25 个** .py 通过（wreader 9 + tests 9 + tools 7） |
-| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过 |
+| 编译 | `py_compile` 全部 **26 个** .py 通过（wreader 9 + tests 9 + tools 8） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过、笔记 5 项全过 |
 
 ## 已完成（可用的功能）
 
@@ -43,7 +43,7 @@
 - 三种视图：中文 / 英文 / 双语对照（`l` 循环、`c` 直达中文）；切视图时按需翻译，原文语言零成本。
 - 按键：`q Q Ctrl-C` 退出、`j/空格/回车/↓/PageDown` 下翻、`k/↑/PageUp` 上翻、`g` 跳行、
   `G` 到末尾、`[` `]` 章节跳转、`/` 搜索、`n` 下一个命中、`b` 书签、`l` 视图、`c` 中文、
-  `t` 翻当前屏（不缓存）、`T` 翻整章（写缓存）、`v` 查词入库。
+  `t` 翻当前屏（不缓存）、`T` 翻整章（写缓存）、`v` 查词入库、`m` 标记、`o` 笔记面板。
 - 状态栏两行：倒数第二行由 `reader.status_bar_format` 拼接（12 个可用 token，未知 token 跳过），
   最后一行是消息/快捷键提示；屏幕最左一列是书签栏（`★`）。
 - **按终端宽度自动换行**（2026-09 新增），CJK 按 2 列宽计算，英文按词断行。
@@ -60,6 +60,20 @@
   ⚠️ 逐行滚动不经过翻页路径，所以**不受翻页重叠影响**（它本来就是一行一行走，上下文天然连着）。
 - 生词下划线、搜索高亮（当前命中反色、其它命中加粗）、章节超 30 分钟提醒看中文。
 - 进度落库：`q`/`Ctrl-C` 都保存位置、书签、本次时长；`auto_save_interval` 默认 60 秒兜底。
+
+### 笔记（标记模式 + 笔记面板，2026-09-23 新增，Phase 1+2 = 只有 UI）
+- **标记模式** `m`：光标变成反色方块，`h/j/k/l` 或方向键扩展选区（`A_REVERSE` 高亮），
+  `y` 把选中的文字复制进引用缓冲区（超 2000 字截断并提示），`Esc` 取消。
+  **只在一屏内选字、绝不翻页**；坐标是 `(屏幕行, 行内字符下标)`，进 `Pager.viewport`。
+- **笔记面板** `o`：占屏幕下方 25%（正文区相应缩小），两个 `curses.newwin` 子窗口 ——
+  引用区（只读、`A_DIM`、`> ` 前缀）显示 `y` 复制的内容，编辑区是 `curses.textpad.Textbox`
+  （回车换行、退格、左右光标）；`Tab` 切焦点、`Ctrl+S` 保存、`Esc` 关闭。
+  折叠时底部提示行显示 `📝 N条笔记 | 按o展开`。
+- 实现要点：模态小循环（与目录浮层同款、不另开线程）；**不调用阻塞的 `Textbox.edit()`**，
+  逐键喂 `do_command()`；`_note_validate` 把回车映射成 `NL`（换行）而非 `Ctrl-G`（提交）；
+  `_run` 里 `_disable_flow_control()` 尽力关掉 `IXON`（否则 `Ctrl+S` 被行规程吞掉）。
+- ⚠️ **笔记只存内存**（`Pager.notes`），退出即失；落盘是下一步（见待办高优先级 #1）。
+- ⚠️ 编辑区中文输入依赖 IME（`do_command` 只认 `curses.ascii.isprint`），实际以英文 / 拼音为主。
 
 ### 翻译
 - 两个后端：`google`（deep-translator）、`deepseek`（HTTP + SSE 流式）。
@@ -93,13 +107,14 @@
   全程用 `.venv/bin/python -m pip` 而**不 activate**（守住"不污染 PATH"这条约定），
   并自动往 `~/.bashrc` / `~/.zshrc` 写别名 —— 装完重启终端即可用。
   选项：`--dev`（多装 pytest）/ `--no-alias`（不碰 rc）/ `--help`；用 `sh install.sh` 跑会自动 `exec bash` 转交。
-- 474 → **545** 项自动化测试（全离线、每测试独立 `tmp_path`）。
+- **595** 项自动化测试（全离线、每测试独立 `tmp_path`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
 - `wreader/` 8 个 + `tests/` 8 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
-  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 2279 条语句上方没有紧邻注释行），
+  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **2777** 条语句上方没有紧邻注释行），
   实际遵循的风格是"一段逻辑配一段中文注释"，详见待办 #4。
-- 校验脚本已从 `/tmp` 搬进 **`tools/`**（2026-09-22）：`check_docs.py`、`check_doc_numbers.py`、
-  `check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py` + `tools/README.md`。
+- 校验脚本已从 `/tmp` 搬进 **`tools/`**（现共 **8** 个）：`check_docs.py`、`check_doc_numbers.py`、
+  `check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py`、`verify_mouse.py`、
+  `verify_notes.py`（2026-09-23 新增，真 pty 验证笔记流程）+ `tools/README.md`。
   统一从 `__file__` 推算仓库根（任意目录可跑）、退出码 0/1（可接 CI），并纳入 `[tool.pyright]`。
 - **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
   `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
@@ -108,6 +123,10 @@
 ## 待办
 
 ### 高优先级
+0. **笔记落盘（Phase 3）**——`m` 标记 + `o` 面板已可用，但 `Ctrl+S` 存的笔记只在
+   `Pager.notes`（内存）里，退出即失。要做：新增 `wreader/notes.py`（纯函数 + 纯文本），
+   存 `~/.wreader/notes/<book_id>.json`，字段 `{"line", "quote", "text", "created"}`；
+   `open_reader` 加载、退出时写回。⚠️ **只写源行号**（屏幕行随终端宽度变化，不能当坐标）。
 1. ~~更正 `README.md` / `README.en.md` 的过期信息~~ → **已完成（2026-09-22）**：
    8 个源码文件的行数、测试总数 **494**、`test_reader.py` **115** 全部按实测改对；
    「已知问题」里补记了自动换行 / 按显示列数 / 配色跟随终端 三项修复；
@@ -155,6 +174,8 @@
 | `read` 只能真 TTY | 重定向即报错 | 报错文案已测 |
 | Windows 需 `windows-curses` | 多一个可选依赖 | `pip install -e ".[windows]"` |
 | `progress` 数值不强制转型 | 字符串值也能读但不会自动改回数字 | 消费方已用 `int()` 兜底 |
+| 笔记只存内存 | 退出阅读器后 `Ctrl+S` 存的笔记全部消失 | Phase 1+2 只做 UI，落盘见待办高优先级 #0；已写进两份 README 的「已知问题」 |
+| 笔记编辑区中文输入受限 | 依赖系统 IME，实际以英文 / 拼音为主 | `curses.textpad.do_command` 只认 `curses.ascii.isprint`，宽字符被跳过 |
 | 终端自身限制透明 | 若终端在备用屏幕禁用透明度，应用无法绕过 | 属终端设置，非应用缺陷 |
 
 ## 决策演变（记录为什么变成现在这样）
@@ -186,4 +207,9 @@
 | **2026-09-22** | 新增 `werd continue` 列"最近打开阅读的三本书" | 用户诉求是「重启之后一到两行就能开 werd 看书」：原先必须 `werd list` 找 id 再 `werd read`。`progress.last_read` 其实**早就在退出阅读器时写好了**，缺的只是一个入口。**故意只"列 id"、不自动打开第一本** —— 最近读的不一定是此刻想读的，程序不该替用户猜；而且"列 id + 抄 id"正好就是用户要的「一到两行」 |
 | **2026-09-22** | 新增 `./install.sh`，把安装压成「三行命令」（clone → cd → install.sh） | 用户诉求：简化安装流程。原先要 `venv` → `activate` → `pip install -e .` 三步，且"重启后能用 werd"还得**另外**配别名（散在两节文档里）。脚本把这些串成**一条幂等命令**。别名写入做成**自动但可跳过**（`--no-alias`），而不是不做 —— 用户明确选了"自动写入、装完重启即可用"；同时保留"手动安装"作为 Windows / 脚本跑不动时的退路 |
 | **2026-09-23** | CLI 命令改名 `wreader` → `werd`（`pyproject.toml` 的 console script + `cli.py` 的 `prog` + `install.sh` 的别名与路径 + 全部文档示例）；**包名 / 仓库名 / 数据目录仍叫 `wreader`** | 用户诉求：命令行太长不好敲。刻意把"命令名"与"包名 / 数据目录"分开 —— 数据目录 `~/.wreader`、环境变量 `WREADER_HOME`、`python -m wreader.cli`、`from wreader import` 一律不动，换来的好处是**零数据迁移**、旧配置与既有测试照常可用；真正变的只有用户敲的那个词 |
-| **2026-09-23** | 新增目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`；缓存放 `~/.wreader/cache/<book_id>_toc.json` | 用户诉求是"目录/章节跳转 + 进度百分比 + 缓存 + 源文件变了失效"。**没有从零造章节系统** —— 章节表导入时早就有（`library.parse_chapters`），跳转原语也是现成的（`Pager.move_to`），所以只补了"百分比 + epub nav 标题 + 可重建缓存 + UI + CLI"。**目录键用 `Tab` 而不是规格里的 `j`**：`j` 已是"下一页"，占用它会毁掉翻页。**epub nav 的行号只在内置提取器路径上可信**（用"spine 布局总行数 == 正文行数"当判据），外部 `ebook-convert` 产出的正文一律退回正则 —— 宁可标题退化，也不给错行号。百分比复用 `library.position_percentage`，**不另造一套**，否则目录与状态栏会互相打脸 |
+| **2026-09-23** | **笔记键位用 `m`（标记）/ `o`（面板），而不是规格里的 `v` / `n`** | 规格给的 `v` 与 `n` **已被占用**（`v` = 查词入库、`n` = 下一个搜索命中），且都写在底部提示栏与三份文档里。让用户拍板后选**零破坏**：保留现有键，新功能用两个空闲键。规格里"`j`/`Tab` 目录跳转"同样是笔误（`j` = 下一页）—— **规格可能与现状不一致，动手前先对一遍现有键位** |
+| **2026-09-23** | 标记坐标用 **`(屏幕行, 行内字符下标)`**，进 `Pager.viewport`（`_draw` 每帧刷新）；标记**只在一屏内选字、绝不翻页** | `viewport` 就是 `visible_rows()` 的返回值，所以高亮与取词天然对齐折行与汉字 2 列宽（列偏移用 `_text_width` 累加），不需要另造一套「屏幕 ↔ 源文」映射。限制在一屏内省掉了滚动时坐标失效的整类问题 |
+| **2026-09-23** | 笔记面板做成**模态小循环**（同目录浮层），并**逐键调 `Textbox.do_command()` 而非 `Textbox.edit()`** | `edit()` 是阻塞循环，`Tab`/`Ctrl+S`/`Esc` 没法自己拦；逐键喂 `do_command` 既复用了 Textbox 现成的 Emacs 键绑定（退格/左右光标/回车换行），又把主循环控制权留在自己手里，且**不另开线程**（符合"面板渲染在主循环里"的要求）。`_note_validate` 把回车映射成 `NL` 而**不映射 `Ctrl-G`**，回车因此永远不会意外提交 |
+| **2026-09-23** | `_run` 里新增 `_disable_flow_control()`（尽力关 `IXON`/`IXOFF`） | `curses.wrapper` 只调 `cbreak()`，`IXON` 仍开着 → 行规程把 `Ctrl-S`（XOFF）吃掉，保存键永远到不了程序。只在 POSIX 生效，Windows / 非 tty 静默降级；`endwin()` 负责还原，不需要手工回滚。**这是"真 pty 才验得出来"的那类问题**（单测不会经过行规程） |
+| **2026-09-23** | 新增 `tools/verify_notes.py`（真 pty 端到端），并把子窗口创建抽成 `reader._sub_window()` | 第一版直接写 `stdscr.newwin(...)`，`FakeStdscr` 恰好也有 `newwin` 所以**单测全绿**，但真 curses 的 window 对象**只有 `derwin`** —— 真 pty 里立刻 `AttributeError`。抽出 `_sub_window()` 后生产用 `curses.newwin`、测试替换成假窗口。**教训：假窗口越像真的，越会掩盖真 API 的差异；UI 改动必须过真 pty** |
+

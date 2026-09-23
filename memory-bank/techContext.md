@@ -149,6 +149,7 @@ python tools/verify_wrap.py                   # 折行属性（期望 OK: 40077 
 python tools/verify_draw.py                   # 绘制不越界（期望 OK: 420 draw checks passed）
 python tools/verify_colors.py                 # 需 pty（见 tools/README.md 的 script 用法）
 python tools/verify_mouse.py                  # 真 pty 端到端验证滚轮/触摸拖动（期望 RESULT: 全部通过）
+python tools/verify_notes.py                  # 真 pty 端到端验证标记 + 笔记面板（期望 RESULT: 全部通过）
 
 # 不污染真实数据做实验
 export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox/novels
@@ -178,15 +179,15 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `tests/test_cli.py` | 35 |
 | `tests/test_config.py` | 51 |
 | `tests/test_library.py` | 119 |
-| `tests/test_reader.py` | **166** |
+| `tests/test_reader.py` | **191** |
 | `tests/test_stats.py` | 76 |
 | `tests/test_toc.py` | 18 |
 | `tests/test_translator.py` | 74 |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **570** |
+| **合计** | **595** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 新增目录 / 章节跳转，
-> 行数、测试总数 **570**、`test_reader.py` **166**、新文件 `test_toc.py` **18**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 新增笔记功能 Phase 1+2，
+> `reader.py` **3112** 行、测试总数 **595**、`test_reader.py` **191**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 
 ## 样例数据

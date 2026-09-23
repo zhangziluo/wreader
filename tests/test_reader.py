@@ -11,10 +11,12 @@ from __future__ import annotations
 
 # 用 curses 的常量（A_REVERSE、KEY_DOWN 等）做断言
 import curses
+# curses.ascii：笔记面板的 validator 会把回车映射成 NL
+import curses.ascii
 # 注入固定日期/时间
 from datetime import date, datetime
 # 类型注解
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # pytest.raises / parametrize / fixture
 import pytest
@@ -46,6 +48,10 @@ class FakeStdscr:
         self.screen: List[List[str]] = [[" "] * width for _ in range(height)]
         # 需要读键的循环（目录浮层）预置的按键队列
         self.keys: List[Any] = []
+        # 子窗口（笔记面板用 stdscr.newwin 建了两个）：建过就记下来，方便断言
+        self.windows: List[FakeStdscr] = []
+        # 子窗口在屏幕上的起始坐标（只有 newwin 出来的才会有意义）
+        self.begin: Tuple[int, int] = (0, 0)
 
     # -- the window API the reader uses ---------------------------------
     def getmaxyx(self) -> Tuple[int, int]:
@@ -101,6 +107,72 @@ class FakeStdscr:
             if 0 <= row < self.height and 0 <= column + offset < self.width:
                 self.screen[row][column + offset] = character
 
+    # -- the slice of the window API the Textbox needs -------------------
+    def newwin(
+        self, nlines: int, ncols: int, begin_y: int, begin_x: int
+    ) -> FakeStdscr:
+        # 笔记面板建两个子窗口：各给一个独立的假窗口，方便断言面板画/编辑了什么
+        child = FakeStdscr(height=nlines, width=ncols)
+        # 记下它在屏幕上的位置（面板靠这个把子窗口摆到下半屏）
+        child.begin = (begin_y, begin_x)
+        # 记到父窗口上，测试从 window.windows 就能拿到
+        self.windows.append(child)
+        return child
+
+    def getch(self) -> int:
+        # Textbox 自己那个 edit() 循环才会用它；这里做个等价实现以防万一
+        if not self.keys:
+            raise KeyboardInterrupt
+        key = self.keys.pop(0)
+        return ord(key) if isinstance(key, str) else int(key)
+
+    def getyx(self) -> Tuple[int, int]:
+        # textpad 每个编辑动作前都会先问光标在哪
+        return self.cursor_row, self.cursor_column
+
+    def addch(self, ch: Any) -> None:
+        # curses 的 addch 既收字符也收字符码；写完光标右移一格
+        character = chr(ch) if isinstance(ch, int) else str(ch)
+        # 在光标处落下这个字符
+        if 0 <= self.cursor_row < self.height and 0 <= self.cursor_column < self.width:
+            self.screen[self.cursor_row][self.cursor_column] = character
+            self.writes.append((self.cursor_row, self.cursor_column, character, 0))
+        # 光标右移（夹住右边界，模拟 curses）
+        self.cursor_column = min(self.cursor_column + 1, max(0, self.width - 1))
+
+    def inch(self, y: Optional[int] = None, x: Optional[int] = None) -> int:
+        # 取某格的字符码：textpad 靠它找行尾、把编辑内容拼回来
+        row = self.cursor_row if y is None else y
+        column = self.cursor_column if x is None else x
+        # 越界当空格，免得 textpad 拿到怪值
+        if not (0 <= row < self.height and 0 <= column < self.width):
+            return 32
+        character = self.screen[row][column]
+        return ord(character) if len(character) == 1 else 32
+
+    def delch(self) -> None:
+        # 删除光标处字符：整行左移一格，行尾补一个空格
+        if 0 <= self.cursor_column < self.width:
+            row = self.screen[self.cursor_row]
+            del row[self.cursor_column]
+            row.append(" ")
+
+    def clrtoeol(self) -> None:
+        # 从光标清到行尾
+        row = self.screen[self.cursor_row]
+        for column in range(self.cursor_column, self.width):
+            row[column] = " "
+
+    def deleteln(self) -> None:
+        # 删掉当前行：下面的行整体上移，末行清空
+        del self.screen[self.cursor_row]
+        self.screen.append([" "] * self.width)
+
+    def insertln(self) -> None:
+        # 在当前行插入一个空行：整体下移，丢掉最后一行
+        self.screen.insert(self.cursor_row, [" "] * self.width)
+        del self.screen[self.height]
+
     # -- helpers for the assertions -------------------------------------
     def row(self, index: int) -> str:
         # 取某一行的文本（去掉右侧空白，方便比较）
@@ -123,6 +195,18 @@ def window() -> FakeStdscr:
 @pytest.fixture
 def pager(pager_factory):
     return pager_factory()
+
+
+# 笔记面板用的假窗口：真 curses 只有模块级的 curses.newwin（window 对象没有 newwin
+# 方法，只有 derwin），所以把读者里那个建窗接缝换成假窗口 —— 子窗口才会被记进 window.windows
+@pytest.fixture
+def panel_window(window, monkeypatch):
+    def fake_newwin(stdscr, nlines: int, ncols: int, begin_y: int, begin_x: int):
+        # 借父假窗口的 newwin，子窗口才会被记进父窗口的 windows 列表
+        return window.newwin(nlines, ncols, begin_y, begin_x)
+
+    monkeypatch.setattr(reader, "_sub_window", fake_newwin)
+    return window
 
 
 # ------------------------------------------------------------------ pure helpers
@@ -1776,3 +1860,280 @@ def test_toc_overlay_without_chapters_reports_it(window, pager_factory) -> None:
     pager = pager_factory()
     reader.handle_key(window, pager, "\t")
     assert "没有识别出章节" in pager.current_message()
+
+
+# ------------------------------------------------ mark mode (selection maths)
+def test_mark_clamp_keeps_the_cursor_on_screen() -> None:
+    rows = [(0, "abc"), (1, ""), (2, "中文字")]
+    # 正常范围原样返回
+    assert reader._mark_clamp(rows, 1, 0) == (1, 0)
+    # 行越界夹回来
+    assert reader._mark_clamp(rows, 99, 0) == (2, 0)
+    assert reader._mark_clamp(rows, -5, 0) == (0, 0)
+    # 列越界夹到该行最后一个字符（汉字也按"一个字符"算一步）
+    assert reader._mark_clamp(rows, 2, 99) == (2, 2)
+    # 空行只有第 0 列可选
+    assert reader._mark_clamp(rows, 1, 5) == (1, 0)
+    # 一屏都没有：光标钉在 (0, 0)
+    assert reader._mark_clamp([], 3, 4) == (0, 0)
+
+
+def test_mark_move_follows_letters_and_arrows() -> None:
+    rows = [(0, "abc"), (1, "de")]
+    # h / ← 往左
+    assert reader._mark_move(rows, 0, 1, "h") == (0, 0)
+    assert reader._mark_move(rows, 0, 1, curses.KEY_LEFT) == (0, 0)
+    # l / → 往右
+    assert reader._mark_move(rows, 0, 1, "l") == (0, 2)
+    assert reader._mark_move(rows, 0, 1, curses.KEY_RIGHT) == (0, 2)
+    # j / ↓ 往下，落到短行时列被夹住
+    assert reader._mark_move(rows, 0, 2, "j") == (1, 1)
+    # k / ↑ 往上
+    assert reader._mark_move(rows, 1, 1, "k") == (0, 1)
+    # 两端都夹住
+    assert reader._mark_move(rows, 0, 0, "h") == (0, 0)
+    assert reader._mark_move(rows, 1, 1, "j") == (1, 1)
+
+
+def test_mark_move_ignores_paging_keys() -> None:
+    rows = [(0, "abc"), (1, "def")]
+    # 翻页键在标记模式里不动光标：标记模式绝不翻页
+    assert reader._mark_move(rows, 0, 1, " ") == (0, 1)
+    assert reader._mark_move(rows, 0, 1, curses.KEY_NPAGE) == (0, 1)
+
+
+def test_mark_normalize_orders_both_directions() -> None:
+    # 已经左上 -> 右下：原样
+    assert reader._mark_normalize((0, 1), (2, 3)) == ((0, 1), (2, 3))
+    # 反向标记：交换成同一顺序
+    assert reader._mark_normalize((2, 3), (0, 1)) == ((0, 1), (2, 3))
+    # 同一行：按列排
+    assert reader._mark_normalize((1, 5), (1, 2)) == ((1, 2), (1, 5))
+
+
+def test_mark_selection_reads_the_characters_in_the_range() -> None:
+    rows = [(0, "hello world")]
+    # 末列包含在内： [0, 4] 就是前五个字符
+    assert reader._mark_selection(rows, (0, 0), (0, 4)) == ("hello", False)
+    # 反向标记结果一样
+    assert reader._mark_selection(rows, (0, 4), (0, 0)) == ("hello", False)
+
+
+def test_mark_selection_glues_the_wrapped_rows_of_one_line() -> None:
+    # 同一个源行被折成两条屏幕行：拼回去不该多出换行
+    rows = [(0, "第一章"), (0, "正文"), (1, "第二章")]
+    assert reader._mark_selection(rows, (0, 0), (2, 2)) == ("第一章正文\n第二章", False)
+
+
+def test_mark_selection_truncates_at_the_limit() -> None:
+    rows = [(0, "abcdef")]
+    # 超限：截断并如实报告
+    assert reader._mark_selection(rows, (0, 0), (0, 5), limit=3) == ("abc", True)
+    # 没超限：原样
+    assert reader._mark_selection(rows, (0, 0), (0, 2)) == ("abc", False)
+    # limit=0 表示不限长
+    assert reader._mark_selection(rows, (0, 0), (0, 5), limit=0) == ("abcdef", False)
+    # 空屏：空字符串
+    assert reader._mark_selection([], (0, 0), (1, 1)) == ("", False)
+
+
+def test_mark_row_span_covers_only_the_selected_rows() -> None:
+    # 选区之外的行没有高亮
+    assert reader._mark_row_span(3, "text", (0, 0), (1, 2)) is None
+    # 单行选区
+    assert reader._mark_row_span(0, "abcdef", (0, 1), (0, 3)) == (1, 3)
+    # 跨行：第一行反色到行尾、中间整行、最后一行从行首
+    assert reader._mark_row_span(0, "abc", (0, 1), (2, 1)) == (1, 2)
+    assert reader._mark_row_span(1, "def", (0, 1), (2, 1)) == (0, 2)
+    assert reader._mark_row_span(2, "ghij", (0, 1), (2, 1)) == (0, 1)
+
+
+# ------------------------------------------------------- mark mode (keys/UI)
+def _draw_once(window, pager) -> None:
+    """Paint one frame so the Pager knows which rows are on screen."""
+    # 标记坐标是"屏幕行"下标，所以先得有这一帧的可见行
+    reader._draw(window, pager, datetime(2026, 1, 1, 12, 0, 0))
+
+
+def test_mark_key_enters_mark_mode(window, pager) -> None:
+    _draw_once(window, pager)
+    assert reader.handle_key(window, pager, "m") is True
+    # 光标落在当前屏首行行首，起点终点重合（那个反色方块就是它）
+    assert pager.mark_mode is True
+    assert pager.mark_start == (0, 0)
+    assert pager.mark_end == (0, 0)
+    assert "标记" in pager.current_message()
+
+
+def test_mark_mode_never_pages(window, pager) -> None:
+    _draw_once(window, pager)
+    reader.handle_key(window, pager, "m")
+    start = pager.position
+    # j / k 在标记模式里是移动光标，空格干脆无操作 —— 位置一动不动
+    reader.handle_key(window, pager, "j")
+    reader.handle_key(window, pager, "k")
+    reader.handle_key(window, pager, " ")
+    assert pager.position == start
+
+
+def test_mark_and_copy_puts_the_text_into_the_buffer(window, pager) -> None:
+    _draw_once(window, pager)
+    # 进入标记后连按两下 l：向右选两个字（BOOK_LINES[0] = "第一章 科学边界"）
+    reader.handle_key(window, pager, "m")
+    reader.handle_key(window, pager, "l")
+    reader.handle_key(window, pager, "l")
+    assert pager.mark_end == (0, 2)
+    # y：复制 -> 退出标记 -> 缓冲区里是选中的文字
+    reader.handle_key(window, pager, "y")
+    assert pager.mark_mode is False
+    assert pager.note_buffer == "第一章"
+    assert pager.mark_start is None and pager.mark_end is None
+    assert "已复制" in pager.current_message()
+
+
+def test_mark_can_be_cancelled(window, pager) -> None:
+    _draw_once(window, pager)
+    reader.handle_key(window, pager, "m")
+    reader.handle_key(window, pager, "l")
+    # Esc：清空标记状态，缓冲区不动
+    reader.handle_key(window, pager, "\x1b")
+    assert pager.mark_mode is False
+    assert pager.mark_start is None and pager.mark_end is None
+    assert pager.note_buffer == ""
+    assert "已取消" in pager.current_message()
+
+
+def test_mark_mode_paints_the_selection_in_reverse_video(window, pager) -> None:
+    _draw_once(window, pager)
+    reader.handle_key(window, pager, "m")
+    reader.handle_key(window, pager, "l")
+    reader.handle_key(window, pager, "l")
+    # 重画一帧，看反色段画出来没有
+    window.writes.clear()
+    _draw_once(window, pager)
+    reversed_text = [
+        text for _row, _col, text, attr in window.writes if attr & curses.A_REVERSE
+    ]
+    assert "第一章" in reversed_text
+
+
+def test_mark_without_anything_to_mark_says_so(pager) -> None:
+    # 空屏（viewport 还没填）：给提示而不是进标记模式
+    empty = FakeStdscr()
+    reader.handle_key(empty, pager, "m")
+    assert pager.mark_mode is False
+    assert "没有可选中的文字" in pager.current_message()
+
+
+def test_message_row_shows_the_note_status_when_folded(pager) -> None:
+    # 没有临时消息也没有长时间提醒时，底部提示行带着笔记计数
+    assert "0条笔记" in reader._message_row(pager, 80)
+    pager.notes.append({"quote": "q", "text": "t", "created": "2026-01-01T00:00:00"})
+    assert "1条笔记" in reader._message_row(pager, 80)
+
+
+# ------------------------------------------------------------- note panel
+def test_note_panel_layout_splits_the_bottom_quarter() -> None:
+    # 40 行：面板 10 行（25%），正文 30 行，内容 9 行拆成引用 4 + 编辑 5
+    assert reader._note_panel_layout(40, 80) == (30, 4, 5)
+    # 屏幕太小就不弹面板
+    assert reader._note_panel_layout(6, 80) is None
+    assert reader._note_panel_layout(40, 5) is None
+    # 矮屏也守住底线：正文至少 3 行，三块加起来正好等于"总高 - 提示行"
+    layout = reader._note_panel_layout(8, 80)
+    assert layout is not None
+    text_rows, quote_rows, edit_rows = layout
+    assert text_rows >= 3
+    assert text_rows + quote_rows + edit_rows == 8 - 1
+
+
+def test_note_validate_turns_enter_into_a_newline() -> None:
+    # 回车（三种上报方式）都变成 NL：换行，绝不提交
+    assert reader._note_validate("\n") == curses.ascii.NL
+    assert reader._note_validate("\r") == curses.ascii.NL
+    assert reader._note_validate(curses.KEY_ENTER) == curses.ascii.NL
+    # 可打印字符换成码点
+    assert reader._note_validate("a") == ord("a")
+    # 方向键原样交给 Textbox
+    assert reader._note_validate(curses.KEY_LEFT) == curses.KEY_LEFT
+    # 多字符字符串不是单键：忽略
+    assert reader._note_validate("ab") is None
+
+
+def test_note_status_counts_the_saved_notes(pager) -> None:
+    # 一条都没有时也显示计数与展开键
+    assert "0条笔记" in reader._note_status(pager)
+    assert "按o展开" in reader._note_status(pager)
+    # 存一条后计数跟着涨
+    pager.notes.append({"quote": "q", "text": "t", "created": "2026-01-01T00:00:00"})
+    assert "1条笔记" in reader._note_status(pager)
+
+
+def test_disable_flow_control_never_raises() -> None:
+    # 测试环境里 stdin 不是 tty：应当静默降级，绝不抛异常
+    reader._disable_flow_control()
+
+
+def test_note_panel_reports_a_tiny_screen(pager_factory) -> None:
+    # 6 行 40 列：装不下面板，给一句提示而不是崩
+    tiny = FakeStdscr(height=6, width=40)
+    pager = pager_factory()
+    reader.handle_key(tiny, pager, "o")
+    assert "屏幕太小" in pager.current_message()
+
+
+def test_note_panel_opens_saves_and_closes(panel_window, pager) -> None:
+    # 先备好一段引用（平时由 m / y 产生）
+    pager.note_buffer = "第一章 科学边界"
+    # 面板里：打 abc -> Tab 切到引用 -> Tab 切回编辑 -> Ctrl+S 保存 -> Esc 关闭
+    panel_window.keys = ["a", "b", "c", "\t", "\t", "\x13", "\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    # 存下一条：引用 + 编辑区内容
+    assert len(pager.notes) == 1
+    assert pager.notes[0]["quote"] == "第一章 科学边界"
+    assert pager.notes[0]["text"] == "abc"
+    # 存完引用与编辑区都清空，面板已折叠
+    assert pager.note_buffer == ""
+    assert pager.note_panel_open is False
+    assert "已保存" in pager.current_message()
+    # 面板确实建了两个子窗口（引用区 + 编辑区）
+    assert len(panel_window.windows) == 2
+
+
+def test_note_panel_paints_the_quote_in_the_first_subwindow(panel_window, pager) -> None:
+    pager.note_buffer = "第一章 科学边界"
+    # 只画一帧就 Esc 关掉
+    panel_window.keys = ["\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    # 第一个子窗口就是引用区，第一行是 "> " + 选中的文字
+    quote_win = panel_window.windows[0]
+    quote_writes = [text for _row, _col, text, _attr in quote_win.writes]
+    assert "> 第一章 科学边界" in quote_writes
+
+
+def test_note_panel_quote_focus_ignores_typing(panel_window, pager) -> None:
+    pager.note_buffer = "引用"
+    # 默认焦点在编辑区；Tab 切到引用区后打的字不该进编辑区
+    panel_window.keys = ["\t", "x", "\x13", "\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    assert len(pager.notes) == 1
+    assert pager.notes[0]["quote"] == "引用"
+    # 引用区不接受输入，所以正文是空的
+    assert pager.notes[0]["text"] == ""
+
+
+def test_note_panel_save_without_anything_says_so(panel_window, pager) -> None:
+    # 没有引用也没写正文：Ctrl+S 只提示，不存空笔记
+    panel_window.keys = ["\x13", "\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    assert pager.notes == []
+    assert "先按 m 标记" in pager.current_message()
+
+
+def test_note_panel_can_be_closed_with_ctrl_c(panel_window, pager) -> None:
+    # 队列空 -> FakeStdscr.get_wch 抛 KeyboardInterrupt -> 面板当作关闭
+    panel_window.keys = []
+    reader.handle_key(panel_window, pager, "o")
+    # 关干净了：没卡在模态循环里，也没存东西
+    assert pager.note_panel_open is False
+    assert pager.notes == []

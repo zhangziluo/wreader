@@ -21,6 +21,7 @@ python tools/check_docs.py
 | `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 × 3 视图 = 420 组） | 0 / 1 |
 | `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
 | `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（8 项对账） | 0 / 1 |
+| `verify_notes.py` | 真 pty 里走一遍「标记 + 笔记面板」：引用区、Ctrl+S、折叠提示都对账（5 项） | 0 / 1 |
 
 ## 逐个说明
 
@@ -116,3 +117,25 @@ python tools/verify_mouse.py     # 期望：RESULT: 全部通过
 >
 > 它的价值已经被验证过：抓出了一个"拖动完全失效"的真 bug —— `curses.mouseinterval` 默认的
 > 点击判定窗口会把**按下事件扣住**，导致拖动状态建立不起来。单测发现不了这个。
+
+### `verify_notes.py`
+
+```bash
+python tools/verify_notes.py     # 期望：RESULT: 全部通过
+```
+
+笔记面板会真的建两个 curses 子窗口、跑 `curses.textpad.Textbox`，还要靠
+「主窗口先刷、子窗口后刷」的刷新顺序才不会被 `stdscr.erase()` 擦掉 —— 这些用 `FakeStdscr`
+的单元测试**盖不到底**（假窗口没有真正的 curses 叠窗语义）。所以这里开一个真 pty、
+跑一次阅读器、按 `m` → `ll` → `y` → `o` → 打 `abc` → `Tab` → `Ctrl+S` → `Esc` → `q`，
+再把终端输出读回来对账 **5 项**：引用区画出 `> …`、面板提示行、`Ctrl+S` 存成功
+（顺带证明 `_disable_flow_control()` 真把 `IXON` 关掉了，否则 XOFF 会被行规程吞掉）、
+折叠后提示行显示 `按o展开`、全程没有 traceback。
+
+> ⚠️ 它的价值也已经被验证过：第一版把子窗口写成 `stdscr.newwin(...)`，
+> 单测（假窗口正好实现了 `newwin`）全绿，但**真 curses 的 window 对象根本没有 `newwin` 方法**
+> （只有 `derwin`）—— 一跑这个脚本就 `AttributeError`。现在代码走 `reader._sub_window()`
+> 这层间接，生产用 `curses.newwin`，测试替换成假窗口。
+>
+> 另一个坑：脚本必须显式给子进程一个 `TERM`（非交互运行时 `TERM` 可能没设，
+> curses 起不来，子进程会提前退出，写 pty 直接 `EIO`）。

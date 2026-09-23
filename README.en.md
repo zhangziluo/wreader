@@ -45,6 +45,7 @@ the next launch resumes exactly where you stopped.
 | 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
 | 🈶 Translation | Chapter-level translation with an on-disk cache — translate once, reuse forever; Google (no API key) and DeepSeek (OpenAI-compatible endpoint) |
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
+| 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. ⚠️ Kept in memory only for now — see "Known issues" |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
 | 🏆 Achievements | 10 achievements (first book, night owl, seven-day streak, …) with progress bars, an unlock animation and a bell |
 | ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
@@ -479,7 +480,7 @@ The hint bar **at the bottom of the reader shows this list by default** (a trans
 replaces it), so there is nothing to memorise:
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 m标记 o笔记 l语言 t翻屏 T翻章 c中文
 ```
 
 | Key | Action |
@@ -502,6 +503,8 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `t` | Translate **the current screen only**, **without caching** (for a quick peek) |
 | `T` | Translate and cache **the whole chapter**, with a progress bar; revisiting it later is instant and free |
 | `v` | Look a word up and file it in the vocabulary notebook (the prompt pre-fills the longest English word on the line) |
+| `m` | Enter **mark mode**: the cursor becomes a reverse-video block; extend the selection with `h` / `j` / `k` / `l` (or the arrow keys), `y` copies it and `Esc` cancels. Mark mode **does not page** — a selection is confined to the screen it started on |
+| `o` | Expand / fold the **note panel** (bottom 25% of the screen; the text area shrinks accordingly): the top half is the **quote area** (read-only, dim, showing what `y` copied as `> …`) and the bottom half is the **editor** (a `curses` text box with Enter for newlines, backspace and left/right cursor keys); `Tab` swaps the focus, `Ctrl+S` saves and `Esc` closes the panel |
 
 Useful details:
 
@@ -520,6 +523,15 @@ Useful details:
 - **Notebook words are underlined** while `vocab.highlight_in_reader = true`; turn it off if the underlines distract you.
 - **After pressing `v`**: with `vocab.auto_add_on_mark = true` the word is stored immediately; set it to `false`
   and a small popup asks `[y] 加入生词本　其他键 取消` ("press y to add, any other key cancels").
+- **Taking notes**: `m` starts mark mode → select with `h/j/k/l` (or the arrow keys) → `y` copies it
+  (truncated at 2000 characters, with a message when it bites) → `o` opens the panel, the quote area shows the
+  selection and you write in the editor → `Ctrl+S` saves. While folded, the hint bar shows
+  `📝 N条笔记 | 按o展开` ("N notes, press o to expand"). Three caveats worth knowing:
+  1. the editor is a `curses.textpad.Textbox`, so **typing Chinese depends on your IME** — in practice
+     it is an English / pinyin editor;
+  2. the panel's `Ctrl+S` needs XON/XOFF flow control to be off (the reader tries to clear `IXON` on startup);
+  3. ⚠️ notes live **in memory only** — they are gone when the reader exits; persistence is left for a later
+     release (see "Known issues").
 - **Slow chapters** (more than 30 minutes spent in one chapter) make the hint bar suggest pressing `c` for Chinese.
 - **`Ctrl-C` mid-session loses nothing**: the position and the session duration are still saved on the way out.
 
@@ -777,18 +789,18 @@ wreader/
 │   ├── cli.py               argparse definition + one handler per sub-command (1087 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (993 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2517 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (3112 lines)
 │   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   570 tests, all offline (see "Running the tests" below)
+└── tests/                   595 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
-    ├── test_reader.py       166 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay
+    ├── test_reader.py       191 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
     ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
@@ -974,6 +986,12 @@ These are the limitations that genuinely exist today; better to write them down 
 - **Numeric values under `progress` in `library.json` are not coerced**: a hand written string
   (`"current_line": "12"`) still works because every consumer wraps it in `int(...)`, but it is not
   turned back into a number for you.
+- **Notes live in memory only**: `m` (mark) plus the `o` note panel work today, but whatever `Ctrl+S`
+  stores disappears with the reading session — **nothing is written to disk yet** (a later release will
+  put it in a plain text file under `~/.wreader/`).
+- **The note editor is essentially English / pinyin**: it is built on `curses.textpad.Textbox`, so typing
+  Chinese depends on your IME; and its `Ctrl+S` requires XON/XOFF flow control to be off (the reader tries
+  to clear `IXON` on startup, but the save key never arrives when it cannot).
 
 Ten former issues that are now fixed, kept here so they are not mistaken for pending work:
 

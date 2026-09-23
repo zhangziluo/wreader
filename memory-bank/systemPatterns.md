@@ -37,7 +37,7 @@
 | `wreader/cli.py` | 1087 | argparse 定义 + 11 个子命令处理函数（含 `toc`） | `["build_parser", "main"]` |
 | `wreader/config.py` | 993 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1159 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读 | **无 `__all__`** |
-| `wreader/reader.py` | 2517 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 3112 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、标记模式、笔记面板 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
 | `wreader/toc.py` | 474 | 目录：章节提取、epub nav/ncx 解析、百分比、可重建缓存 | 10 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
@@ -111,6 +111,9 @@
 | 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
 | 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
 | 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
+| 标记选字 | `handle_key`（`m`，此后 `pager.mark_mode` 走 `_handle_mark_key`）→ `_enter_mark` / `_mark_move`（作用于 `Pager.viewport` 的纯函数）；高亮在 `_draw` → `_mark_row_span` + `_draw_marked_row`（`A_REVERSE`）；`y` → `_copy_selection` → `_mark_selection` → `Pager.note_buffer` |
+| 笔记面板 | `handle_key`（`o`）→ `_note_panel`（模态循环：`_draw_note_panel` + `_draw_quote`；逐键 `_note_validate` → `curses.textpad.Textbox.do_command`；`Tab` 切 `note_focus`；`Ctrl+S` → `_save_note` → `Pager.notes`；`Esc` 关闭）；子窗口由 `reader._sub_window()` 建 |
+| 终端流控 | `_run` → `_disable_flow_control()`（POSIX 用 `termios` 清 `IXON|IXOFF`，让 `Ctrl+S` 到得了程序；`endwin()` 负责还原） |
 
 ## 值得记住的坑（血泪）
 
@@ -165,3 +168,14 @@
 15. **epub 的 nav 行号只在内置提取器路径上成立**：`extract_epub_builtin` 是把各 spine 文档用 `\n`
     拼起来的，"每份文档的起始行"可算；换成外部 `ebook-convert`，正文布局完全不同。判据是
     「spine 布局总行数 == 正文行数」，不符就退回正则 —— 宁可标题退化，也不给错行号（错行号比没有更糟）。
+16. **`curses.window` 对象没有 `newwin` 方法**：只有模块级的 `curses.newwin`（窗口对象上对应的是 `derwin`）。
+    第一版写成 `stdscr.newwin(...)`，`FakeStdscr` 恰好也实现了 `newwin` → **单测全绿**，
+    真 pty 里立刻 `AttributeError: '_curses.window' object has no attribute 'newwin'`。
+    现在走 `reader._sub_window()`（生产 `curses.newwin`、测试 monkeypatch 成假窗口），见 `tools/verify_notes.py`。
+    **教训：假窗口实现得越像真 curses，越容易掩盖真 API 的差异 —— UI 改动必须过一遍真 pty。**
+17. **画叠窗要"主窗口先刷、子窗口后刷"**：`stdscr.erase()` 会把子窗口覆盖的那几行**一起标脏**，
+    顺序反了就会被主窗口的空白格擦掉。`_draw_note_panel` 里 `stdscr.refresh()` 在前，
+    `quote_win.refresh()` / `edit_win.refresh()` 在后。
+18. **`Ctrl-S` 会被终端行规程吃掉**：`curses.wrapper` 只调 `cbreak()`，`IXON` 仍开着 →
+    终端把 `Ctrl-S`（XOFF）当流控吞掉，面板的保存键永远到不了程序。要么自己清 `IXON`
+    （`_disable_flow_control()`），要么别把保存键放在 Ctrl-S 上。**单测不经过行规程，只有真 pty 能验。**
