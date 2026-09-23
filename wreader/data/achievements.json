@@ -3,60 +3,196 @@
     "id": "first_book",
     "name": "📖 开卷有益",
     "desc": "第一次打开一本书",
+    "category": "数据积累",
     "condition": "books_read >= 1"
   },
   {
-    "id": "first_hour",
-    "name": "⏱️ 初窥门径",
-    "desc": "累计阅读满1小时",
-    "condition": "total_time >= 3600"
-  },
-  {
-    "id": "ten_hours",
-    "name": "🎓 学富五车",
-    "desc": "累计阅读满10小时",
-    "condition": "total_time >= 36000"
-  },
-  {
-    "id": "night_owl",
-    "name": "🌙 深夜书虫",
-    "desc": "凌晨0-4点阅读超1小时",
-    "condition": "night_time >= 3600"
-  },
-  {
-    "id": "streak_7",
-    "name": "🔥 七日不断",
-    "desc": "连续7天每天阅读30分钟",
-    "condition": "streak >= 7"
-  },
-  {
-    "id": "streak_30",
-    "name": "🗿 铁血读者",
-    "desc": "连续30天每天阅读",
-    "condition": "streak >= 30"
-  },
-  {
     "id": "book_finished",
-    "name": "🏁 完本达人",
+    "name": "🏁 第一本",
     "desc": "读完第一本书",
+    "category": "数据积累",
     "condition": "finished >= 1"
+  },
+  {
+    "id": "ten_books",
+    "name": "📚 十本大关",
+    "desc": "累计读完 10 本书",
+    "category": "数据积累",
+    "condition": "finished >= 10"
+  },
+  {
+    "id": "fifty_books",
+    "name": "🎯 半百",
+    "desc": "累计读完 50 本书",
+    "category": "数据积累",
+    "condition": "finished >= 50"
+  },
+  {
+    "id": "hundred_books",
+    "name": "💰 百本富翁",
+    "desc": "累计读完 100 本书",
+    "category": "数据积累",
+    "condition": "finished >= 100"
+  },
+  {
+    "id": "thousand_books",
+    "name": "🏛️ 千本富豪",
+    "desc": "累计读完 1000 本书",
+    "category": "数据积累",
+    "condition": "finished >= 1000"
+  },
+  {
+    "id": "first_shelf",
+    "name": "🗄️ 书库初成",
+    "desc": "书库里添加第 1 本书",
+    "category": "数据积累",
+    "condition": "library_books >= 1"
+  },
+  {
+    "id": "collector",
+    "name": "📦 藏书家",
+    "desc": "书库里累计 50 本书",
+    "category": "数据积累",
+    "condition": "library_books >= 50"
+  },
+  {
+    "id": "mobile_library",
+    "name": "🚚 移动图书馆",
+    "desc": "书库里累计 100 本书",
+    "category": "数据积累",
+    "condition": "library_books >= 100"
+  },
+  {
+    "id": "words_10k",
+    "name": "✒️ 万字户",
+    "desc": "累计阅读 1 万字",
+    "category": "数据积累",
+    "condition": "words_read >= 10000"
+  },
+  {
+    "id": "words_100k",
+    "name": "⛰️ 十万大山",
+    "desc": "累计阅读 10 万字",
+    "category": "数据积累",
+    "condition": "words_read >= 100000"
+  },
+  {
+    "id": "words_1m",
+    "name": "💵 百万富翁",
+    "desc": "累计阅读 100 万字",
+    "category": "数据积累",
+    "condition": "words_read >= 1000000"
+  },
+  {
+    "id": "words_10m",
+    "name": "🎩 千万俱乐部",
+    "desc": "累计阅读 1000 万字",
+    "category": "数据积累",
+    "condition": "words_read >= 10000000"
+  },
+  {
+    "id": "words_100m",
+    "name": "👑 亿万富豪",
+    "desc": "累计阅读 1 亿字",
+    "category": "数据积累",
+    "condition": "words_read >= 100000000"
+  },
+  {
+    "id": "words_1b",
+    "name": "🌌 十亿富豪",
+    "desc": "累计阅读 10 亿字",
+    "category": "数据积累",
+    "condition": "words_read >= 1000000000"
   },
   {
     "id": "vocab_100",
     "name": "📝 词汇积累",
-    "desc": "生词本满100个",
+    "desc": "生词本满 100 个",
+    "category": "数据积累",
     "condition": "vocab_count >= 100"
+  },
+  {
+    "id": "vocab_500",
+    "name": "🧠 生词狂魔",
+    "desc": "生词本累计记录 500 个单词",
+    "category": "数据积累",
+    "condition": "vocab_count >= 500"
   },
   {
     "id": "translator",
     "name": "🌍 双语者",
     "desc": "首次使用翻译功能",
+    "category": "数据积累",
     "condition": "translations >= 1"
   },
   {
+    "id": "first_hour",
+    "name": "⏱️ 初窥门径",
+    "desc": "累计阅读满 1 小时",
+    "category": "阅读习惯",
+    "condition": "total_time >= 3600"
+  },
+  {
+    "id": "ten_hours",
+    "name": "🎓 学富五车",
+    "desc": "累计阅读满 10 小时",
+    "category": "阅读习惯",
+    "condition": "total_time >= 36000"
+  },
+  {
+    "id": "night_owl",
+    "name": "🌙 深夜书虫",
+    "desc": "凌晨 0-4 点阅读超 1 小时",
+    "category": "阅读习惯",
+    "condition": "night_time >= 3600"
+  },
+  {
+    "id": "streak_7",
+    "name": "🔥 七日不断",
+    "desc": "连续 7 天每天阅读 30 分钟",
+    "category": "阅读习惯",
+    "condition": "streak >= 7"
+  },
+  {
+    "id": "streak_30",
+    "name": "🗿 铁血读者",
+    "desc": "连续 30 天每天阅读",
+    "category": "阅读习惯",
+    "condition": "streak >= 30"
+  },
+  {
+    "id": "hundred_days",
+    "name": "🧱 百日筑基",
+    "desc": "连续 100 天打开 werd",
+    "category": "阅读习惯",
+    "condition": "days_opened >= 100"
+  },
+  {
+    "id": "early_bird",
+    "name": "🌅 清晨第一眼",
+    "desc": "在 05:00-07:00 期间首次打开",
+    "category": "阅读习惯",
+    "condition": "early_open >= 1"
+  },
+  {
     "id": "marathon",
-    "name": "🧘 专注模式",
-    "desc": "单次连续阅读超2小时",
+    "name": "🏃 马拉松",
+    "desc": "单次会话阅读超过 2 小时",
+    "category": "阅读习惯",
     "condition": "single_session >= 7200"
+  },
+  {
+    "id": "ultra_marathon",
+    "name": "🛌 超长待机",
+    "desc": "单次会话阅读超过 4 小时",
+    "category": "阅读习惯",
+    "condition": "single_session >= 14400"
+  },
+  {
+    "id": "weekend_warrior",
+    "name": "⚔️ 周末战士",
+    "desc": "周六或周日累计阅读 3 小时",
+    "category": "阅读习惯",
+    "condition": "weekend_time >= 10800"
   }
 ]

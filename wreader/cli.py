@@ -18,6 +18,8 @@ import argparse
 import json
 # 直接写 sys.stdout/sys.exit，绕过 rich 的渲染避免污染重定向输出
 import sys
+# datetime：daily_open 事件要带上"什么时候打开的"
+from datetime import datetime
 # 类型注解：Callable 表示"可调用的函数"，其余是容器和可选类型
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -28,8 +30,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 # rich 的表格，list/search/vocab/stats 都用它排版
 from rich.table import Table
 
-# 同包内引用：版本号 + 配置 + 书库 + 统计
-from . import __version__, config, library, stats
+# 同包内引用：版本号 + 配置 + 书库 + 统计 + 成就事件
+from . import __version__, achievements, config, library, stats
 
 # 对外只暴露这两个函数：构造解析器和程序入口
 __all__ = ["build_parser", "main"]
@@ -38,6 +40,44 @@ __all__ = ["build_parser", "main"]
 console = Console()
 # 错误输出用的 Console（stderr），方便 `> file` 时把错误留在终端
 err_console = Console(stderr=True)
+
+
+def _now() -> datetime:
+    """Return the current local time (a seam the tests replace)."""
+    # 单独包一层，测试里可以注入固定时刻，让"清晨第一眼"可预测
+    return datetime.now()
+
+
+def _record_achievements(
+    event_type: str,
+    data: Optional[Mapping[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Fire one achievements event; never let it break the command.
+
+    A broken definitions file or an unreadable state file must not stop ``werd
+    import`` from importing, so every failure degrades to "no unlocks".
+    """
+    try:
+        # 唯一入口：记录事件 + 判定解锁 + 落盘
+        return achievements.check_achievements(event_type, data, now=now)
+    except (
+        achievements.AchievementsError,
+        library.LibraryError,
+        stats.StatsError,
+    ):
+        # 成就系统坏了：静默跳过，命令照常成功
+        return []
+
+
+def _unlocked_ids() -> List[str]:
+    """Return the unlocked achievement ids from the state file."""
+    try:
+        # 权威位置是数据目录里的 achievements.json
+        return achievements.unlocked_ids(achievements.load_state())
+    except achievements.AchievementsError:
+        # 状态文件坏了：当作一个都没解锁（`werd achievements` 会另外提示）
+        return []
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -361,6 +401,10 @@ def cmd_import(args: argparse.Namespace) -> int:
     # 失败的：把原因写到 stderr
     for path, reason in result.failed:
         err_console.print("  [red]![/red] {}: {}".format(path.name, reason))
+    # 入库成功：记一次 book_add（"书库初成 / 藏书家 / 移动图书馆"）
+    _report_unlocked(
+        _record_achievements("book_add", {"count": len(result.imported)})
+    )
     # 走到这里就返回成功；个别失败不影响整体退出码
     return 0
 
@@ -688,12 +732,8 @@ def _count_translations(count: int) -> List[Dict[str, Any]]:
     except library.LibraryError:
         # 索引坏了也没关系：章节缓存已经落盘，计数下次再补
         return []  # the chapters are cached either way; the counter can wait
-    try:
-        # 计数更新后看看有没有新解锁的成就
-        return stats.check_achievements()
-    except (library.LibraryError, stats.StatsError):
-        # 成就检查失败不该影响翻译命令本身的成败，静默返回空
-        return []
+    # 计数更新后让成就引擎重算一次（"双语者"就是看 translations 指标）
+    return _record_achievements("check")
 
 
 def _report_unlocked(newly: Sequence[Dict[str, Any]]) -> None:
@@ -971,7 +1011,7 @@ def cmd_vocab(args: argparse.Namespace) -> int:
 
 
 # 这几个指标本身是"秒"，展示时要换算成小时/分钟
-_TIME_METRICS = ("total_time", "night_time", "single_session")
+_TIME_METRICS = ("total_time", "night_time", "single_session", "weekend_time")
 
 #: Weekday labels for the heatmap grid, Monday first (``date.weekday()`` order).
 # 热力图每行的星期名，按 date.weekday() 的顺序（周一是 0）
@@ -1054,8 +1094,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
     # 读设置：热力图开关、每日目标等都从这里来
     settings = config.load_config()
-    # 让 stats 模块算出一份完整报告（一个纯数据的 dict）
-    report = stats.build_report(document, settings=settings)
+    # 让 stats 模块算出一份完整报告（一个纯数据的 dict），解锁记录来自成就状态文件
+    report = stats.build_report(document, settings=settings, unlocked=_unlocked_ids())
     # --json：直接把这份 dict 原样输出，脚本和人类看到的是同一份数据
     if getattr(args, "json", False):
         sys.stdout.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -1120,75 +1160,62 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_achievements(args: argparse.Namespace) -> int:
-    """Handle ``werd achievements`` -- unlocked list plus progress on the rest."""
+    """Handle ``werd achievements`` -- unlocked list plus progress on the rest.
+
+    The unlock state lives in ``<data dir>/achievements.json`` (see
+    :mod:`wreader.achievements`).  Running the command also re-checks everything,
+    so progress earned outside the reader (through ``werd translate``, say) still
+    gets a timestamp instead of waiting for the next book to be closed.  That is
+    idempotent, and a secret achievement keeps its name to itself until it fires.
+    """
     try:
-        # 成就是根据统计数据判定的，先读书库索引
-        document = library.load_library()
-        # 读出成就定义（名称、条件等）
-        definitions = stats.load_achievements()
-        # Recording is idempotent, and doing it here means progress earned outside
-        # the reader (through `werd translate`, say) still gets a timestamp instead
-        # of waiting for the next book to be closed.  No fanfare: that belongs to
-        # the moment of unlocking while reading.
-        # 顺手补记一次解锁：这个操作是幂等的，重复调用不会重复记录
-        stats.check_achievements(document, achievements=definitions)
-    except (library.LibraryError, stats.StatsError) as exc:
+        # 顺手补记一次（幂等）：把书库/生词本那边的进度也结算成解锁
+        _record_achievements("check")
+        # 读出全部成就：名字、描述、分类、进度、是否隐藏、解锁时间
+        rows = achievements.list_achievements()
+    except (
+        achievements.AchievementsError,
+        library.LibraryError,
+        stats.StatsError,
+    ) as exc:
         return _fail(str(exc))
 
-    # 当前各项指标的数值，用来算每个成就的进度
-    metrics = stats.compute_metrics(document)
-    # 已经记录下来的解锁信息
-    state = document.get("achievements") or {}
-    # 把解锁记录整理成 id -> 记录 的字典，方便下面查
-    recorded = {}
-    entries = state.get("unlocked") if isinstance(state, dict) else None
-    if isinstance(entries, list):
-        for entry in entries:
-            # 新格式：每条是个字典，取它的 id
-            if isinstance(entry, dict) and entry.get("id"):
-                recorded[str(entry["id"])] = entry
-            # 老格式：每条就是个 id 字符串，补成统一结构
-            elif isinstance(entry, str):
-                recorded[entry] = {"id": entry, "unlocked_at": ""}
-
     # 分成"已解锁"和"进行中"两组
-    done = []
-    pending = []
-    for achievement in definitions:
-        # 算出这个成就当前进度以及是否达标
-        info = stats.achievement_state(achievement, metrics)
-        # 有解锁记录或当前指标已达标，都算已完成
-        if info["id"] in recorded or info["unlocked"]:
-            done.append((info, str((recorded.get(info["id"]) or {}).get("unlocked_at") or "")))
-        else:
-            pending.append(info)
-
+    done = [row for row in rows if row["unlocked"]]
+    pending = [row for row in rows if not row["unlocked"]]
     # 打印已解锁数量
-    console.print(
-        "[bold]已解锁 {}/{}[/bold]".format(len(done), len(definitions))
-    )
+    console.print("[bold]已解锁 {}/{}[/bold]".format(len(done), len(rows)))
     # 逐条列出已解锁的成就（带解锁时间，没有时间就不显示"解锁于"）
-    for info, stamp in done:
+    for row in done:
         console.print(
             "  [green]🏆[/green] [bold]{}[/bold] [dim]{}  {}{}[/dim]".format(
-                info["name"],
-                info["desc"],
-                "" if not stamp else "解锁于 ",
-                stamp,
+                row["name"],
+                row["desc"],
+                "" if not row["unlocked_at"] else "解锁于 ",
+                row["unlocked_at"],
             )
         )
-    # 有未完成的就再列一段进度
+    # 有未完成的就按分类列进度
     if pending:
         console.print("\n[bold]进行中[/bold]")
-        for info in pending:
+        category = ""
+        for row in pending:
+            # 换分类了就打一行小标题
+            if row["category"] != category:
+                category = str(row["category"])
+                console.print("  [bold cyan]{}[/bold cyan]".format(category))
+            # 隐藏成就：还没解锁就只说"有这么个东西"，不剧透条件
+            if row["secret"]:
+                console.print("    [dim]❓ 隐藏成就（解锁后揭晓）[/dim]")
+                continue
             console.print(
-                "  {}  [bold]{}[/bold] [dim]{}/{}  {}[/dim]".format(
+                "    {}  [bold]{}[/bold] [dim]{}/{}  {}[/dim]".format(
                     # 一个简单的文本进度条
-                    stats.progress_bar(info["current"], info["required"]),
-                    info["name"],
-                    _metric_text(info["metric"], info["current"]),
-                    _metric_text(info["metric"], info["required"]),
-                    info["desc"],
+                    stats.progress_bar(row["current"], row["required"]),
+                    row["name"],
+                    _metric_text(row["metric"], row["current"]),
+                    _metric_text(row["metric"], row["required"]),
+                    row["desc"],
                 )
             )
     return 0
@@ -1216,6 +1243,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     # 解析参数；argv 为 None 时 argparse 会自动取 sys.argv[1:]
     args = parser.parse_args(argv)
+    # 启动事件：每天第一次打开 werd 都算数（"百日筑基""清晨第一眼"靠它）
+    _report_unlocked(_record_achievements("daily_open", {}, now=_now()))
     # 按子命令名取出对应的处理函数
     handler = _HANDLERS[args.command]
     try:

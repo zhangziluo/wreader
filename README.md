@@ -48,7 +48,7 @@
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
 | 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。⚠️ 目前只存在内存里，落盘见「已知问题」 |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
-| 🏆 成就 | 10 个成就（开卷有益、深夜书虫、七日不断……），命令行显示进度条，解锁时有动画和提示音 |
+| 🏆 成就 | 28 个成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音 |
 | ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
 
 ---
@@ -297,7 +297,10 @@ werd search '#fantasy'    # 带 # 前缀表示只搜标签
 
 - 打开时自动检测书的语言，中文书默认进中文视图，英文书默认进英文视图（检测靠 CJK 字符占比，离线纯本地计算）。
 - 每 60 秒自动保存一次阅读位置（可关），退出时再完整保存一次。
-- 退出时把这次会话的时长、读过的行数写进统计，并检查有没有达成新成就。
+- 退出时把这次会话的时长、读过的行数写进统计，并把 `session_end` 事件交给成就引擎
+  （本次读过的**行区间**会按行号去重地折算成字数，所以同一页读两遍不会重复计数）。
+- 每次启动 `werd` 都会记一次 `daily_open` 事件（「百日筑基」「清晨第一眼」看的就是它），
+  `werd import` 记 `book_add`，`werd translate` 之后再让引擎重算一次。
 - **需要真正的交互式终端**，重定向或管道里跑会报错：
   `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
@@ -394,13 +397,20 @@ werd achievements
 真实输出：
 
 ```
-已解锁 1/10
-  🏆 📖 开卷有益 第一次打开一本书  解锁于 2026-09-21T16:13:43
+已解锁 1/28
+  🏆 🗄️ 书库初成 书库里添加第 1 本书  解锁于 2026-09-21T16:13:43
 
 进行中
-  ░░░░░░░░░░░░░░  ⏱️ 初窥门径 0分钟/1小时  累计阅读满1小时
-  ██████░░░░░░░░  🔥 七日不断 3/7  连续7天每天阅读30分钟
+  阅读习惯
+    ░░░░░░░░░░░░░░  ⏱️ 初窥门径 0分钟/1小时  累计阅读满 1 小时
+    ░░░░░░░░░░░░░░  🧱 百日筑基 3/100  连续 100 天打开 werd
+    ...
+  数据积累
+    ██████░░░░░░░░  ✒️ 万字户 4200/10000  累计阅读 1 万字
+    ...
 ```
+
+行首数字是"已解锁 / 总数"，解锁的会带时间戳；未解锁的按**分类**分组，每条一个进度条。
 
 ### `werd config`
 
@@ -640,6 +650,7 @@ werd config translate.baidu_secret 你的密钥
 | --- | --- | --- |
 | 设置 | `~/.wreader/settings.toml` | `$WREADER_HOME` |
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
+| 成就状态 | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch0_en.txt`、`ch0_bilingual.txt` | `translator.cache_dir` |
 | 小说正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
@@ -714,6 +725,39 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
 - `total_lines` 和每个 `chapters[].line_start` 都是 `正文.split("\n")` 的下标，
   阅读器的 `current_line`、书签的 `line` 用的是同一套坐标，互相不会错位。
 - `tags` 目前由 `werd search '#tag'` 使用，命令行还没有加标签的入口，需要手改索引。
+- `achievements` 段是**旧版**存放解锁记录的地方。解锁记录现在住在
+  `~/.wreader/achievements.json`（见下节），第一次读成就状态时会**自动迁移一次**；
+  迁移后这里的旧内容不再被读取，留着只是为了不让旧文件"看起来丢了东西"。
+
+### `~/.wreader/achievements.json` —— 成就状态
+
+```json
+{
+  "version": 1,
+  "unlocked": [
+    { "id": "first_shelf", "name": "🗄️ 书库初成", "unlocked_at": "2026-09-21T16:13:43" }
+  ],
+  "counters": { "daily_open": 12, "book_add": 3, "session_end": 9 },
+  "metrics": {
+    "days_opened": ["2026-09-21", "2026-09-22"],
+    "early_open": 0,
+    "weekend_seconds": { "2026-09-20": 10800 },
+    "words_read": 42000
+  },
+  "books": { "3e027c4de949": { "words": 42000, "counted": [[0, 812]] } },
+  "progress": { "first_book": { "current": 2, "required": 1 } }
+}
+```
+
+要点：
+
+- `unlocked` 是**解锁记录**（成就定义本身在包的 `data/achievements.json` 里）；
+- `counters` 是事件次数，`metrics` 是只有事件流才知道的数字（打开过几天、周末多少秒、读了多少字）；
+- `books[].counted` 是**每本书已经统计过的行号区间**（半开区间 `[start, end)`），
+  字数去重就靠它：同一段正文读第二遍不会再累加；
+- 手改坏了也不会让 `werd` 起不来：读不出来时会把坏文件改名成 `achievements.json.broken`，
+  然后从空状态重新开始；写盘一律"临时文件 + 原子替换"，并且全程持有 `achievements.json.lock`
+  文件锁（Windows 没有 `flock`，退化成只有原子替换）。
 
 ### `~/.wreader/vocab.json` —— 生词本
 
@@ -748,26 +792,66 @@ ch0_bilingual.txt   第 1 章的中英段落对照（喂给阅读器的双语视
 
 ## 成就清单
 
-定义在 `wreader/data/achievements.json`，一共 10 个。条件是简单的 `指标 比较符 数字` 表达式，可以自己加。
+定义在 `wreader/data/achievements.json`，一共 **28** 个（Phase 1），分四类。
+条件是简单的 `指标 比较符 数字` 表达式，可以自己加；**解锁状态**存在
+`~/.wreader/achievements.json`（纯 JSON，随便改、随便备份）。
 
-| 成就 | 名称 | 条件 |
+| 成就 | 名称 | 分类 | 条件 |
+| --- | --- | --- | --- |
+| `first_book` | 📖 开卷有益 | 数据积累 | 第一次打开一本书 |
+| `book_finished` | 🏁 第一本 | 数据积累 | 读完第一本书 |
+| `ten_books` | 📚 十本大关 | 数据积累 | 累计读完 10 本书 |
+| `fifty_books` | 🎯 半百 | 数据积累 | 累计读完 50 本书 |
+| `hundred_books` | 💰 百本富翁 | 数据积累 | 累计读完 100 本书 |
+| `thousand_books` | 🏛️ 千本富豪 | 数据积累 | 累计读完 1000 本书 |
+| `first_shelf` | 🗄️ 书库初成 | 数据积累 | 书库里添加第 1 本书 |
+| `collector` | 📦 藏书家 | 数据积累 | 书库里累计 50 本书 |
+| `mobile_library` | 🚚 移动图书馆 | 数据积累 | 书库里累计 100 本书 |
+| `words_10k` | ✒️ 万字户 | 数据积累 | 累计阅读 1 万字 |
+| `words_100k` | ⛰️ 十万大山 | 数据积累 | 累计阅读 10 万字 |
+| `words_1m` | 💵 百万富翁 | 数据积累 | 累计阅读 100 万字 |
+| `words_10m` | 🎩 千万俱乐部 | 数据积累 | 累计阅读 1000 万字 |
+| `words_100m` | 👑 亿万富豪 | 数据积累 | 累计阅读 1 亿字 |
+| `words_1b` | 🌌 十亿富豪 | 数据积累 | 累计阅读 10 亿字 |
+| `vocab_100` | 📝 词汇积累 | 数据积累 | 生词本满 100 个 |
+| `vocab_500` | 🧠 生词狂魔 | 数据积累 | 生词本累计记录 500 个单词 |
+| `translator` | 🌍 双语者 | 数据积累 | 首次使用翻译功能 |
+| `first_hour` | ⏱️ 初窥门径 | 阅读习惯 | 累计阅读满 1 小时 |
+| `ten_hours` | 🎓 学富五车 | 阅读习惯 | 累计阅读满 10 小时 |
+| `night_owl` | 🌙 深夜书虫 | 阅读习惯 | 凌晨 0-4 点阅读超 1 小时 |
+| `streak_7` | 🔥 七日不断 | 阅读习惯 | 连续 7 天每天阅读 30 分钟 |
+| `streak_30` | 🗿 铁血读者 | 阅读习惯 | 连续 30 天每天阅读 |
+| `hundred_days` | 🧱 百日筑基 | 阅读习惯 | 连续 100 天打开 werd |
+| `early_bird` | 🌅 清晨第一眼 | 阅读习惯 | 在 05:00-07:00 期间首次打开 |
+| `marathon` | 🏃 马拉松 | 阅读习惯 | 单次会话阅读超过 2 小时 |
+| `ultra_marathon` | 🛌 超长待机 | 阅读习惯 | 单次会话阅读超过 4 小时 |
+| `weekend_warrior` | ⚔️ 周末战士 | 阅读习惯 | 周六或周日累计阅读 3 小时 |
+
+条件里可用的指标：
+
+| 指标 | 含义 | 来源 |
 | --- | --- | --- |
-| `first_book` | 📖 开卷有益 | 第一次打开一本书 |
-| `first_hour` | ⏱️ 初窥门径 | 累计阅读满 1 小时 |
-| `ten_hours` | 🎓 学富五车 | 累计阅读满 10 小时 |
-| `night_owl` | 🌙 深夜书虫 | 凌晨 0-4 点阅读超 1 小时 |
-| `streak_7` | 🔥 七日不断 | 连续 7 天每天阅读 30 分钟 |
-| `streak_30` | 🗿 铁血读者 | 连续 30 天每天阅读 |
-| `book_finished` | 🏁 完本达人 | 读完第一本书 |
-| `vocab_100` | 📝 词汇积累 | 生词本满 100 个 |
-| `translator` | 🌍 双语者 | 首次使用翻译功能 |
-| `marathon` | 🧘 专注模式 | 单次连续阅读超 2 小时 |
+| `books_read` / `finished` | 读过的书数 / 读完的书数 | 书库索引 |
+| `total_time` / `night_time` / `single_session` / `weekend_time` | 累计 / 夜间 / 单次最长 / 周末阅读秒数 | 索引 + 成就状态 |
+| `streak` | 连续天数 | 索引里的每日桶 |
+| `vocab_count` / `translations` | 生词数 / 翻译次数 | 生词本 + 索引 |
+| `library_books` | 书库里一共几本书 | 书库索引 |
+| `words_read` | 累计读了多少字（**按行号区间去重**） | 成就状态 |
+| `days_opened` / `early_open` | 打开过 werd 的天数 / 是否在清晨打开过 | 成就状态 |
 
-条件里可用的指标：`books_read`、`total_time`、`night_time`、`streak`、`finished`、
-`vocab_count`、`translations`、`single_session`（时间类指标单位是**秒**）。
+字数口径：**中文一字算一个，英文一个词算一个**，标点与数字不计。同一段正文读第二遍不再累加
+（靠每本书记下来的「已统计行区间」判断）。
+
+**事件驱动**：各模块调用 `achievements.check_achievements(事件名, 数据)`，事件有
+`daily_open`（每次启动 `werd`）、`session_end`（退出阅读，带时长与读过的行区间）、
+`book_add`（`werd import`）、`progress_update`、`book_finish`、`word_add`、
+`geo_change`（Phase 3）、以及不带任何累加的 `check`（只是"现在重算一遍"）。
+已解锁的成就不会重复触发；整个「读状态 → 记事件 → 判定 → 写回」在**文件锁**下进行，
+两个终端同时开也不会互相覆盖（Windows 没有 `flock`，退化成原子替换写入）。
 
 "连续天数"的判定：一天阅读 ≥ 30 分钟才算有效；当天永远算数（因为它正要变成事实）。
 解锁时会打印动画和横幅，`stats.achievement_sound = false` 可以关掉提示音。
+
 
 ---
 
@@ -784,14 +868,15 @@ wreader/
 ├── tools/                   开发期校验脚本：文档锚点/数字对拍/折行/绘制/配色（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
-│   ├── __init__.py          __version__ 和模块地图（18 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1237 行）
+│   ├── __init__.py          __version__ 和模块地图（19 行）
+│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定与文件锁（768 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1266 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1007 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3308 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3342 行）
 │   ├── translator.py        章节缓存 / 分批 / 段落映射 + 引擎适配层（1199 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
-│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
+│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（785 行）
 │   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
 │   ├── translate/           可插拔翻译引擎（每个厂商一个模块；行数见 memory-bank）
 │   │   ├── __init__.py      引擎注册表 + 工厂：按名字造引擎
@@ -803,13 +888,14 @@ wreader/
 │   │   ├── deepseek.py      DeepSeek chat completions（流式 SSE）
 │   │   └── local.py         本地 Argos Translate（离线，可选依赖）
 │   └── data/
-│       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   654 项测试，全部离线运行（见下方「运行测试」）
+│       └── achievements.json  28 个成就的定义（198 行）
+└── tests/                   683 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
+    ├── test_achievements.py 35 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
     ├── test_reader.py       192 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
-    ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
+    ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
     ├── test_translator.py   77 项 —— 语言识别、分批、章节缓存、引擎适配、错误映射
     ├── test_translate.py    49 项 —— 引擎注册表、各厂商签名/请求构造、错误与参数校验
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出

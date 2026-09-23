@@ -47,7 +47,7 @@ the next launch resumes exactly where you stopped.
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
 | 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. ⚠️ Kept in memory only for now — see "Known issues" |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
-| 🏆 Achievements | 10 achievements (first book, night owl, seven-day streak, …) with progress bars, an unlock animation and a bell |
+| 🏆 Achievements | 28 achievements (first book, night owl, hundred-day streak, weekend warrior, …) unlocked by **events**, with per-category progress bars, an unlock animation and a bell |
 | ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
 
 ---
@@ -308,7 +308,11 @@ The heart of the tool; see [Reader key bindings](#reader-key-bindings) for every
 - The book's language is detected on open (share of CJK characters, computed locally and offline), and the
   reader starts in the Chinese view for Chinese books and the English view for English ones.
 - The reading position is saved every 60 seconds (configurable) and once more on exit.
-- On exit, the session's duration and lines read are written to the statistics and achievements are checked.
+- On exit, the session's duration and lines read are written to the statistics, and the
+  `session_end` event goes to the achievements engine (the line ranges walked this session are
+  folded into the word count with per-range deduplication, so re-reading a page adds nothing).
+- Every `werd` start records a `daily_open` event (that is what "hundred-day streak" and "early
+  bird" look at), `werd import` records `book_add`, and `werd translate` re-checks afterwards.
 - It **needs a real interactive terminal**; in a pipe or with redirected output you get:
   `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
@@ -414,16 +418,21 @@ werd achievements
 Real output:
 
 ```
-已解锁 1/10
-  🏆 📖 开卷有益 第一次打开一本书  解锁于 2026-09-21T16:13:43
+已解锁 1/28
+  🏆 🗄️ 书库初成 书库里添加第 1 本书  解锁于 2026-09-21T16:13:43
 
 进行中
-  ░░░░░░░░░░░░░░  ⏱️ 初窥门径 0分钟/1小时  累计阅读满1小时
-  ██████░░░░░░░░  🔥 七日不断 3/7  连续7天每天阅读30分钟
+  阅读习惯
+    ░░░░░░░░░░░░░░  ⏱️ 初窥门径 0分钟/1小时  累计阅读满 1 小时
+    ░░░░░░░░░░░░░░  🧱 百日筑基 3/100  连续 100 天打开 werd
+    ...
+  数据积累
+    ██████░░░░░░░░  ✒️ 万字户 4200/10000  累计阅读 1 万字
+    ...
 ```
 
-(`1/10 unlocked`, the unlocked entry with its timestamp, then `进行中` = "in progress" with one progress bar per
-remaining achievement.)
+(`1/28 unlocked` and the unlocked entries with their timestamps, then `进行中` = "in progress": the
+remaining ones grouped by category, one progress bar each.)
 
 ### `werd config`
 
@@ -681,6 +690,7 @@ tells you to run `werd config translate`.
 | --- | --- | --- |
 | Settings | `~/.wreader/settings.toml` | `$WREADER_HOME` |
 | Library index | `~/.wreader/library.json` | `$WREADER_HOME` |
+| Achievements state | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | Vocabulary notebook | `~/.wreader/vocab.json` | `$WREADER_HOME` |
 | Translation cache | `~/.wreader/cache/<book_id>/ch0_en.txt`, `ch0_bilingual.txt` | `translator.cache_dir` |
 | Book text (UTF-8) | `~/novels/<title>_utf8.txt` | `$WREADER_NOVELS_DIR`, `library.novels_dir` |
@@ -789,24 +799,64 @@ The cache is per chapter, so deleting the whole directory affects nothing else �
 
 ## Achievements
 
-Defined in `wreader/data/achievements.json`; there are 10 of them. A condition is a simple
-`metric comparison number` expression, so you can add your own.
+Defined in `wreader/data/achievements.json`; there are **28** of them (Phase 1), in four
+categories. A condition is a simple `metric comparison number` expression, so you can add your
+own. The **unlock records** live in `~/.wreader/achievements.json` (plain JSON, editable).
 
-| Achievement | Name | Condition |
+| Achievement | Name | Category | Condition |
+| --- | --- | --- | --- |
+| `first_book` | 📖 开卷有益 | Data | Open a book for the first time |
+| `book_finished` | 🏁 第一本 | Data | Finish your first book |
+| `ten_books` | 📚 十本大关 | Data | Finish 10 books |
+| `fifty_books` | 🎯 半百 | Data | Finish 50 books |
+| `hundred_books` | 💰 百本富翁 | Data | Finish 100 books |
+| `thousand_books` | 🏛️ 千本富豪 | Data | Finish 1000 books |
+| `first_shelf` | 🗄️ 书库初成 | Data | One book in the library |
+| `collector` | 📦 藏书家 | Data | 50 books in the library |
+| `mobile_library` | 🚚 移动图书馆 | Data | 100 books in the library |
+| `words_10k` | ✒️ 万字户 | Data | 10,000 words read |
+| `words_100k` | ⛰️ 十万大山 | Data | 100,000 words read |
+| `words_1m` | 💵 百万富翁 | Data | One million words read |
+| `words_10m` | 🎩 千万俱乐部 | Data | Ten million words read |
+| `words_100m` | 👑 亿万富豪 | Data | 100 million words read |
+| `words_1b` | 🌌 十亿富豪 | Data | A billion words read |
+| `vocab_100` | 📝 词汇积累 | Data | 100 words in the notebook |
+| `vocab_500` | 🧠 生词狂魔 | Data | 500 words in the notebook |
+| `translator` | 🌍 双语者 | Data | Use translation for the first time |
+| `first_hour` | ⏱️ 初窥门径 | Habits | One hour of total reading |
+| `ten_hours` | 🎓 学富五车 | Habits | Ten hours of total reading |
+| `night_owl` | 🌙 深夜书虫 | Habits | More than an hour read between 00:00 and 04:00 |
+| `streak_7` | 🔥 七日不断 | Habits | Seven days in a row with 30 minutes each |
+| `streak_30` | 🗿 铁血读者 | Habits | Thirty days in a row of reading |
+| `hundred_days` | 🧱 百日筑基 | Habits | Open werd on 100 days |
+| `early_bird` | 🌅 清晨第一眼 | Habits | Open werd between 05:00 and 07:00 |
+| `marathon` | 🏃 马拉松 | Habits | A single session longer than two hours |
+| `ultra_marathon` | 🛌 超长待机 | Habits | A single session longer than four hours |
+| `weekend_warrior` | ⚔️ 周末战士 | Habits | Three hours of weekend reading (Saturday or Sunday) |
+
+Available metrics:
+
+| Metric | Meaning | Comes from |
 | --- | --- | --- |
-| `first_book` | 📖 开卷有益 | Open a book for the first time |
-| `first_hour` | ⏱️ 初窥门径 | One hour of total reading |
-| `ten_hours` | 🎓 学富五车 | Ten hours of total reading |
-| `night_owl` | 🌙 深夜书虫 | More than an hour read between 00:00 and 04:00 |
-| `streak_7` | 🔥 七日不断 | Seven days in a row with 30 minutes each |
-| `streak_30` | 🗿 铁血读者 | Thirty days in a row of reading |
-| `book_finished` | 🏁 完本达人 | Finish your first book |
-| `vocab_100` | 📝 词汇积累 | 100 words in the notebook |
-| `translator` | 🌍 双语者 | Use translation for the first time |
-| `marathon` | 🧘 专注模式 | A single reading session longer than two hours |
+| `books_read` / `finished` | books read / books finished | the library index |
+| `total_time` / `night_time` / `single_session` / `weekend_time` | total / night / longest session / weekend seconds | index + achievements state |
+| `streak` | consecutive days | the daily buckets in the index |
+| `vocab_count` / `translations` | notebook words / translation uses | notebook + index |
+| `library_books` | books in the library | the library index |
+| `words_read` | words read, **deduplicated by line range** | achievements state |
+| `days_opened` / `early_open` | days werd was opened / whether it was opened at dawn | achievements state |
 
-Available metrics: `books_read`, `total_time`, `night_time`, `streak`, `finished`, `vocab_count`,
-`translations`, `single_session` (time-based metrics are in **seconds**).
+Word counting: **one Chinese character is one word, one English token is one word**; punctuation
+and digits do not count. Reading the same passage twice adds nothing, because every book keeps the
+line ranges that were already counted.
+
+Unlocking is **event driven**: every module calls
+`achievements.check_achievements(event, data)` with one of `daily_open` (every `werd` start),
+`session_end` (leaving the reader: duration plus the line ranges walked), `book_add`
+(`werd import`), `progress_update`, `book_finish`, `word_add`, `geo_change` (Phase 3) or a plain
+`check` (just re-evaluate now). An achievement never fires twice, and the whole
+read-record-check-write cycle runs under a **file lock**, so two terminals cannot clobber each
+other (Windows has no `flock`; there the write stays atomic but unlocked).
 
 The streak rule: a day only counts once it reaches 30 minutes, but today always counts — it is about to
 become a fact. Unlocking prints an animation and a banner; `stats.achievement_sound = false` silences the bell.
@@ -826,14 +876,15 @@ wreader/
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
-│   ├── __init__.py          __version__ and the module map (18 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1237 lines)
+│   ├── __init__.py          __version__ and the module map (19 lines)
+│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, file lock (768 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1266 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (1007 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes (3308 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes (3342 lines)
 │   ├── translator.py        chapter cache / batching / paragraph mapping + the engine adapter (1199 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
-│   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
+│   ├── stats.py             metrics, heatmap, achievement definitions, celebration (785 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
 │   ├── translate/           pluggable translation engines (one module per provider; line counts live in the memory-bank)
 │   │   ├── __init__.py      engine registry + factory: build an engine by name
@@ -845,13 +896,14 @@ wreader/
 │   │   ├── deepseek.py      DeepSeek chat completions (streamed SSE)
 │   │   └── local.py         local Argos Translate (offline, optional dependency)
 │   └── data/
-│       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   654 tests, all offline (see "Running the tests" below)
+│       └── achievements.json  the 28 achievement definitions (198 lines)
+└── tests/                   683 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
+    ├── test_achievements.py 35 tests — word counting, range dedup, event accounting, state file, locking, unlock checks
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
     ├── test_reader.py       192 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
-    ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
+    ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
     ├── test_translator.py   77 tests — language detection, batching, cache, engine adapter, error mapping
     ├── test_translate.py    49 tests — engine registry, each provider's signature/request building, errors
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export

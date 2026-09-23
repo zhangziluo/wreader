@@ -169,19 +169,23 @@ def test_stats_hides_the_heatmap_when_configured(capsys) -> None:
     assert "热力图已隐藏" in capsys.readouterr().out
 
 
-def test_achievements_lists_progress(capsys) -> None:
+def test_achievements_lists_progress(capsys, monkeypatch) -> None:
+    # 固定启动时刻：测试若恰好在 05:00-07:00 跑，会顺手解锁"清晨第一眼"
+    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 1, 12, 0, 0))
     # 全新环境下应当一个都没解锁
     assert cli.main(["achievements"]) == 0
     out = capsys.readouterr().out
-    assert "已解锁 0/10" in out
+    assert "已解锁 0/28" in out
     # 并列出未解锁项的名字
     assert "开卷有益" in out
 
 
-def test_achievements_marks_one_as_done(capsys, imported) -> None:
+def test_achievements_marks_one_as_done(capsys, imported, monkeypatch) -> None:
     # 延迟导入 reader，避免非 curses 平台上的导入错误
-    from wreader import reader
+    from wreader import achievements, reader
 
+    # 同样固定启动时刻，避免"清晨第一眼"掺进来
+    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 1, 12, 0, 0))
     # 造一个 Pager 并直接保存一次 60 秒的会话
     pager = reader.Pager(list(BOOK_LINES), book_id=imported["zh"], page_height=4)
     reader.save_session(
@@ -191,13 +195,26 @@ def test_achievements_marks_one_as_done(capsys, imported) -> None:
         datetime(2026, 1, 1, 10, 0, 0),
         datetime(2026, 1, 1, 10, 1, 0),
     )
-    # 清掉 save_session 可能产生的输出
+    # 模拟"退出阅读"：把会话交给成就引擎（正文与读过的行区间一起带上）
+    achievements.check_achievements(
+        "session_end",
+        {
+            "book_id": imported["zh"],
+            "seconds": 60,
+            "started": "2026-01-01T10:00:00",
+            "ended": "2026-01-01T10:01:00",
+            "lines": list(BOOK_LINES),
+            "ranges": [(0, len(BOOK_LINES))],
+        },
+    )
+    # 清掉可能产生的输出
     capsys.readouterr()
-    # 现在应当解锁了 1 个
+    # 读过一本书（开卷有益）+ 书库非空（书库初成），应当解锁 2 个
     assert cli.main(["achievements"]) == 0
     out = capsys.readouterr().out
-    assert "已解锁 1/10" in out
+    assert "已解锁 2/28" in out
     assert "开卷有益" in out
+    assert "书库初成" in out
 
 
 def test_vocab_listing_search_and_removal(capsys, notebook: Path) -> None:

@@ -21,15 +21,25 @@ from wreader import config, library, stats
 def test_load_achievements_reads_the_packaged_file() -> None:
     # 读打包的那份成就定义
     definitions = stats.load_achievements()
-    # 当前随包发布 10 条
-    assert len(definitions) == 10
+    # 当前随包发布 28 条（Phase 1：原有 10 条 + 新加的 18 条）
+    assert len(definitions) == 28
     for achievement in definitions:
         # 三要素都要非空
         assert achievement["id"]
         assert achievement["name"]
         assert achievement["condition"]
+        # 分类必须有值（CLI 靠它分组），secret 必须是布尔
+        assert achievement["category"]
+        assert isinstance(achievement["secret"], bool)
         # 且结构统一
-        assert set(achievement) == {"id", "name", "desc", "condition"}
+        assert set(achievement) == {
+            "id",
+            "name",
+            "desc",
+            "condition",
+            "category",
+            "secret",
+        }
     # id 不能重复
     ids = [achievement["id"] for achievement in definitions]
     assert len(set(ids)) == len(ids)
@@ -42,9 +52,16 @@ def test_load_achievements_accepts_an_explicit_path(tmp_path) -> None:
         json.dumps({"achievements": [{"id": "x", "condition": "streak >= 2"}]}),
         encoding="utf-8",
     )
-    # 缺 name 时用 id 兜底，desc 补空串
+    # 缺 name 时用 id 兜底，desc 补空串，category/secret 补默认值
     assert stats.load_achievements(target) == [
-        {"id": "x", "name": "x", "desc": "", "condition": "streak >= 2"}
+        {
+            "id": "x",
+            "name": "x",
+            "desc": "",
+            "condition": "streak >= 2",
+            "category": stats.DEFAULT_CATEGORY,
+            "secret": False,
+        }
     ]
 
 
@@ -375,78 +392,6 @@ def test_bump_translations() -> None:
     assert document["stats"]["translations"] == 6
 
 
-# ---------------------------------------------------------------- achievements
-def test_check_achievements_unlocks_and_records_progress(
-    achievements_document, definitions
-) -> None:
-    # save=False：只改内存里的文档，不写盘
-    newly = stats.check_achievements(
-        achievements_document, definitions, save=False
-    )
-    # 三条都达标，按定义顺序返回
-    assert [entry["id"] for entry in newly] == ["read_one", "two_hours", "night"]
-    # 每条都带解锁时间戳
-    assert all(entry["unlocked_at"] for entry in newly)
-    # 解锁记录被写回文档
-    assert achievements_document["achievements"]["unlocked"] == newly
-    # 同时刷新了进度快照
-    progress = achievements_document["achievements"]["progress"]
-    assert progress["read_one"] == {"current": 2, "required": 1}
-    assert progress["two_hours"] == {"current": 7800, "required": 7200}
-    assert progress["night"] == {"current": 7200, "required": 3600}
-
-
-def test_check_achievements_is_idempotent(achievements_document, definitions) -> None:
-    # 第一次解锁三条
-    stats.check_achievements(achievements_document, definitions, save=False)
-    # 第二次调用不该重复记录
-    assert stats.check_achievements(achievements_document, definitions, save=False) == []
-    assert len(achievements_document["achievements"]["unlocked"]) == 3
-
-
-def test_check_achievements_leaves_unreached_ones_locked(
-    achievements_document, definitions
-) -> None:
-    # 把累计时长改小，让 two_hours 达不到
-    achievements_document["stats"]["total_read_time"] = 10
-    newly = stats.check_achievements(achievements_document, definitions, save=False)
-    # 只有另外两条解锁
-    assert [entry["id"] for entry in newly] == ["read_one", "night"]
-
-
-def test_check_achievements_honours_the_clock(achievements_document, definitions) -> None:
-    # 注入固定时间，验证时间戳格式
-    stamp = datetime(2026, 5, 6, 7, 8, 9)
-    newly = stats.check_achievements(
-        achievements_document, definitions, now=stamp, save=False
-    )
-    assert newly[0]["unlocked_at"] == "2026-05-06T07:08:09"
-
-
-def test_check_achievements_saves_the_library(isolated_home, definitions) -> None:
-    # 造一本有会话记录的书
-    document = library.load_library()
-    document["books"]["x"] = {
-        "title": "X",
-        "progress": {"sessions": [{"start": "a", "end": "b", "lines_read": 1}]},
-    }
-    # 默认 save=True：应当写盘
-    stats.check_achievements(document, definitions)
-
-    # 重新读盘能看到解锁记录
-    from_disk = library.load_library()
-    assert [entry["id"] for entry in from_disk["achievements"]["unlocked"]] == ["read_one"]
-
-
-def test_check_achievements_without_a_document_uses_the_library(
-    isolated_home,
-) -> None:
-    # 不传文档时自动读写索引；空书库不会有解锁
-    assert stats.check_achievements() == []
-    # 顺带确认索引文件被创建出来
-    assert config.library_file().is_file()
-
-
 # --------------------------------------------------------------- celebration bits
 # 参数化：进度条的取整与越界处理
 @pytest.mark.parametrize(
@@ -529,7 +474,7 @@ def test_build_report_is_complete_and_json_serialisable(achievements_document) -
     assert report["night_seconds"] == 7200
     assert report["longest_session_seconds"] == 14400
     assert report["streak_min_seconds"] == stats.STREAK_SECONDS
-    assert report["achievements"]["total"] == 10
+    assert report["achievements"]["total"] == 28
     # 每本书的累计时长（按降序）
     assert report["books"] == [
         {"id": "aaa", "title": "Read a lot", "seconds": 7200},
@@ -582,7 +527,7 @@ def test_build_report_of_an_empty_library(isolated_home) -> None:
     )
     assert report["total_seconds"] == 0
     assert report["books"] == []
-    assert report["achievements"] == {"unlocked": [], "unlocked_count": 0, "total": 10}
+    assert report["achievements"] == {"unlocked": [], "unlocked_count": 0, "total": 28}
     # 带生成时间
     assert report["generated_at"]
 

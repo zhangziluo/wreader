@@ -11,10 +11,11 @@ Two things live here:
 
 The recording side already lives in :mod:`wreader.reader` (session start/end,
 ``progress.total_time_seconds``, ``stats.daily_read_time``, ``stats.translations``);
-this module reads that data back and turns it into metrics.  Everything except
-:func:`check_achievements` and :func:`celebrate` is a pure function over plain
-data, so the metrics, the streak and the heatmap are testable without a
-terminal.
+this module reads that data back and turns it into metrics.  The **unlocks**
+themselves (which achievement fired, when) live in :mod:`wreader.achievements`,
+which calls :func:`compute_metrics` from here.  Everything except
+:func:`celebrate` is a pure function over plain data, so the metrics, the streak
+and the heatmap are testable without a terminal.
 """
 
 # 延迟求值类型注解
@@ -41,6 +42,7 @@ from . import config, library, vocab
 # 模块公开的名字：常量 + 各项统计/成就函数
 __all__ = [
     "CELEBRATION_FRAMES",
+    "DEFAULT_CATEGORY",
     "HEATMAP_CHARS",
     "HEATMAP_DAYS",
     "STREAK_SECONDS",
@@ -50,7 +52,6 @@ __all__ = [
     "build_report",
     "bump_translations",
     "celebrate",
-    "check_achievements",
     "compute_metrics",
     "evaluate_condition",
     "format_hours",
@@ -71,6 +72,9 @@ __all__ = [
 
 # 成就定义文件名，放在包的 data/ 目录里
 ACHIEVEMENTS_FILE = "achievements.json"
+
+# 定义里没写 category 时的兜底分类（`werd achievements` 会把它排在最后）
+DEFAULT_CATEGORY = "其他"
 
 # 一天读满 30 分钟才算"有效阅读日"，用于连续天数统计
 #: A day only counts towards an achievement streak once it reaches this.
@@ -147,13 +151,15 @@ def load_achievements(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         # 没有 id 或没有条件判断的项无法使用，跳过（不让整个列表失败）
         if not item.get("id") or not item.get("condition"):
             continue
-        # 统一成四个字段，并把值都转成字符串
+        # 统一成六个字段，并把值都转成字符串（category/secret 供 `werd achievements` 分组）
         achievements.append(
             {
                 "id": str(item["id"]),
                 "name": str(item.get("name") or item["id"]),
                 "desc": str(item.get("desc") or ""),
                 "condition": str(item["condition"]),
+                "category": str(item.get("category") or DEFAULT_CATEGORY),
+                "secret": bool(item.get("secret")),
             }
         )
     return achievements
@@ -592,80 +598,6 @@ def bump_translations(document: Dict[str, Any], count: int = 1) -> int:
     return total
 
 
-def check_achievements(
-    # 书库文档；不传就自己读索引（并在最后写回）
-    document: Optional[Dict[str, Any]] = None,
-    # 成就定义；不传就读打包的 achievements.json
-    achievements: Optional[Sequence[Dict[str, Any]]] = None,
-    # 解锁时间戳来源（测试可注入固定时间）
-    now: Optional[datetime] = None,
-    # 是否把结果写回磁盘
-    save: bool = True,
-) -> List[Dict[str, Any]]:
-    """Unlock every achievement whose condition now holds.
-
-    Returns the newly unlocked ones in definition order so the caller can
-    celebrate them, and refreshes ``achievements.progress`` on the way through.
-    When *document* is omitted the index is loaded and written back; a caller
-    that passes its own document can pass ``save=False`` to keep control.
-    """
-    # 没传文档就从磁盘读
-    if document is None:
-        document = library.load_library()
-    # 没传定义就用打包的那份（拷贝成列表，下面只读）
-    definitions = (
-        list(achievements) if achievements is not None else load_achievements()
-    )
-    # 先算出所有指标的当前值
-    metrics = compute_metrics(document)
-
-    # 确保 achievements 段落存在且是字典
-    state = document.get("achievements")
-    if not isinstance(state, dict):
-        state = {}
-        document["achievements"] = state
-    # 已解锁列表（格式不对就重建为空列表）
-    entries = state.get("unlocked")
-    if not isinstance(entries, list):
-        entries = []
-    # 已解锁 id 的集合，用来判重
-    known = set(unlocked_ids(document))
-    # 本次记录使用的时间戳
-    stamp = (now or datetime.now()).isoformat(timespec="seconds")
-
-    # 本次新解锁的成就，按定义顺序返回给调用方做庆祝
-    newly: List[Dict[str, Any]] = []
-    # 每个成就的进度快照，写回文件供 `werd achievements` 展示
-    progress: Dict[str, Dict[str, int]] = {}
-    for achievement in definitions:
-        # 算出这条成就的当前进度与是否达标
-        info = achievement_state(achievement, metrics)
-        progress[achievement["id"]] = {
-            "current": info["current"],
-            "required": info["required"],
-        }
-        # 没达标，或者之前已经解锁过：跳过
-        if not info["unlocked"] or achievement["id"] in known:
-            continue
-        # 新解锁：记一条带时间戳的记录
-        record = {
-            "id": achievement["id"],
-            "name": achievement["name"],
-            "unlocked_at": stamp,
-        }
-        entries.append(record)
-        known.add(achievement["id"])
-        newly.append(record)
-
-    # 把解锁列表和进度写回文档
-    state["unlocked"] = entries
-    state["progress"] = progress
-    # 需要的话落盘
-    if save:
-        library.save_library(document)
-    return newly
-
-
 def build_report(
     # 书库文档
     document: Dict[str, Any],
@@ -673,6 +605,8 @@ def build_report(
     today: Optional[date] = None,
     # 已加载的配置（读每日目标用）
     settings: Optional[config.Config] = None,
+    # 已解锁的成就 id；不传就退回读索引里的老记录（兼容旧数据）
+    unlocked: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Return everything ``werd stats`` shows as plain, JSON serialisable data.
 
@@ -702,7 +636,9 @@ def build_report(
         # 定义文件坏了也不该让 stats 命令失败
         total_achievements = 0
     # 已解锁的 id 列表
-    unlocked = unlocked_ids(document)
+    # 已解锁的 id 列表：解锁的权威位置是 achievements.json，调用方一般直接传进来；
+    # 没传时退回读索引里的老记录（只为了让旧数据、旧测试仍然可用）
+    unlocked = list(unlocked) if unlocked is not None else unlocked_ids(document)
 
     # 这份字典既用于渲染表格，也直接作为 --json 的输出
     return {

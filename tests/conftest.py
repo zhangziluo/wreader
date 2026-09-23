@@ -319,32 +319,6 @@ def achievements_document() -> Dict[str, Any]:
     }
 
 
-# 一份测试专用的成就定义，避免依赖打包的那份文件
-@pytest.fixture
-def definitions() -> List[Dict[str, Any]]:
-    """A tiny achievement list so tests do not depend on the shipped file."""
-    return [
-        {
-            "id": "read_one",
-            "name": "Read one",
-            "desc": "one book with a session",
-            "condition": "books_read >= 1",
-        },
-        {
-            "id": "two_hours",
-            "name": "Two hours",
-            "desc": "two hours in total",
-            "condition": "total_time >= 7200",
-        },
-        {
-            "id": "night",
-            "name": "Night owl",
-            "desc": "an hour at night",
-            "condition": "night_time >= 3600",
-        },
-    ]
-
-
 # 预先塞两个生词的笔记本
 @pytest.fixture
 def notebook() -> Path:

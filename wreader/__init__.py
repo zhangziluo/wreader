@@ -7,7 +7,8 @@ Module layout:
 * :mod:`wreader.reader`      -- curses based paged reading experience
 * :mod:`wreader.translator`  -- translation back-ends
 * :mod:`wreader.vocab`       -- vocabulary notebook
-* :mod:`wreader.stats`       -- reading statistics and achievements
+* :mod:`wreader.stats`       -- reading statistics and achievement definitions
+* :mod:`wreader.achievements` -- event driven achievements: state, unlocks, file lock
 * :mod:`wreader.config`      -- user configuration handling
 """
 

@@ -12,13 +12,17 @@
         ┌───────────────────┼───────────────────┬──────────────┐
         ▼                   ▼                   ▼              ▼
    library.py          translator.py        vocab.py       stats.py
-   导入/索引/搜索       引擎适配+章节缓存    生词本         指标/热力图/成就
+   导入/索引/搜索       引擎适配+章节缓存    生词本         指标/热力图/成就定义
         │                   │                   │              │
         └───────────────────┴───────────────────┴──────────────┘
+                            │  ✔ 事件（daily_open / session_end / book_add …）
+                            ▼
+                    achievements.py         ← 记事件 + 判解锁 + 写状态（flock 串行化）
                             ▼
                        config.py            ← 数据目录、settings.toml、SCHEMA 驱动
                             ▼
-                  ~/.wreader/{settings.toml, library.json, vocab.json, cache/}
+                  ~/.wreader/{settings.toml, library.json, vocab.json,
+                              achievements.json, cache/}
                   ~/novels/<书名>_utf8.txt
 
   纯数据层之外的特例：
@@ -38,12 +42,13 @@
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
-| `wreader/__init__.py` | 18 | `__version__`、模块地图 | `["__version__"]` |
-| `wreader/cli.py` | 1237 | argparse 定义 + 子命令处理函数（含 `toc`、`config translate` 向导） | `["build_parser", "main"]` |
+| `wreader/__init__.py` | 19 | `__version__`、模块地图 | `["__version__"]` |
+| `wreader/achievements.py` | 768 | **事件驱动成就引擎**：状态文件、文件锁、事件累加、解锁判定、字数去重 | 17 个（`check_achievements`/`record_event`/…） |
+| `wreader/cli.py` | 1266 | argparse 定义 + 子命令处理函数（含 `toc`、`config translate` 向导） | `["build_parser", "main"]` |
 | `wreader/config.py` | 1007 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1159 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读 | **无 `__all__`** |
-| `wreader/reader.py` | 3308 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、标记/笔记、译文弹窗 | 11 个（`Pager`/`open_reader`…） |
-| `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
+| `wreader/reader.py` | 3342 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、标记/笔记、译文弹窗 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/stats.py` | 785 | 指标、热力图、连续天数、**成就定义加载**与庆祝动画 | 27 个 |
 | `wreader/toc.py` | 474 | 目录：章节提取、epub nav/ncx 解析、百分比、可重建缓存 | 10 个 |
 | `wreader/translator.py` | 1199 | 章节缓存 + 分批 + 段落映射 + 语言规范化 + 引擎适配（`EngineBackend`） | 26 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |
@@ -55,7 +60,7 @@
 | `wreader/translate/deepseek.py` | 221 | DeepSeek chat completions + SSE 解析 | 5 个 |
 | `wreader/translate/local.py` | 129 | 本地 Argos Translate（惰性导入） | 3 个 |
 | `wreader/translate/__init__.py` | 150 | 引擎注册表 + 工厂（`make_engine`/`engine_from_settings`/`available_engines`） | 13 个 |
-| `wreader/data/achievements.json` | — | 10 个成就定义（可被 `$WREADER_HOME` 覆盖） | — |
+| `wreader/data/achievements.json` | 198 | **28 个**成就定义（可被 `$WREADER_HOME` 覆盖） | — |
 
 ## 关键设计模式
 
@@ -125,6 +130,23 @@
 - 翻译失败 → `TranslationError` / `TranslationUnavailable` → 消息行提示
 - 索引写不进 → `save_position()` 返回 `False`，下次自动保存再试
 - 章节缓存缺失 → 回落到逐段翻译，不影响阅读
+
+### 8. 成就：事件驱动 + 单一解锁存储（`achievements.py`）
+- **唯一解锁存储**是 `<data dir>/achievements.json`（不是 `library.json`）。旧版本写在
+  `library.json` 的 `achievements.unlocked` 里，**第一次读状态时自动迁移一次**，
+  之后那里的旧内容不再被读（`stats.unlocked_ids(document)` 只留给迁移与兼容测试）。
+- **唯一入口**是 `achievements.check_achievements(event_type, data)`：记事件 → 算指标 →
+  逐条判定 → 写回。事件名被 `EVENTS` 白名单校验，写错立刻抛 `AchievementsError`（绝不静默丢事件）。
+- **条件是表达式**（`"words_read >= 10000"`），指标 = `stats.compute_metrics(document)`
+  ∪ 状态派生指标（`words_read`/`days_opened`/`early_open`/`weekend_time`/`library_books`）。
+  加一条成就 = 往 `data/achievements.json` 加一行，代码不用动。
+- **字数按行号区间去重**：`Pager.read_ranges` 在 `move_to()` 里记下每次"向前"走过的
+  `[起点, 终点)`；退出时整段交给引擎，引擎只统计"没统计过的那些行"（`uncovered_words`），
+  并把区间并进 `books[id].counted`。所以同一页读两遍不会重复累加。
+- **文件锁**：读-改-写整个包在 `_file_lock()`（POSIX `flock`；Windows 无 `fcntl` →
+  退化成"只有原子替换"）。写盘一律 `mkstemp` + `os.replace`。
+- **容错姿态**：状态文件坏 → 改名成 `achievements.json.broken` 再从空状态开始；
+  定义文件坏 / 指标写错 → 只是"这次不判定"，绝不让阅读或命令失败。
 
 ## 关键实现路径（改动时必看）
 
@@ -232,4 +254,22 @@
     「无法访问类 Translator 的属性 params」。写法：**直接构造具体类**，或对 `make_engine()`
     的返回值用 `isinstance` 收窄。`make_engine()` 声明返回基类类型是**故意**的（它要能返回六家
     引擎），别为了让临时脚本好写就把 `params` 提到基类 —— 那会变成"每个引擎都得实现"的假契约。
+24. **`daily_open` 每次启动都触发 → 与"跑测试的时刻"耦合**：`cli.main()` 一进来就记
+    `daily_open`，所以测试若恰好在北京时间 05:00-07:00 跑，`early_bird` 会**自己解锁**，
+    `assert "已解锁 0/28"` 当场翻车。对策：`cli._now()` 是**注入缝**，测试把它换成固定中午。
+    凡是"依赖当前时刻/日期"的新事件，都要留这种缝，否则测试会变成按钟点随机失败。
+25. **成就的"解锁"只能有一个写入路径**：权威存储是 `<data dir>/achievements.json`。
+    曾经的两套（`stats.check_achievements` 写 `library.json`）会造成"到底谁说了算"，
+    所以那个函数**已删除**（连同它的 6 个测试）；`stats` 只保留**定义加载**与指标计算。
+    新增解锁逻辑时不要再往 `library.json` 写。
+26. **`_normalise_state` 里的行区间必须统一成 `list[list[int]]`**：`merge_ranges()` 返回
+    tuple，直接塞进 state 会让"内存形状"与"JSON 形状"不一致 → 读回来 `==` 断言永远失败
+    （本次实测：`[(0, 2)] != [[0, 2]]`）。**同一份数据只允许一种表示**。
+27. **不要为了跨平台在模块顶部 `import msvcrt`**：pyright 在 macOS 上会报"无法解析"。
+    `_lock_file()` 的做法是**局部** `import fcntl` + `except ImportError: return False`，
+    Windows 侧退化成"只有原子替换"，这个取舍写进了函数 docstring 与 README。
+28. **条件里的指标名必须真实存在**：写成 `condition: "book_adds >= 1"`（指标拼错）时，
+    `parse_condition` 不报错、进程不崩，但那条成就**永远解锁不了** —— 静默失效最难查。
+    `tests/test_achievements.py::test_packaged_conditions_only_use_metrics_that_exist`
+    专门拦这个：拿 `compute_metrics()` 的键集合逐个对拍，加新指标/新成就时它会立刻失败。
 

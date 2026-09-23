@@ -74,8 +74,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、书库、统计成就、目录、翻译、生词本
-from . import config, library, stats, toc, translator, vocab
+# 同包引用：配置、书库、统计成就、成就事件、目录、翻译、生词本
+from . import achievements, config, library, stats, toc, translator, vocab
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
@@ -597,6 +597,9 @@ class Pager:
         #: forward lines scrolled this session: the reading work actually done
         # 本次会话向前读了多少行（只统计前进，回退不抵消）
         self.lines_read = 0
+        #: half open ``(start, end)`` line ranges walked through this session
+        # 本次会话读过的行区间：退出时交给成就引擎，按区间去重统计字数
+        self.read_ranges: List[Tuple[int, int]] = []
         # 书签拷贝一份（深拷贝每个字典）
         self.bookmarks = [dict(mark) for mark in bookmarks]
         # 行号 -> 译文（临时翻译与缓存翻译都放这里）
@@ -879,6 +882,8 @@ class Pager:
         # 只统计"向前"的位移，往回翻不抵消阅读量
         if target > self.position:
             self.lines_read += target - self.position
+            # 记下这一趟读过的区间 [起点, 终点)：中间翻页、跳转、滚轮都经过这里
+            self.read_ranges.append((self.position, target))
         self.position = target
         # 段内偏移不能为负；大到超出这一行的折行条数时由渲染侧夹住
         self.line_offset = max(0, int(offset))
@@ -2672,24 +2677,22 @@ def _reload_vocab(pager: Pager) -> None:
         pager.say("生词本读取失败：{}".format(exc))
 
 
-def _celebrate_achievements(ring: bool = True) -> List[Dict[str, Any]]:
-    """Unlock whatever the finished session earned, then show the fanfare.
+def _celebrate_achievements(
+    newly: Sequence[Dict[str, Any]], ring: bool = True
+) -> List[Dict[str, Any]]:
+    """Print the post-curses fanfare for the achievements in *newly*.
 
-    A broken definition file must never turn a reading session into a traceback,
-    so anything unexpected is reported and swallowed instead.  *ring* mirrors the
-    ``achievement_sound`` setting: some terminals beep loudly on ``'\\a'``.
+    This runs after curses has handed the terminal back, so plain writes are
+    enough.  The unlocking itself happens in
+    :func:`wreader.achievements.check_achievements`; this only renders the result,
+    which keeps a broken definition file from ever turning a session into a
+    traceback.  *ring* mirrors the ``achievement_sound`` setting: some terminals
+    beep loudly on ``'\\a'``.
     """
-    try:
-        # 根据最新统计检查有没有新解锁的成就
-        newly = stats.check_achievements()
-    except (stats.StatsError, library.LibraryError) as exc:
-        # 成就文件坏了也只是提示，不能影响阅读体验
-        console.print("[yellow]achievements skipped: {}[/yellow]".format(exc))
-        return []
     # 逐条播放庆祝动画
     for achievement in newly:
         stats.celebrate(achievement, ring=ring)
-    return newly
+    return list(newly)
 
 
 def _mark_word(stdscr: Any, pager: Pager) -> None:
@@ -3304,5 +3307,36 @@ def open_reader(book_id: str) -> int:
         )
     )
     # 检查并庆祝本次会话解锁的成就（按设置决定是否响铃）
-    _celebrate_achievements(ring=bool(settings.get("stats.achievement_sound", True)))
+    _celebrate_achievements(
+        _session_achievements(pager, seconds, started, ended),
+        ring=bool(settings.get("stats.achievement_sound", True)),
+    )
     return 0
+
+
+def _session_achievements(
+    pager: Pager, seconds: int, started: datetime, ended: datetime
+) -> List[Dict[str, Any]]:
+    """Hand the finished session to the achievements engine; never raise.
+
+    The payload carries the whole line ranges walked through this session, so the
+    engine can count the words it has not counted before (a re-read adds nothing).
+    """
+    try:
+        # session_end：时长 + 读过的行区间 → 事件记录 + 解锁判定
+        return achievements.check_achievements(
+            "session_end",
+            {
+                "book_id": pager.book_id,
+                "seconds": int(seconds),
+                "started": _iso(started),
+                "ended": _iso(ended),
+                # 正文交给引擎，它自己按行号区间去重
+                "lines": pager.lines,
+                "ranges": list(pager.read_ranges),
+            },
+        )
+    except (achievements.AchievementsError, library.LibraryError, stats.StatsError) as exc:
+        # 成就系统坏了也只是提示一句，绝不能影响阅读体验
+        console.print("[yellow]achievements skipped: {}[/yellow]".format(exc))
+        return []

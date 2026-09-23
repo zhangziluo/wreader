@@ -7,9 +7,9 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **654 passed**，全离线、不碰真实数据，约 4~25 秒 |
+| 测试 | **683 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3164** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3405** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
 | 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**54 个跟踪文件**（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
@@ -106,8 +106,14 @@
 - 指标：总时长、今日/本周/本月、夜间阅读（含跨午夜重叠计算）、单次最长、连续天数。
 - 连续天数规则：一天 ≥ 30 分钟才算有效；**当天永远算数**（它正要变成事实）。
 - 热力图（`heatmap` 单元格 + `heatmap_weeks` 整周对齐）与 ASCII 进度条。
-- 10 个成就，条件为 `指标 比较符 数字` 表达式，定义在 `wreader/data/achievements.json`，
-  可被 `$WREADER_HOME` 下的同名文件覆盖；解锁时播动画横幅，`stats.achievement_sound` 可静音。
+- **事件驱动成就引擎**（`wreader/achievements.py`，2026-09-23 Phase 1）：定义 **28** 条
+  （`wreader/data/achievements.json`，可被 `$WREADER_HOME` 下的同名文件覆盖），条件是
+  `指标 比较符 数字` 表达式；解锁记录写在 `~/.wreader/achievements.json`（纯 JSON + 文件锁，
+  坏文件自动改名 `.broken` 重建）。事件：`daily_open`（每次启动）、`session_end`（退出阅读，
+  带时长与读过的行区间）、`book_add`（`werd import`）、`progress_update`/`book_finish`/
+  `word_add`/`geo_change`、以及纯重算的 `check`。
+- **字数按行号区间去重**（中文一字=1、英文一词=1、标点不计），同一页读两遍不重复累加。
+- 解锁时播动画横幅，`stats.achievement_sound` 可静音；`werd achievements` 按分类显示进度条。
 
 ### 配置
 - `settings.toml`，5 个 section / 24 个键，由 `SCHEMA` 单一事实来源驱动（默认值、类型、写序、行尾注释）。
@@ -148,6 +154,18 @@
    顺手改正一处旧笔误：那份"已解决"清单原文写"六条"，实际列了 7 条
    （英文版写的是 Seven，是对的），现已扩成 **十条**，中英两版一致。
    同性质的守卫见 #3（把校验脚本搬进仓库，以后改代码就能自动查出这类数字漂移）。
+
+### 高优先级
+0b. **成就引擎 Phase 2 / Phase 3**（用户给了完整 ~60 条规格，Phase 1 已完成 28 条）。
+   - **Phase 2（操作彩蛋 / 难度挑战）**：需要**阅读器内的实时事件**——
+     `key`（空格连击=手速达人、连续翻页=翻页永动机、全程方向键=方向键怀旧、`t` 连打=翻译狂魔）、
+     `resize`（≤40 列并读满 5 分钟=极限尺寸、≤60 列读完一章=窄屏挑战）、
+     以及 5 秒的**屏内通知**（现在解锁只在退出后的普通终端里庆祝）。
+     另外要新增两个前置功能：阅读器**帮助页**（帮助迷）与**意外中断自动恢复**流程（我反悔 / 恢复大师）。
+   - **Phase 3（地理 / 环境）**：`geo.py`（ip-api.com，1 小时缓存、**必须可注入且离线降级**）
+     + `env.py`（云主机 / WSL / tmux / 可编辑安装探测）→ 环游亚欧非美大洋、世界公民、百年世仇、
+     节日读者、名字彩蛋（`werd --werd` / `werd word`）、成就猎人（查看成就页 >10 次）。
+   - 规格原文里的 `~/.nr/achievements.json` **是改名前的旧路径**，本项目一律用 `~/.wreader`（已定）。
 
 ### 中优先级
 2. **实现 `reader.theme`**（当前是预留项，改了没效果）：在 `_init_colors()` 之后
@@ -236,4 +254,11 @@
 | **2026-09-23** | `requests` 与 `deep-translator` **保持必装**，只把 `argostranslate` 放进 `local` extra | 计划里原本写"deep-translator 移到 google extra"，实现时判定不妥：**google 是默认引擎**，把它的依赖做成可选 = 装完就坏（`pip install wreader` 后按 `t` 直接报"没装包"）。extras 只该装"重且少数人才用"的东西，Argos 的几百 MB 模型正合适 |
 | **2026-09-23** | `t` 从"只翻当前屏并提示已翻译 N 段"改成"**译文在底部弹窗显示 3 秒**"，并新增"未配置就走向导"的前置检查 | 规格明确要求弹窗；顺带修掉旧行为的反直觉之处——旧 `t` 只把译文塞进内存，用户按完看不到任何译文（得再按 `l`）。前置检查则是把"没配好"和"请求失败"分开：前者给可操作提示，后者才是错误 |
 | **2026-09-23** | 新增 `tools/verify_translate.py`（真 pty，**不联网**） | 弹窗要真建子窗口/真按叠窗顺序刷；但翻译必须联网，而测试纪律不许联网。于是只验"不联网也确定"的两条：引擎不可用时 `t` 的提示、向导的落盘。**用 `local`（没装包）与 `baidu`（没填密钥）各打一次**，两条路都不需要网络 |
+| **2026-09-23** | 成就引擎**独立成模块** `wreader/achievements.py`，解锁状态从 `library.json` 搬到 `~/.wreader/achievements.json`（第一次读状态时**自动迁移一次**） | 用户规格要求"事件驱动"。有些成就的条件根本**无法从索引派生**（打开过几天、周末读了多少秒、按行号去重后的字数），必须随事件记下来。"单一写入路径"避免"到底谁说了算"；一次性迁移保证老用户不丢解锁 |
+| **2026-09-23** | 成就条件**仍是** `指标 比较符 数字` 表达式（而不是每种成就写一个判定函数） | 28 条里绝大多数本质是累计量。用"**事件累加 → 派生指标 → 表达式判定**"三件套：既满足"事件驱动 + 各模块调 `check_achievements`"，又保住"用户自己往 json 加一条成就"这个**已文档化的特性**（零代码扩展）。只有真正无法用指标表达的（实时按键、地理时间窗、环境探测）才留给 Phase 2/3 的专用判定器 |
+| **2026-09-23** | 字数"按行号区间去重"由 `Pager.read_ranges` 承担，挂在 `move_to()` 这个**唯一位移入口** | 只记"读了多少行"换算不出字数；只记总字数又会因回翻重复计数。**行区间**是唯一同时满足"去重"与"行号坐标唯一"硬约束的表示；挂在 `move_to` 上则天然覆盖翻页/滚轮/跳转/搜索所有路径，不必逐个方法插桩 |
+| **2026-09-23** | 定义文件加 `category` / `secret` 两个字段（**4 键 → 6 键**，旧定义自动补默认值） | 规格要求按分类展示成就、且有隐藏成就。代价是 `stats.load_achievements` 的规范化与 2 个测试同步更新；老式定义仍能加载（补 `DEFAULT_CATEGORY` 与 `secret=False`） |
+| **2026-09-23** | **删除** `stats.check_achievements`（连同它的 6 个测试） | 解锁只能有一个写入路径。留着它 = 两套真相（一个写 `library.json`、一个写 `achievements.json`）。`stats` 从此只负责"指标 + 定义加载 + 庆祝动画" |
+| **2026-09-23** | 文件锁只做 POSIX `flock`，Windows 退化为"原子替换、不串行化" | 主战场是 macOS / Linux / Termux。为 Windows 在**模块顶部** `import msvcrt` 会让 pyright 在 macOS 上报"无法解析"；改成函数内 `import fcntl` + `ImportError: return False`。这是明说的取舍（docstring 与两份 README 都写了） |
+| **2026-09-23** | `marathon` / `book_finished` 的**显示名**改成规格里的「马拉松」「第一本」 | 用户规格明确给了名字。**id 不变** → 老用户的解锁记录与 `library.json` 里的旧数据照常有效（名字只是展示层，解锁记录里存的那份只是快照） |
 

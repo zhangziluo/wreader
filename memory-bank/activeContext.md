@@ -4,10 +4,10 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`654 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`683 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 **9** 个校验脚本全绿（新增 `verify_translate.py`），且**已 git 化并推送到 GitHub**
 （`main` 跟踪 `origin/main`）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3164** 条语句上方没有紧邻注释行
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3405** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 ⚠️ IDE 里飘的**幽灵告警已侦破**（同一份 **143 行**野生 `cli.py` 碎片，见 ㉔ / ㉕）：
 `cli.py:24: 未定义"Optional"` 与 `cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`
@@ -21,7 +21,8 @@ README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻�
 **CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
 **目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**、
 **笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑；笔记暂存内存，落盘是下一步）**、
-**可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**。
+**可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**、
+**成就引擎 Phase 1：`wreader/achievements.py` 事件驱动 + 28 个成就 + `~/.wreader/achievements.json`（㉖）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -995,9 +996,58 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
    因此**故意没**给 `.gitignore` 加 `/cli.py`：那样反而会让它悄悄消失、下次没人发现。
    宁可让它继续在 `git status` 里显形，同时**永不用 `git add -A`**。
 
+### ㉖ 成就引擎 Phase 1：`wreader/achievements.py` + 28 个成就（2026-09-23）
+
+**需求**：用户给了完整的「事件驱动成就系统」规格（约 60 条成就、`check_achievements(event_type, data)`、
+数据存 `~/.nr/achievements.json`、解锁时在 curses 底部通知 5 秒、IP 地理用 ip-api.com 缓存 1 小时、
+文件锁防并发、字数按行号去重）。**Phase 1 只做引擎 + 累计/习惯类成就**，把需要实时按键、
+地理、环境探测的部分留给 Phase 2/3（见 `progress.md` 待办 0b）。
+
+**做了什么**：
+
+| 文件 | 变化 |
+| --- | --- |
+| `wreader/achievements.py` | **新增 768 行**：状态文件读写（原子替换 + `flock`）、`record_event`、`compute_metrics`（= `stats.compute_metrics` ∪ 状态派生指标）、`check_achievements(event, data)`、`list_achievements()`、`count_words`/`uncovered_words`/`merge_ranges`/`weekend_seconds` 等纯函数 |
+| `wreader/data/achievements.json` | 10 → **28** 条，每条加 `category`（阅读习惯 / 数据积累）+ `secret`；198 行 |
+| `wreader/stats.py` | 849 → **785** 行：**删掉 `check_achievements`**（解锁权威只剩一个），保留指标/定义加载/庆祝；`load_achievements` 改为产出 6 键；`build_report` 新增可选 `unlocked=` |
+| `wreader/reader.py` | `Pager.read_ranges` + 在 `move_to()` 里记区间；`_session_achievements()` 发 `session_end`；`_celebrate_achievements(newly, ring)` 只负责渲染 |
+| `wreader/cli.py` | `_now()` / `_record_achievements()` / `_unlocked_ids()`；`main` 发 `daily_open`、`cmd_import` 发 `book_add`、`cmd_translate` 后重算；`cmd_achievements` 按分类重写 |
+| 测试 | 新增 `tests/test_achievements.py` **35 项**；`test_stats.py` 76 → 70（6 个旧解锁测试删除、2 个定义测试改为 6 键）；`test_cli.py` 2 项改为走新引擎 + 固定 `cli._now` |
+
+**关键决策与理由**：见 `progress.md` 决策演变表最后 7 行（独立模块 / 仍用表达式 / 区间去重挂在
+`move_to` / 6 键定义 / 删除旧 `check_achievements` / 只做 POSIX 锁 / 改名两个成就的显示名）。
+**`~/.nr` 是改名前的旧路径，一律用 `~/.wreader`**（`config.data_dir()`）。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest tests/` | **683 passed**（654 + `test_achievements` 35 − `test_stats` 6） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` / `check_doc_numbers.py` | **RESULT: OK** / **RESULT: ALL OK**（`achievements.py` 768、`stats.py` 785、`cli.py` 1266、`reader.py` 3342、`achievements.json` 198、`test_achievements.py` 35、总数 683 全部对拍） |
+| `tools/verify_wrap.py` / `verify_draw.py` | 40077 / 420（回归） |
+| `tools/verify_mouse.py` / `verify_notes.py` / `verify_translate.py` | 全部通过（回归：动过 `move_to` 与阅读器退出路径，所以真 pty 必跑） |
+| `tools/verify_colors.py`（`script -q /dev/null` 包一层） | 干净退出 |
+| 端到端冒烟（`WREADER_HOME` 指向 `/tmp`） | `werd import` → 屏幕上直接打出「🏆 已解锁 1 个成就：🗄️ 书库初成」；`werd achievements` → `已解锁 1/28` + 分类分组 + 时间类指标按小时渲染；`~/.wreader/achievements.json` 里 `counters`/`metrics`/`progress` 都正确 |
+
+**踩到的坑（都写进了 `systemPatterns.md` 坑 #24-28）**：
+1. **`progress` 没进 `empty_state()`** → 写回的进度快照读回来就没了（`KeyError: 'progress'`）。教训：**任何新段落都要同时进 `empty_state()` 与 `_normalise_state()`**，否则"写进去"和"读出来"不对称。
+2. **`merge_ranges` 返回 tuple，直接进 state 会让内存形状与 JSON 形状不一致**，`==` 断言永远失败（`[(0, 2)] != [[0, 2]]`）。已统一成 `list[list[int]]`。
+3. **全角标点会被 `east_asian_width` 判成宽字符** → `，。` 也算了字数。改为"排除空白与 `unicodedata.category == P`"。
+4. **`daily_open` 挂在 `cli.main()` 上 → 测试与"跑测试的时刻"耦合**：05:00-07:00 跑会自己解锁 `early_bird`。加了 `cli._now()` 注入缝，测试固定成中午。
+5. **一次 `editor` 替换想"删除 6 个测试"却只传了表头当 `old_text`** → 反而把整块**复制**了一份（测试重名）。看到 `--diff` 里出现 `+` 而不是 `-` 就要立刻回头核对；删除类编辑必须把**整块**当 `old_text`。
+6. 规格里的 `~/.nr/achievements.json` 与项目现状（`nr` → `wreader` 改名、数据在 `~/.wreader`）**冲突**，按项目现状处理并记录。
+
+**Phase 1 明确没做**（别误以为已有）：Phase 2/3 的实时按键类、屏内 5 秒通知、地理（`geo.py`）、
+环境探测（`env.py`）、阅读器帮助页、意外中断自动恢复流程。
+
 ## 待办 / 下一步
 
-按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools"三项已移除）：
+按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools""成就 Phase 1"四项已移除）：
+
+0. **成就 Phase 2/3**（实时按键事件 + 屏内 5 秒通知 + 地理 `geo.py` / 环境 `env.py`）——
+   规格与拆分见 `progress.md` 待办 **0b**；Phase 1 已落地的接口是
+   `achievements.check_achievements(event, data)` 与 `EVENTS` 白名单（`key` / `resize` 还没加）。
 
 1. **笔记落盘（Phase 3）**——最高优先级的未完成功能。现在 `m` 标记 + `o` 面板已经能用，
    但 `Ctrl+S` 存下的笔记只在 `Pager.notes`（内存）里，退出阅读器即消失。要做的事：

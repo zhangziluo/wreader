@@ -34,8 +34,10 @@
    `T` 翻整章并写入 `cache/<book_id>/`，`werd translate <id>` 翻整本。
    ⚠️ 引擎没配好时按 `t` **只提示**"运行 `werd config translate`"，不偷偷发请求。
 5. **生词本**：阅读中按 `v` 查词入库；命令行增删查、`--review` 复习、`--export anki`。
-6. **统计与成就**：阅读时长、热力图、连续天数；`wreader/data/achievements.json` 里 10 个成就，
-   条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
+6. **统计与成就**：阅读时长、热力图、连续天数；**事件驱动**的成就引擎
+   （`wreader/achievements.py`）把 `daily_open` / `session_end` / `book_add` 等事件记进
+   `~/.wreader/achievements.json`；`wreader/data/achievements.json` 里 **28** 个成就定义
+   （Phase 1），条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
 7. **配置**：`~/.wreader/settings.toml`；`werd config <section.key> [value]` 读写，`--reset` 复原。
 8. **目录**：章节表由正则识别（`toc.patterns` 可加自定义正则），epub 优先用书自带的 `nav` / `toc`；
    阅读中按 `Tab` 呼出目录浮层（`/` 过滤、回车跳转），`werd toc <id> [--rebuild]` 可查看 / 重建；
