@@ -135,6 +135,22 @@ def check(label: str, needle: str, blob: str) -> None:
     print("  {} {}（找 {!r}）".format("OK  " if ok else "FAIL", label, needle))
 
 
+def run_cli(env: dict[str, str], args: list[str]) -> str:
+    """在同一个沙箱里跑一条 werd 子命令，返回它的输出（stdout + stderr）。
+
+    ``stdin`` 必须显式断开：不然 ``werd notes <id>`` 会以为有人在按键，
+    分页时一直等下去（子进程继承了本工具的终端）。
+    """
+    result = subprocess.run(
+        [PY, "-m", "wreader.cli"] + args,
+        env=env,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    return (result.stdout or "") + (result.stderr or "")
+
+
 def main() -> int:
     """入口：跑一次笔记流程，逐项对账。"""
     home, env, book_id = build_sandbox()
@@ -156,6 +172,62 @@ def main() -> int:
         print("  FAIL ⑤ 没有异常（输出里出现 Traceback）")
     else:
         print("  OK   ⑤ 没有异常")
+
+    print("== 落盘结果（Phase 3：markdown + 索引）==")
+    # ⑥ 笔记真的写进了 markdown：文件头 + 小节 + 引用 + 分界行 + 正文
+    note_path = home / "notes" / "{}.md".format(book_id)
+    landed = note_path.read_text(encoding="utf-8") if note_path.is_file() else ""
+    check("⑥ 笔记文件已生成", "## 笔记 #1", landed)
+    check("⑥ 写入了引用", "第一章", landed)
+    check("⑥ 写入了正文", "abc", landed)
+    check("⑥ 引用与正文的分界行", "我的想法：", landed)
+    # ⑦ index.json 是派生索引：条数记对了
+    index_path = home / "notes" / "index.json"
+    index_text = index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
+    check("⑦ 索引里条数为 1", '"count": 1', index_text)
+    check("⑦ 索引里带书籍 id", book_id, index_text)
+
+    print("== 第二次会话：追加不覆盖 ==")
+    # ⑧ 再进一次阅读器写第二条：文件里该有两条，第一条不能丢
+    run_notes_case(env, book_id)
+    second = note_path.read_text(encoding="utf-8") if note_path.is_file() else ""
+    check("⑧ 第二条加在后面", "## 笔记 #2", second)
+    check("⑧ 第一条还在（没被覆盖）", "## 笔记 #1", second)
+
+    print("== CLI：werd notes ==")
+    # ⑨ 列清单：带上书籍 id 与条数
+    listed = run_cli(env, ["notes"])
+    check("⑨ 清单里有这本书", book_id, listed)
+    check("⑨ 清单表头有「条数」", "条数", listed)
+    # ⑩ 翻单本：分隔线 + 序号 + 正文
+    paged = run_cli(env, ["notes", book_id])
+    check("⑩ 分页提示行", "空格看下一条", paged)
+    check("⑩ 打出第一条", "#1", paged)
+    check("⑩ 打出引用", "第一章", paged)
+    # ⑪ 导出到临时目录（不碰真实 ~/books）
+    export_dir = home / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    exported = subprocess.run(
+        [PY, "-m", "wreader.cli", "notes", book_id, "--export"],
+        env=dict(env, HOME=str(home)),
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        cwd=str(export_dir),
+    )
+    # 导出目标是 ~/books：把 HOME 指到沙箱，于是落在 <home>/books
+    exported_file = home / "books" / "notes_{}.md".format(book_id)
+    check(
+        "⑪ 导出成功",
+        "已导出到",
+        (exported.stdout or "") + (exported.stderr or ""),
+    )
+    check(
+        "⑪ 导出的文件内容一致",
+        "## 笔记 #1",
+        exported_file.read_text(encoding="utf-8") if exported_file.is_file() else "",
+    )
+
     print()
     print("RESULT:", "全部通过" if not failures else "失败项 {}".format(failures))
     if failures:

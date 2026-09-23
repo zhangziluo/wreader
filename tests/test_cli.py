@@ -22,8 +22,8 @@ from typing import List
 # pytest.raises
 import pytest
 
-# 被测模块 + 断言时要用到的配置/书库/翻译/生词本
-from wreader import cli, config, library, translator, vocab
+# 被测模块 + 断言时要用到的配置/书库/翻译/生词本/笔记
+from wreader import cli, config, library, notes, translator, vocab
 
 # 复用 conftest 里的样例正文
 from conftest import BOOK_LINES
@@ -44,6 +44,8 @@ def test_build_parser_knows_every_command() -> None:
         "stats",
         "achievements",
         "config",
+        "toc",
+        "notes",
     ):
         # 有位置参数的子命令要补上占位参数
         args = parser.parse_args([command] + _required_argument(command))
@@ -58,6 +60,8 @@ def _required_argument(command: str) -> list:
         "search": ["x"],
         "read": ["id"],
         "translate": ["id"],
+        "toc": ["id"],
+        # notes 的 book_id 是可选的，所以不需要占位参数
     }.get(command, [])
 
 
@@ -215,6 +219,93 @@ def test_achievements_marks_one_as_done(capsys, imported, monkeypatch) -> None:
     assert "已解锁 2/28" in out
     assert "开卷有益" in out
     assert "书库初成" in out
+
+
+def test_notes_without_any_notes_says_how_to_start(capsys) -> None:
+    # 还一条笔记都没有：给引导语，退出码仍是 0
+    assert cli.main(["notes"]) == 0
+    assert "还没有笔记" in capsys.readouterr().out
+
+
+def test_notes_lists_every_book_newest_first(capsys) -> None:
+    # 两本书各写一条（book2 更晚），列表里都要出现
+    notes.save_note("book1", "三体", "引用一", "想法一", now=datetime(2026, 1, 1, 10, 0))
+    notes.save_note("book2", "活着", "引用二", "想法二", now=datetime(2026, 1, 2, 10, 0))
+    assert cli.main(["notes"]) == 0
+    out = capsys.readouterr().out
+    assert "三体" in out and "活着" in out
+    assert "book1" in out and "book2" in out
+    # 表格里带条数
+    assert "1" in out
+
+
+def test_notes_pages_a_single_book(capsys) -> None:
+    # 三条笔记：非交互（pytest 的 capsys）时不等按键，一次全打出来
+    for index in range(3):
+        notes.save_note(
+            "book1", "三体", "引用{}".format(index), "想法{}".format(index), now=datetime(2026, 1, 1, 10, index)
+        )
+    assert cli.main(["notes", "book1"]) == 0
+    out = capsys.readouterr().out
+    # 每条之前一条 --- 分隔线，序号与时间都在
+    assert out.count("---") == 3
+    assert "#1" in out and "#2" in out and "#3" in out
+    assert "想法2" in out
+
+
+def test_notes_paging_stops_on_q(capsys, monkeypatch) -> None:
+    for index in range(3):
+        notes.save_note("book1", "三体", "引用{}".format(index), "想法{}".format(index))
+    # 假装在真终端里（两个 isatty 都真），而且第一个按键就是 q
+    monkeypatch.setattr(cli, "_paging_is_interactive", lambda: True)
+    monkeypatch.setattr(cli, "_read_one_key", lambda: "q")
+    assert cli.main(["notes", "book1"]) == 0
+    out = capsys.readouterr().out
+    # 看到第一条就退出了，后面的没打
+    assert "#1" in out
+    assert "#3" not in out
+
+
+def test_notes_paging_needs_a_terminal_on_both_ends(monkeypatch) -> None:
+    class _Tty:
+        """任意一端是终端。"""
+
+        def __init__(self, tty: bool) -> None:
+            self._tty = tty
+
+        def isatty(self) -> bool:
+            return self._tty
+
+    # 输入是终端、输出被重定向（| less / CI 日志）：没人按键，不能等
+    monkeypatch.setattr(cli.sys, "stdin", _Tty(True))
+    monkeypatch.setattr(cli.sys, "stdout", _Tty(False))
+    assert cli._paging_is_interactive() is False
+    # 两端都是终端：才等按键
+    monkeypatch.setattr(cli.sys, "stdout", _Tty(True))
+    assert cli._paging_is_interactive() is True
+
+
+def test_notes_export_writes_the_markdown(capsys, monkeypatch, tmp_path) -> None:
+    notes.save_note("book1", "三体", "引用", "想法")
+    # 把导出目录指到 tmp：绝不能往真实 ~/books 写
+    monkeypatch.setattr(cli, "DEFAULT_NOTES_EXPORT_DIR", str(tmp_path))
+    assert cli.main(["notes", "book1", "--export"]) == 0
+    out = capsys.readouterr().out
+    assert "已导出到" in out
+    target = tmp_path / "notes_book1.md"
+    assert target.is_file()
+    assert "引用" in target.read_text(encoding="utf-8")
+
+
+def test_notes_export_needs_a_book_id(capsys) -> None:
+    # 不给 id 的导出没有意义：报错并给出正确用法
+    assert cli.main(["notes", "--export"]) == 1
+    assert "needs a book id" in capsys.readouterr().err
+
+
+def test_notes_for_an_unknown_book_is_harmless(capsys) -> None:
+    assert cli.main(["notes", "nope"]) == 0
+    assert "还没有笔记" in capsys.readouterr().out
 
 
 def test_vocab_listing_search_and_removal(capsys, notebook: Path) -> None:

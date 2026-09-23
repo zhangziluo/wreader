@@ -7,7 +7,7 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **683 passed**，全离线、不碰真实数据，约 4~25 秒 |
+| 测试 | **727 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
 | 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3405** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
@@ -61,19 +61,26 @@
 - 生词下划线、搜索高亮（当前命中反色、其它命中加粗）、章节超 30 分钟提醒看中文。
 - 进度落库：`q`/`Ctrl-C` 都保存位置、书签、本次时长；`auto_save_interval` 默认 60 秒兜底。
 
-### 笔记（标记模式 + 笔记面板，2026-09-23 新增，Phase 1+2 = 只有 UI）
+### 笔记（标记模式 + 笔记面板 + 落盘，2026-09-23 Phase 1+2+3 全部完成）
 - **标记模式** `m`：光标变成反色方块，`h/j/k/l` 或方向键扩展选区（`A_REVERSE` 高亮），
   `y` 把选中的文字复制进引用缓冲区（超 2000 字截断并提示），`Esc` 取消。
   **只在一屏内选字、绝不翻页**；坐标是 `(屏幕行, 行内字符下标)`，进 `Pager.viewport`。
 - **笔记面板** `o`：占屏幕下方 25%（正文区相应缩小），两个 `curses.newwin` 子窗口 ——
   引用区（只读、`A_DIM`、`> ` 前缀）显示 `y` 复制的内容，编辑区是 `curses.textpad.Textbox`
-  （回车换行、退格、左右光标）；`Tab` 切焦点、`Ctrl+S` 保存、`Esc` 关闭。
-  折叠时底部提示行显示 `📝 N条笔记 | 按o展开`。
+  （回车换行、退格、左右光标）；`Tab` 切焦点、`Ctrl+S` 保存、`Esc` 关闭（**Esc 会把没提交的内容提交**）。
+  折叠时底部提示行显示 `📝 N条笔记 | 按o展开`。保存成功时状态栏闪现 `✓ 已保存` 1.5 秒。
+- **存储（Phase 3，`wreader/notes.py`）**：一本一个 `~/.wreader/notes/<book_id>.md`
+  （文件头 + `## 笔记 #N — 时间` 小节，**只追加不覆盖**）；`index.json` 是**派生索引**
+  （书名 / 条数 / 最后修改 / 预览，`count` 从 `.md` 数出来、删掉自动重建）；
+  编辑区**每 30 秒自动存一份草稿** `<book_id>.draft.md`（`Esc` 提交后删掉，`Ctrl-C` 只留草稿，
+  打开面板时自动捞回来）。并发写靠 `index.json.lock`（`wreader/lock.py` 的共享实现）。
+- **CLI**：`werd notes`（列清单，按最后修改倒序）/ `werd notes <id>`（逐条翻看，空格翻页、`q` 退出，
+  非 tty 时一次打完）/ `werd notes <id> --export`（导出到 `~/books/notes_<id>.md`）。
 - 实现要点：模态小循环（与目录浮层同款、不另开线程）；**不调用阻塞的 `Textbox.edit()`**，
   逐键喂 `do_command()`；`_note_validate` 把回车映射成 `NL`（换行）而非 `Ctrl-G`（提交）；
   `_run` 里 `_disable_flow_control()` 尽力关掉 `IXON`（否则 `Ctrl+S` 被行规程吞掉）。
-- ⚠️ **笔记只存内存**（`Pager.notes`），退出即失；落盘是下一步（见待办高优先级 #1）。
-- ⚠️ 编辑区中文输入依赖 IME（`do_command` 只认 `curses.ascii.isprint`），实际以英文 / 拼音为主。
+- ⚠️ 编辑区中文输入依赖 IME（`do_command` 只认 `curses.ascii.isprint`），实际以英文 / 拼音为主；
+  且 `Textbox.gather()` 会把字符截成 7 位，所以**中文正文不进编辑区**（见坑 #29）。
 
 ### 翻译（2026-09-23 重构为可插拔引擎）
 - **引擎层在 `wreader/translate/`**：每个厂商一个模块，共 8 个文件 1317 行 ——
@@ -143,10 +150,13 @@
 ## 待办
 
 ### 高优先级
-0. **笔记落盘（Phase 3）**——`m` 标记 + `o` 面板已可用，但 `Ctrl+S` 存的笔记只在
-   `Pager.notes`（内存）里，退出即失。要做：新增 `wreader/notes.py`（纯函数 + 纯文本），
-   存 `~/.wreader/notes/<book_id>.json`，字段 `{"line", "quote", "text", "created"}`；
-   `open_reader` 加载、退出时写回。⚠️ **只写源行号**（屏幕行随终端宽度变化，不能当坐标）。
+0. ~~**笔记落盘（Phase 3）**~~ → **已完成（2026-09-23）**：新增 `wreader/notes.py` +
+   `wreader/lock.py`，`Ctrl+S`/`Esc` 落盘成 markdown、30 秒草稿、`werd notes` 三条路径、
+   派生 `index.json`、`--export`；见 activeContext ㉘。
+   ⚠️ 剩下的小尾巴（**不是**当初计划的一部分，属于新发现的限制）：
+   - 编辑区仍打不进中文（`do_command` 只认 ASCII）→ 想支持得自己接管插入与 `gather()`；
+   - 笔记**没有**记录源行号（当初的草案里有 `line` 字段）——现在只有引用原文与批注，
+     所以"从笔记跳回原文"还做不到。要加就在 `save_note` 里补 `line`（与书签同一套坐标）。
 1. ~~更正 `README.md` / `README.en.md` 的过期信息~~ → **已完成（2026-09-22）**：
    8 个源码文件的行数、测试总数 **494**、`test_reader.py` **115** 全部按实测改对；
    「已知问题」里补记了自动换行 / 按显示列数 / 配色跟随终端 三项修复；
@@ -206,8 +216,7 @@
 | `read` 只能真 TTY | 重定向即报错 | 报错文案已测 |
 | Windows 需 `windows-curses` | 多一个可选依赖 | `pip install -e ".[windows]"` |
 | `progress` 数值不强制转型 | 字符串值也能读但不会自动改回数字 | 消费方已用 `int()` 兜底 |
-| 笔记只存内存 | 退出阅读器后 `Ctrl+S` 存的笔记全部消失 | Phase 1+2 只做 UI，落盘见待办高优先级 #0；已写进两份 README 的「已知问题」 |
-| 笔记编辑区中文输入受限 | 依赖系统 IME，实际以英文 / 拼音为主 | `curses.textpad.do_command` 只认 `curses.ascii.isprint`，宽字符被跳过 |
+| 笔记编辑区中文输入受限 | 依赖系统 IME，实际以英文 / 拼音为主 | `curses.textpad.do_command` 只认 `curses.ascii.isprint`，宽字符被跳过；另外 `Textbox.gather()` 会把字符截成 7 位，所以**中文正文根本不进编辑区**（草稿里的中文由引擎直接落盘），见坑 #29 |
 | 翻译引擎没有重试 / 退避 | 一次网络抖动就浪费一整章（Google 免费端点尤其明显） | 失败仍按 `TranslateError`（单章）/ `TranslateUnavailable`（整本中止）处理；要加需做成可配置，见 activeContext 待办 #8 |
 | 只有百度有可复现的外部签名向量 | 腾讯云最终签名只能靠结构断言 + 自洽性验证，改动后无外部对拍 | 官方文档把 SecretId/SecretKey 打码了；有道/腾讯都没找到可复现的公开向量 |
 | 本地引擎需自备语言包 | 选了 `local` 但没装语言包时不可用 | `available()` 会提前拦下并提示装包命令，不让它到第一次翻译才炸 |
@@ -261,4 +270,9 @@
 | **2026-09-23** | **删除** `stats.check_achievements`（连同它的 6 个测试） | 解锁只能有一个写入路径。留着它 = 两套真相（一个写 `library.json`、一个写 `achievements.json`）。`stats` 从此只负责"指标 + 定义加载 + 庆祝动画" |
 | **2026-09-23** | 文件锁只做 POSIX `flock`，Windows 退化为"原子替换、不串行化" | 主战场是 macOS / Linux / Termux。为 Windows 在**模块顶部** `import msvcrt` 会让 pyright 在 macOS 上报"无法解析"；改成函数内 `import fcntl` + `ImportError: return False`。这是明说的取舍（docstring 与两份 README 都写了） |
 | **2026-09-23** | `marathon` / `book_finished` 的**显示名**改成规格里的「马拉松」「第一本」 | 用户规格明确给了名字。**id 不变** → 老用户的解锁记录与 `library.json` 里的旧数据照常有效（名字只是展示层，解锁记录里存的那份只是快照） |
+| **2026-09-23** | 笔记落盘用 **markdown（一本一个 `.md`）+ 派生 `index.json`**，而不是当初草案的"一个 `<book_id>.json`" | 用户 Phase 3 规格指定了 markdown + 索引。好处正好对上项目的硬约束：**人能用编辑器直接看/改/备份**，而 JSON 索引只是缓存（`count` 从 `.md` 数出来、删掉自动重建，永远不漂移） |
+| **2026-09-23** | "自动保存"做成**崩溃草稿**（`<book_id>.draft.md`），而不是每 30 秒追加一条笔记 | 规格把 `save_note()` 同时挂给"Ctrl+S / 30 秒 / 关面板"三个触发点，但 `save_note` 是**追加**：照字面实现会让同一段草稿每 30 秒多出一条重复笔记。拆开更符合意图 —— **Ctrl+S/Esc = 提交一条**，**30 秒 = 只留草稿防丢字** |
+| **2026-09-23** | 把 `achievements.py` 里的文件锁**抽成 `wreader/lock.py`** 共用 | 现在两个模块（成就状态、笔记索引）都要"读-改-写"串行化，复制一份实现就等于两处会各自跑偏。抽出后 `achievements.py` 从 768 行降到 715 行 |
+| **2026-09-23** | 中文草稿**不进编辑区**，由引擎从草稿文件直接提交 | `Textbox.gather()` 内部用 `curses.ascii.ascii()`（`& 0x7f`）拼字符串，中文进过编辑区就必然变乱码（实测 `草稿正文`→`I?c\x07`）。宁可牺牲"在编辑区里接着改中文"，也不能让用户的数据被静默改坏 |
+| **2026-09-23** | `werd notes <id>` 的翻页只在 **stdin 与 stdout 都是 tty** 时等按键 | 只看 `stdin.isatty()` 会让"stdout 被捕获、stdin 还是终端"的场景（`| less`、CI、`capture_output=True`）永远卡在第一页 —— 实测把 `tools/verify_notes.py` 整个挂死，只能 `pkill`。与阅读器的 tty 判据保持一致 |
 

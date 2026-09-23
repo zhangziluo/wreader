@@ -45,7 +45,9 @@
 9. **笔记**：阅读中按 `m` 进入**标记模式**（`h/j/k/l` 或方向键选字、反色高亮、`y` 复制进引用缓冲区、
    `Esc` 取消，只在一屏内选字、不翻页，上限 2000 字）；按 `o` 展开**笔记面板**
    （下方 25%，引用区只读 + `curses.textpad.Textbox` 编辑区，`Tab` 切焦点、`Ctrl+S` 保存、`Esc` 关闭）。
-   ⚠️ **当前只做完了 UI（Phase 1+2）**：笔记存在内存里，退出即失，落盘（`~/.wreader/` 纯文本）是下一步。
+   **笔记落盘**成 markdown（`wreader/notes.py`）：一本书一个 `~/.wreader/notes/<book_id>.md`，
+   只追加不覆盖，另有派生索引 `index.json` 与崩溃草稿 `<book_id>.draft.md`（每 30 秒）；
+   命令行用 `werd notes [book_id] [--export]` 查看 / 导出。
 
 ## 硬性技术约束（不要破坏）
 

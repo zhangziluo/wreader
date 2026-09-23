@@ -66,6 +66,7 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
 | 成就状态 | `~/.wreader/achievements.json`（另有 `.lock` 锁文件；坏掉时被改名为 `.broken`） | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
+| 笔记 | `~/.wreader/notes/<book_id>.md`（一本书一个 markdown）+ `index.json`（派生索引）+ `<book_id>.draft.md`（未提交草稿）+ `index.json.lock`（锁文件） | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch{N}_en.txt`、`ch{N}_bilingual.txt` | `translator.cache_dir` |
 | 目录缓存 | `~/.wreader/cache/<book_id>_toc.json`（随正文 mtime 自动失效，可随时删） | 同 `translator.cache_dir` |
 | 正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
@@ -185,20 +186,21 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | 文件 | 项数 |
 | --- | --- |
 | `tests/test_achievements.py` | **35** |
-| `tests/test_cli.py` | 41 |
+| `tests/test_cli.py` | 49 |
 | `tests/test_config.py` | 51 |
 | `tests/test_library.py` | 119 |
-| `tests/test_reader.py` | **192** |
+| `tests/test_notes.py` | **30** |
+| `tests/test_reader.py` | **198** |
 | `tests/test_stats.py` | 70 |
 | `tests/test_toc.py` | 18 |
 | `tests/test_translate.py` | **49** |
 | `tests/test_translator.py` | **77** |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **683** |
+| **合计** | **727** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 成就引擎 Phase 1：
-> `achievements.py` **768** 行为新模块、`stats.py` **785**、`test_achievements.py` **35**、
-> 测试总数 **683**、成就 **28** 个）。
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 笔记 Phase 3：
+> `notes.py` **558**、`lock.py` **81** 两个新模块，`cli.py` **1450**、`reader.py` **3515**、
+> `achievements.py` **715**（文件锁抽走后变短）、`test_notes.py` **30**、总数 **727**）。
 > 以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 > ⚠️ **子包里的文件不在它的校验范围内**（`wreader/translate/*` 的名字会跟包根撞车），

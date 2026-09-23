@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytest
 
 # 被测模块 + 翻译与生词本
-from wreader import reader, translator, vocab
+from wreader import notes, reader, translator, vocab
 
 # 复用样例正文
 from conftest import BOOK_LINES, ENGLISH_LINES
@@ -2100,13 +2100,20 @@ def test_note_panel_opens_saves_and_closes(panel_window, pager) -> None:
     # 面板里：打 abc -> Tab 切到引用 -> Tab 切回编辑 -> Ctrl+S 保存 -> Esc 关闭
     panel_window.keys = ["a", "b", "c", "\t", "\t", "\x13", "\x1b"]
     reader.handle_key(panel_window, pager, "o")
-    # 存下一条：引用 + 编辑区内容
+    # 存下一条：引用 + 编辑区内容（形状与 notes.load_notes 一致）
     assert len(pager.notes) == 1
+    assert pager.notes[0]["index"] == 1
     assert pager.notes[0]["quote"] == "第一章 科学边界"
-    assert pager.notes[0]["text"] == "abc"
+    assert pager.notes[0]["content"] == "abc"
+    assert pager.notes[0]["time"]
+    # 真的落盘了：磁盘上的 markdown 与内存里那份一致
+    stored = notes.load_notes(pager.book_id)
+    assert stored == list(pager.notes)
+    assert "第一章 科学边界" in notes.note_file(pager.book_id).read_text(encoding="utf-8")
     # 存完引用与编辑区都清空，面板已折叠
     assert pager.note_buffer == ""
     assert pager.note_panel_open is False
+    # 状态栏闪现的是规格里那句话
     assert "已保存" in pager.current_message()
     # 面板确实建了两个子窗口（引用区 + 编辑区）
     assert len(panel_window.windows) == 2
@@ -2131,7 +2138,7 @@ def test_note_panel_quote_focus_ignores_typing(panel_window, pager) -> None:
     assert len(pager.notes) == 1
     assert pager.notes[0]["quote"] == "引用"
     # 引用区不接受输入，所以正文是空的
-    assert pager.notes[0]["text"] == ""
+    assert pager.notes[0]["content"] == ""
 
 
 def test_note_panel_save_without_anything_says_so(panel_window, pager) -> None:
@@ -2149,3 +2156,95 @@ def test_note_panel_can_be_closed_with_ctrl_c(panel_window, pager) -> None:
     # 关干净了：没卡在模态循环里，也没存东西
     assert pager.note_panel_open is False
     assert pager.notes == []
+
+
+# ------------------------------------------------ note panel: 落盘（Phase 3）
+def test_note_panel_esc_commits_what_was_typed(panel_window, pager) -> None:
+    # 没按 Ctrl+S，直接 Esc：编辑区里的内容也要变成一条笔记（失去焦点即保存）
+    panel_window.keys = ["h", "i", "\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    stored = notes.load_notes(pager.book_id)
+    assert len(stored) == 1
+    assert stored[0]["content"] == "hi"
+
+
+def test_note_panel_ctrl_c_keeps_the_text_as_a_draft(panel_window, pager) -> None:
+    # Ctrl-C 关面板：不提交成笔记，但内容要留成草稿，下次打开还在
+    panel_window.keys = ["h", "i"]
+    reader.handle_key(panel_window, pager, "o")
+    assert notes.load_notes(pager.book_id) == []
+    assert notes.load_draft(pager.book_id)["text"] == "hi"
+
+
+def test_note_panel_restores_an_ascii_draft(panel_window, pager) -> None:
+    # 上次崩溃留下的草稿（纯 ASCII）：引用区与编辑区都要捞回来
+    notes.save_draft(pager.book_id, "草稿里的引用", "draft body")
+    panel_window.keys = ["\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    # 引用区（第一个子窗口）画出来的就是草稿里的引用
+    quote_writes = [text for _row, _col, text, _attr in panel_window.windows[0].writes]
+    assert any("草稿里的引用" in text for text in quote_writes)
+    # 编辑区（第二个子窗口）里画出了草稿正文
+    edit_win = panel_window.windows[1]
+    written = "".join(text for _row, _col, text, _attr in edit_win.writes)
+    assert "draft body" in written
+    # Esc 提交后草稿消失，正式笔记里就是这份草稿（引用与正文都带过来了）
+    assert notes.load_draft(pager.book_id) == {"quote": "", "text": ""}
+    note = notes.load_notes(pager.book_id)[0]
+    assert note["quote"] == "草稿里的引用"
+    assert note["content"] == "draft body"
+
+
+def test_note_panel_commits_a_chinese_draft_without_the_editor(panel_window, pager) -> None:
+    """中文草稿不走编辑区，也绝不能变形。
+
+    关键回归：``Textbox.gather()`` 用 ``curses.ascii.ascii()`` 把每个字符截成 7 位，
+    所以中文一旦进过编辑区再读回来就会变成乱码（实测 ``草稿正文`` -> ``I?c\\x07``）。
+    正确处理是**根本不进编辑区**：Esc 提交时直接从草稿文件原样落盘。
+    """
+    notes.save_draft(pager.book_id, "中文引用", "草稿正文")
+    panel_window.keys = ["\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    # 编辑区是空的（中文没有被塞进去）
+    edit_win = panel_window.windows[1]
+    written = "".join(text for _row, _col, text, _attr in edit_win.writes)
+    assert "草稿正文" not in written
+    # 提交出来的正文一字不差，没有变成乱码
+    note = notes.load_notes(pager.book_id)[0]
+    assert note["quote"] == "中文引用"
+    assert note["content"] == "草稿正文"
+    # 草稿已经被消费掉
+    assert notes.load_draft(pager.book_id) == {"quote": "", "text": ""}
+
+
+def test_autosave_draft_waits_for_the_interval(pager) -> None:
+    # 直接测那 30 秒的判断：没到点不写，到点才写
+    editor = None  # _autosave_draft 只在到点后才读编辑区，这里用假对象
+    class _Editor:
+        def gather(self) -> str:
+            return "写到一半"
+
+    editor = _Editor()
+    # 刚存过：时间差为 0，不该写草稿
+    now = reader.time.monotonic()
+    assert reader._autosave_draft(pager, editor, now) == now
+    assert notes.draft_file(pager.book_id).is_file() is False
+    # 时间差超过阈值：写一份草稿，并把时刻推到现在
+    stale = now - reader.NOTE_AUTOSAVE_SECONDS - 1
+    assert reader._autosave_draft(pager, editor, stale) > stale
+    assert notes.load_draft(pager.book_id)["text"] == "写到一半"
+
+
+def test_note_panel_reports_a_save_failure(panel_window, pager, monkeypatch) -> None:
+    # 磁盘写不进去（目录只读等）：提示一句，而且**绝不**清空用户写的内容
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise notes.NotesError("disk is full")
+
+    monkeypatch.setattr(reader.notes, "save_note", boom)
+    pager.note_buffer = "重要引用"
+    panel_window.keys = ["x", "\x13", "\x1b"]
+    reader.handle_key(panel_window, pager, "o")
+    assert pager.notes == []
+    # 引用还在（没被清掉），用户不会白写
+    assert pager.note_buffer == "重要引用"
+    assert "失败" in pager.current_message()

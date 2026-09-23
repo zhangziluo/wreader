@@ -46,7 +46,7 @@
 | 🌍 三种视图 | `中文` / `英文` / `双语对照`，按 `l` 循环切换；本来就是中文的书看中文视图不需要翻译，离线也能读 |
 | 🈶 翻译 | **可插拔引擎**：Google（免密钥，默认）/ 百度 / 有道智云 / 腾讯云 / DeepSeek / 本地 Argos；`werd config translate` 向导式配置。章节级翻译 + 磁盘缓存，译一次永久复用 |
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
-| 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。⚠️ 目前只存在内存里，落盘见「已知问题」 |
+| 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。笔记**落盘成 markdown**（`~/.wreader/notes/<book_id>.md`），`werd notes` 查看 / 导出；编辑区每 30 秒自动留一份草稿，掉电也不丢 |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
 | 🏆 成就 | 28 个成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音 |
 | ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
@@ -250,6 +250,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `werd stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
 | `werd achievements` | 成就清单与解锁进度 |
 | `werd toc <book_id>` | 查看某本书的目录（章节 + 进度百分比）；`--rebuild` 强制重解析 |
+| `werd notes [book_id]` | 笔记：不带参数列出有笔记的书；带 id 逐条翻看（空格翻页 / `q` 退出）；`--export` 导出 markdown |
 | `werd config` | 查看 / 修改设置 |
 
 退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）、
@@ -412,6 +413,35 @@ werd achievements
 
 行首数字是"已解锁 / 总数"，解锁的会带时间戳；未解锁的按**分类**分组，每条一个进度条。
 
+### `werd notes`
+
+```bash
+werd notes                          # 列出写过笔记的书（条数 / 最后修改 / 预览，按时间倒序）
+werd notes 3e027c4de949             # 逐条翻看这本书的笔记（空格看下一条，q 退出）
+werd notes 3e027c4de949 --export    # 导出到 ~/books/notes_3e027c4de949.md
+```
+
+笔记本体就是 markdown，放在 `~/.wreader/notes/`：
+
+```markdown
+# 三体
+
+书籍ID: 3e027c4de949
+创建时间: 2026-09-23T15:10:00
+
+## 笔记 #1 — 2026-09-23 15:10
+
+汪淼看到了一串数字在眼前跳动。
+我的想法：
+
+这段和《球状闪电》呼应。
+```
+
+- 一本书一个文件（`<book_id>.md`）；第一次写时自动建目录、写文件头，之后**只追加不覆盖**。
+- `index.json` 是**派生索引**（书名 / 条数 / 最后修改 / 预览）：删掉会自动重建，手改 `.md` 也不会让它跑偏。
+- 两个进程同时写（两个终端、或 ssh 上的两台机器）靠 `index.json.lock` 文件锁串行化，一条都不会丢。
+- 输出被重定向 / 管道时 `werd notes <id>` **不会**停下来等按键，直接把全部笔记打出来（否则 `| less` 会挂住）。
+
 ### `werd config`
 
 ```bash
@@ -504,10 +534,11 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 - **生词会有下划线**（`vocab.highlight_in_reader = true` 时）；关闭后就不打扰阅读。
 - **按 `v` 之后**：如果 `vocab.auto_add_on_mark = true`，查完直接收进生词本；设为 `false` 则会弹一个小窗问你 `[y] 加入生词本　其他键 取消`。
 - **记笔记**：`m` 进入标记模式 → `h/j/k/l`（或方向键）选中一段 → `y` 复制（超过 2000 字自动截断并提示）→ `o` 打开面板，引用区自动显示选中的原文，在编辑区写批注 → `Ctrl+S` 保存。
-  面板折叠时底部提示行会显示 `📝 N条笔记 | 按o展开`。三个坑要知道：
+  面板折叠时底部提示行会显示 `📝 N条笔记 | 按o展开`。四个要知道的点：
   1. 编辑区基于 `curses.textpad.Textbox`，**中文输入依赖系统 IME**，实际以英文 / 拼音为主；
   2. `Ctrl+S` 需要终端没开 XON/XOFF 流控（阅读器启动时会尝试自动关掉 `IXON`，关不掉就只能改用别的键）；
-  3. ⚠️ 笔记目前**只存在内存里** —— 退出阅读器就没了，落盘留给后续版本（见「已知问题」）。
+  3. **笔记会落盘**：`Ctrl+S` 追加到 `~/.wreader/notes/<book_id>.md`（纯 markdown，可以直接拿编辑器改），按 `Esc` 关面板时也会把没提交的内容存成一条；
+  4. 编辑区**每 30 秒自动存一份草稿**（`<book_id>.draft.md`）：崩溃、掉电或 `Ctrl-C` 关掉面板都不会丢字，下次打开面板自动捞回来。`Ctrl-C` 只留草稿不提交，`Esc` 才提交成正式笔记。
 - **读到很慢的章节**（同一章停留超过 30 分钟），提示栏会顺手建议你按 `c` 看看中文。
 - **中途 Ctrl-C** 不会丢进度：退出前同样会保存位置和本次时长。
 
@@ -652,6 +683,7 @@ werd config translate.baidu_secret 你的密钥
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
 | 成就状态 | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
+| 笔记 | `~/.wreader/notes/<book_id>.md`（每本书一个 markdown）+ `index.json`（派生索引）+ `<book_id>.draft.md`（未提交草稿） | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch0_en.txt`、`ch0_bilingual.txt` | `translator.cache_dir` |
 | 小说正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
 
@@ -869,11 +901,13 @@ wreader/
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（19 行）
-│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定与文件锁（768 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1266 行）
+│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定与文件锁（715 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1450 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1007 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3342 行）
+│   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（81 行）
+│   ├── notes.py             笔记：每本书一个 markdown + 派生索引 + 草稿（558 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3515 行）
 │   ├── translator.py        章节缓存 / 分批 / 段落映射 + 引擎适配层（1199 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（785 行）
@@ -889,18 +923,19 @@ wreader/
 │   │   └── local.py         本地 Argos Translate（离线，可选依赖）
 │   └── data/
 │       └── achievements.json  28 个成就的定义（198 行）
-└── tests/                   683 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   727 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_achievements.py 35 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
-    ├── test_reader.py       192 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
+    ├── test_notes.py        30 项 —— markdown 追加、解析、派生索引、导出、草稿、并发文件锁
+    ├── test_reader.py       198 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
     ├── test_translator.py   77 项 —— 语言识别、分批、章节缓存、引擎适配、错误映射
     ├── test_translate.py    49 项 —— 引擎注册表、各厂商签名/请求构造、错误与参数校验
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
     ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
-    └── test_cli.py          41 项 —— 参数解析、各子命令输出、退出码、翻译引擎配置向导
+    └── test_cli.py          49 项 —— 参数解析、各子命令输出、退出码、笔记清单与分页、翻译引擎配置向导
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
@@ -1068,10 +1103,10 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - **Windows 需要额外依赖** `windows-curses`（`pip install -e ".[windows]"`）。
 - **`library.json` 里 `progress` 的数值不做类型强制转换**：手写成字符串（`"current_line": "12"`）
   也能正常读，因为消费方都用 `int(...)` 兜住了，但它不会被自动改回数字。
-- **笔记只存在内存里**：`m` 标记 + `o` 笔记面板已经可用，但 `Ctrl+S` 存下的笔记随阅读会话结束
-  一起消失，**还没有落盘**（后续版本会写到 `~/.wreader/` 下的纯文本文件）。
 - **笔记编辑区以英文 / 拼音为主**：编辑区基于 `curses.textpad.Textbox`，中文输入依赖系统 IME；
   并且面板里的 `Ctrl+S` 要求终端没开 XON/XOFF 流控（阅读器启动时会尝试自动关掉 `IXON`，关不掉时保存键会到不了程序）。
+  另外 `Textbox.gather()` 会把字符截成 7 位，所以**中文不能被填进编辑区**：草稿里的中文由引擎直接落盘，
+  不会经过那个控件（见 `_restore_draft`）。
 
 已经解决、不再属于已知问题的十条（留个记录，免得又被当成待办）：
 

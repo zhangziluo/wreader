@@ -74,8 +74,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、书库、统计成就、成就事件、目录、翻译、生词本
-from . import achievements, config, library, stats, toc, translator, vocab
+# 同包引用：配置、书库、统计成就、成就事件、目录、翻译、生词本、笔记
+from . import achievements, config, library, notes, stats, toc, translator, vocab
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
@@ -181,6 +181,13 @@ _TOC_HINT = "↑↓ 选择  Enter 跳转  / 过滤  q/Esc 关闭"
 _NOTE_HINT = "笔记  Tab 切换焦点  Ctrl+S 保存  Esc 关闭"
 # 笔记面板展开时占屏幕高度的比例（贴在下方），其余留给正文
 _NOTE_PANEL_RATIO = 0.25
+# 编辑区每隔多久自动存一份草稿（秒）：只防"没提交就崩了"，不产生正式笔记
+#: Seconds between two automatic draft saves while the note panel is open.
+NOTE_AUTOSAVE_SECONDS = 30.0
+# 面板里轮询按键的间隔（毫秒）：既要即时回显按键，又要能按 30 秒节拍自动保存
+_NOTE_TICK_MS = 200
+# 手动保存后状态栏上那行提示显示多久（秒）
+_NOTE_SAVED_SECONDS = 1.5
 #: One selection may copy at most this many characters (``y`` truncates past it).
 # 一次标记最多复制多少字符，超出就截断并提示（别把整章塞进引用区）
 NOTE_MAX_CHARS = 2000
@@ -527,6 +534,8 @@ class Pager:
         auto_add_on_mark: bool = True,
         # 目录条目（章节表 + 百分比），供 Tab 浮层使用
         toc_entries: Sequence[Dict[str, Any]] = (),
+        # 这本书**已经在磁盘上**的笔记（打开阅读器时从 notes.py 读出来）
+        notes: Sequence[Dict[str, Any]] = (),
     ) -> None:
         # 拷贝成列表，避免外部改动影响内部状态
         self.lines = list(lines)
@@ -624,8 +633,8 @@ class Pager:
         # 最近一次选中并复制的文字（y 写入），面板的引用区显示它
         self.note_buffer = ""
         #: notes saved this session: ``[{"quote", "text", "created"}, ...]``
-        # 本次会话已保存的笔记；Phase 1+2 只存内存，落盘留给后续阶段
-        self.notes: List[Dict[str, Any]] = []
+        # 这本书的笔记（打开时从磁盘读入，保存后追加）：与 notes.load_notes 同一形状
+        self.notes: List[Dict[str, Any]] = [dict(entry) for entry in notes]
         #: the note panel is expanded (``o`` toggles it)
         # 笔记面板是否展开（o 切换）；展开期间阅读区缩到上方
         self.note_panel_open = False
@@ -2382,23 +2391,31 @@ def _note_panel(stdscr: Any, pager: Pager) -> None:
     pager.note_panel_open = True
     # 打开时焦点默认在编辑区（引用区只是只读展示）
     pager.note_focus = "edit"
-    # 模态：阻塞等键；退出时在 finally 里恢复主循环的 1 秒轮询
-    stdscr.timeout(-1)
+    # 上次自动存草稿的时刻（草稿只防崩溃/断电，不产生正式笔记）
+    last_draft = time.monotonic()
+    # 万一上次是"写了没提交"（崩溃 / Ctrl-C）：把草稿捞回面板
+    pending_body = _restore_draft(pager, editor)
+    # 模态：短超时轮询按键，既能即时回显，又能按 30 秒节拍自动存草稿
+    stdscr.timeout(_NOTE_TICK_MS)
+    # Esc 才是"提交并关闭"；Ctrl-C 只关面板（内容留成草稿）
+    commit = False
     try:
         while True:
             # 重画面板这一帧
             _draw_note_panel(stdscr, pager, quote_win, edit_win, text_rows)
             try:
-                # 等一个按键（模态，一直等）
+                # 等一个按键（最多等一帧）
                 key = stdscr.get_wch()
             except curses.error:
-                # 少见的瞬时错误：重画再等
+                # 这一帧超时了：到点就把编辑区存成草稿，然后继续等
+                last_draft = _autosave_draft(pager, editor, last_draft)
                 continue
             except KeyboardInterrupt:
-                # Ctrl-C：关面板回阅读
+                # Ctrl-C：关面板回阅读（内容留成草稿，下次打开还在）
                 return
-            # Esc：关面板回阅读
+            # Esc：把这一条提交成笔记再关面板
             if key in _ESCAPE_KEYS:
+                commit = True
                 return
             # Ctrl+S：把"引用 + 编辑区内容"存成一条笔记
             if key in _SAVE_KEYS:
@@ -2417,6 +2434,8 @@ def _note_panel(stdscr: Any, pager: Pager) -> None:
                 continue
             editor.do_command(code)
     finally:
+        # 关面板时收尾：Esc 提交成笔记，其他情况留成草稿（一个字都不丢）
+        _finish_note_panel(pager, editor, commit, pending_body)
         # 恢复主循环的轮询间隔，否则关面板后界面会卡在阻塞读上
         stdscr.timeout(_TICK_MS)
         # 面板已折叠
@@ -2456,25 +2475,58 @@ def _note_validate(key: Any) -> Optional[int]:
     return None
 
 
-def _save_note(pager: Pager, editor: Any) -> None:
-    """Store the current quote plus whatever the editor holds as one note."""
-    # 收集编辑区内容（Textbox 自己按行拼好，会剥掉行尾空白）
+def _editor_text(editor: Any) -> str:
+    """Return what the text box currently holds; ``""`` when it cannot be read."""
     try:
-        text = str(editor.gather()).strip("\n").strip()
+        # Textbox 自己按行拼好内容，并剥掉行尾空白
+        return str(editor.gather()).strip("\n").strip()
     except curses.error:
-        text = ""
+        # 窗口已失效（比如正在 resize）：当作空
+        return ""
+
+
+def _commit_note(pager: Pager, text: str, editor: Any = None) -> bool:
+    """Append one note (quote + *text*) to disk, then clear the buffer.
+
+    Returns whether something was stored.  The note goes to
+    ``<data dir>/notes/<book_id>.md`` via :mod:`wreader.notes`; ``pager.notes`` is
+    only a mirror for the "📝 N 条笔记" indicator.  A write failure keeps the text
+    (and the editor) untouched, so nothing typed is ever lost to a permission
+    problem.  *editor* is optional so the draft-recovery path can commit a body
+    that never went through the text box.
+    """
     # 既没有引用也没写正文：没什么可存的，提醒一句就好
     if not text and not pager.note_buffer:
         pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
-        return
-    # 存一条笔记：引用 + 正文 + 时间戳（时间戳格式与仓库其它地方一致）
-    pager.notes.append(
-        {"quote": pager.note_buffer, "text": text, "created": _iso(_now())}
-    )
-    # 存完清空引用与编辑区，方便接着写下一条
+        return False
+    try:
+        # 真正落盘：追加到 markdown 并刷新索引
+        note = notes.save_note(pager.book_id, pager.title, pager.note_buffer, text)
+    except (notes.NotesError, OSError) as exc:
+        # 写不进去（目录只读、磁盘满）：内容留在编辑区，别让用户白写一遍
+        pager.say("笔记保存失败：{}".format(exc))
+        return False
+    # 理论上被上面拦掉了，兜一层防止"静默成功"
+    if note is None:
+        pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
+        return False
+    # 内存里也记一份：折叠提示的计数立刻跟着变
+    pager.notes.append(note)
+    # 内容已经变成正式笔记，草稿不再需要
+    notes.clear_draft(pager.book_id)
+    # 存完清空引用（以及编辑区，如果这一条是从编辑区来的）
     pager.note_buffer = ""
-    _clear_editor(editor)
-    pager.say("已保存（共 {} 条笔记）".format(len(pager.notes)))
+    if editor is not None:
+        _clear_editor(editor)
+    # 规格要求：状态栏闪现"✓ 已保存"1.5 秒
+    pager.say("✓ 已保存", _NOTE_SAVED_SECONDS)
+    return True
+
+
+def _save_note(pager: Pager, editor: Any) -> bool:
+    """``Ctrl+S``: commit whatever the editor holds as one note."""
+    # 从这里进来的内容一定过过 Textbox，所以直接读编辑区
+    return _commit_note(pager, _editor_text(editor), editor)
 
 
 def _clear_editor(editor: Any) -> None:
@@ -2486,6 +2538,120 @@ def _clear_editor(editor: Any) -> None:
         editor.win.refresh()
     except curses.error:
         # 窗口已失效（比如正在 resize）：忽略
+        pass
+
+
+def _fill_editor(editor: Any, text: str) -> None:
+    """Put *text* into a Textbox window (the stock widget has no setter).
+
+    Lines are wrapped by **display width** before being written: a long line
+    would otherwise be clipped by :func:`_addstr`, quietly shortening the draft
+    that is being restored.
+    """
+    try:
+        # 子窗口尺寸：用它决定折行宽度与能放几行
+        rows, cols = editor.win.getmaxyx()
+        editor.win.erase()
+        width = max(1, cols - 1)
+        # 光标最后落在哪（写完把光标放过去，接着往下写）
+        row = 0
+        last_row, last_col = 0, 0
+        for line in text.split("\n"):
+            # 窗口写满了就不再往下写（多余的仍在草稿文件里）
+            if row >= rows:
+                break
+            for piece in _wrap_line(line, width):
+                if row >= rows:
+                    break
+                _addstr(editor.win, row, 0, piece)
+                last_row, last_col = row, min(_text_width(piece), width)
+                row += 1
+        editor.win.move(min(last_row, rows - 1), min(last_col, max(0, cols - 1)))
+        editor.win.refresh()
+    except curses.error:
+        # 窗口失效：忽略（草稿还在磁盘上，不会丢）
+        pass
+
+
+def _restore_draft(pager: Pager, editor: Any) -> str:
+    """Put an un-committed draft back, returning the part that did not fit.
+
+    The quote always comes back -- it is a plain string in ``pager.note_buffer``.
+    The **body** can only go into the text box while it is pure ASCII:
+    :meth:`curses.textpad.Textbox.gather` rebuilds its string with
+    ``curses.ascii.ascii()``, which masks every character to 7 bits, so a Chinese
+    body would come back as mojibake (``草`` -> ``I``).
+
+    A non-ASCII body is therefore left **out** of the editor and handed back to
+    the caller, which commits it straight from the draft file: what gets stored is
+    the draft byte for byte, and nothing is silently mangled.
+    """
+    try:
+        draft = notes.load_draft(pager.book_id)
+    except notes.NotesError:
+        # 草稿读不了不该挡着面板打开
+        return ""
+    # 引用区还是空的才用草稿里的引用（别覆盖刚复制的那段）
+    if not pager.note_buffer and draft["quote"]:
+        pager.note_buffer = draft["quote"]
+    body = draft["text"]
+    # 没有正文：只把引用捞回来就够了
+    if not body:
+        return ""
+    if body.isascii():
+        # 纯 ASCII：编辑区能原样呈上来，用户还能接着改
+        _fill_editor(editor, body)
+        return ""
+    # 中文正文：不进编辑区（会被 gather 截成 8 位），交给调用方直接提交
+    pager.say("草稿里有中文：按 Esc 提交会原样写入（编辑区只显英文）")
+    return body
+
+
+def _autosave_draft(pager: Pager, editor: Any, last: float) -> float:
+    """Write a draft every :data:`NOTE_AUTOSAVE_SECONDS`; return the new stamp.
+
+    Called from the panel's idle tick, so it never blocks typing.  A draft is
+    **not** a note: it is only the crash-recovery copy of what is being typed.
+    """
+    moment = time.monotonic()
+    # 还没到点：把上次的时刻原样交回去
+    if moment - last < NOTE_AUTOSAVE_SECONDS:
+        return last
+    try:
+        # 编辑区为空时 save_draft 会顺手删掉旧草稿
+        notes.save_draft(pager.book_id, pager.note_buffer, _editor_text(editor))
+    except (notes.NotesError, OSError):
+        # 草稿写不了无所谓：正式笔记照样能存
+        pass
+    return moment
+
+
+def _finish_note_panel(
+    pager: Pager, editor: Any, commit: bool, pending_body: str = ""
+) -> None:
+    """Leave the panel: commit what was typed, or stash it as a draft.
+
+    ``Esc`` means "done, keep this" (commit a note); ``Ctrl-C`` and any other way
+    out mean "not now" (keep it as a draft).  Either way nothing typed is lost.
+    *pending_body* is the non-ASCII draft body from :func:`_restore_draft`, which
+    never entered the editor and is committed straight from the draft file.
+    """
+    text = _editor_text(editor)
+    # 编辑区里没有、但草稿文件里有的正文（中文草稿）
+    body = text or pending_body
+    # 什么都没写：顺手清掉可能存在的旧草稿，不留垃圾
+    if not body and not pager.note_buffer:
+        notes.clear_draft(pager.book_id)
+        return
+    if commit:
+        # Esc：提交成一条正式笔记；中文草稿不经过 Textbox，直接原样落盘
+        _commit_note(pager, body, editor if text else None)
+        return
+    try:
+        # 非正常关闭：留成草稿，下次打开面板自动捞回来
+        notes.save_draft(pager.book_id, pager.note_buffer, body)
+    except (notes.NotesError, OSError):
+        # 草稿写不了也只能算了，不能因此把面板关不掉
         pass
 
 
@@ -3234,6 +3400,11 @@ def open_reader(book_id: str) -> int:
     language = detect_book_language(lines)
     # 目录（章节表 + 百分比）：优先读缓存，缺失/过期则现建
     book_toc = toc.load_toc(str(book_id), book, settings)
+    # 这本书已有的笔记（磁盘是权威；读不出来就当没有，不能挡住开书）
+    try:
+        book_notes = notes.load_notes(str(book_id))
+    except notes.NotesError:
+        book_notes = []
     # 组装 Pager：所有配置都在这里被"翻译"成运行时参数
     pager = Pager(
         lines=lines,
@@ -3268,6 +3439,8 @@ def open_reader(book_id: str) -> int:
         auto_add_on_mark=bool(vocab_settings.get("auto_add_on_mark", True)),
         # Tab 目录浮层用的条目（带百分比）
         toc_entries=book_toc,
+        # 这本书已经存在的笔记：折叠提示显示条数，面板打开时接着写
+        notes=book_notes,
     )
     # 载入生词集合，正文里会给它们加下划线
     _reload_vocab(pager)

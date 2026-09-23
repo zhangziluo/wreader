@@ -4,10 +4,10 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`683 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`727 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 **9** 个校验脚本全绿（新增 `verify_translate.py`），且**已 git 化并推送到 GitHub**
 （`main` 跟踪 `origin/main`）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3405** 条语句上方没有紧邻注释行
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3819** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 ⚠️ IDE 里飘的**幽灵告警已侦破**（同一份 **143 行**野生 `cli.py` 碎片，见 ㉔ / ㉕）：
 `cli.py:24: 未定义"Optional"` 与 `cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`
@@ -20,9 +20,10 @@ README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻�
 新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
 **CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
 **目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**、
-**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑；笔记暂存内存，落盘是下一步）**、
+**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑）**、
 **可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**、
-**成就引擎 Phase 1：`wreader/achievements.py` 事件驱动 + 28 个成就 + `~/.wreader/achievements.json`（㉖）**。
+**成就引擎 Phase 1：`wreader/achievements.py` 事件驱动 + 28 个成就 + `~/.wreader/achievements.json`（㉖）**、
+**笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` 落盘成 markdown + `werd notes` 三条路径（㉘）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1041,20 +1042,67 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 **Phase 1 明确没做**（别误以为已有）：Phase 2/3 的实时按键类、屏内 5 秒通知、地理（`geo.py`）、
 环境探测（`env.py`）、阅读器帮助页、意外中断自动恢复流程。
 
+### ㉘ 笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` + `werd notes`（2026-09-23）
+
+**需求**：用户给了 Phase 3 规格（存储逻辑 + CLI）：新增笔记模块、markdown 落盘 + `index.json`、
+30 秒自动保存、`Ctrl+S` 闪现"✓ 已保存"、`werd notes` 三条用法（清单 / 分页 / 导出）、
+文件锁防并发、目录自动创建、UTF-8。
+
+**做了什么**：
+
+| 文件 | 变化 |
+| --- | --- |
+| `wreader/notes.py` | **新增 558 行**：`save_note`（追加 markdown + 刷索引）、`load_notes`/`parse_notes`（容错解析）、`list_all_notes`（从 `.md` 重建派生索引）、`update_index`、`export_notes`、`save_draft`/`load_draft`/`clear_draft` |
+| `wreader/lock.py` | **新增 81 行**：把成就模块里的文件锁抽出来共用（`file_lock(path)`；POSIX `flock`，Windows 退化为原子替换） |
+| `wreader/reader.py` | 3342 → **3515 行**：`Pager.notes` 改成"打开时从磁盘载入"；`_commit_note`/`_save_note` 落盘 + `✓ 已保存` 1.5 秒；`_note_panel` 改成 200ms 节拍轮询 + 30 秒草稿 + `Esc` 提交 / `Ctrl-C` 留草稿；`_restore_draft`/`_fill_editor`/`_finish_note_panel` 新增 |
+| `wreader/cli.py` | 1266 → **1450 行**：新增 `werd notes [book_id] [--export]`（`_notes_table` / `_page_notes` / `_read_one_key` / `_paging_is_interactive` / `DEFAULT_NOTES_EXPORT_DIR = "~/books"`） |
+| `wreader/achievements.py` | 768 → **715 行**（文件锁搬去 `lock.py`，`_file_lock` 三兄弟删除） |
+| 测试 | 新增 `tests/test_notes.py` **30 项**（含**三进程并发写**的锁验证）；`test_reader.py` 192 → **198**（落盘 / 草稿 / 恢复 / 失败保留）；`test_cli.py` 41 → **49**（清单 / 分页 / `q` 退出 / 导出 / 边界） |
+| `tools/verify_notes.py` | 真 pty 端到端从 5 项扩到 **20 项**：加上落盘格式、索引计数、**第二次会话追加不覆盖**、CLI 三条路径、`--export` 内容一致 |
+
+**规格里我改掉/澄清的三处**（详见 `progress.md` 决策演变最后 5 行）：
+1. **"自动保存"= 崩溃草稿，不是每 30 秒追加一条笔记**（否则同一段草稿会重复入账）；
+2. **markdown 为源 + 派生索引**（`count` 从 `.md` 数出来，删掉 `index.json` 自动重建，永不漂移）；
+3. **`Esc` = 提交、`Ctrl-C` = 只留草稿**（规格里写的"n 折叠"在本项目是"下一个搜索命中"，
+   面板实际由 `Esc` 关闭）。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest tests/` | **727 passed**（683 + `test_notes` 30 + `test_reader` 6 + `test_cli` 8） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` / `check_doc_numbers.py` | **RESULT: OK** / **RESULT: ALL OK**（`notes.py` 558、`lock.py` 81、`cli.py` 1450、`reader.py` 3515、`achievements.py` 715、`test_notes.py` 30、总数 727 全对拍） |
+| `tools/verify_notes.py`（真 pty） | **全部通过（20 项）** —— 含落盘 markdown 格式、`index.json` 计数、**第二次会话追加**、`werd notes` 清单/分页、`--export` 落到 `~/books` 且内容一致 |
+| `tools/verify_mouse.py` / `verify_translate.py` / `verify_colors.py` | 全部通过（回归：动过 `reader.py` 的面板与退出路径） |
+| `tools/verify_wrap.py` / `verify_draw.py` | 40077 / 420 |
+| `py_compile` | wreader + translate + tests + tools 全过 |
+
+**踩到的坑（都写进了 `systemPatterns.md` 坑 #29-32）**：
+1. ⚠️ **`Textbox.gather()` 把字符截成 7 位**（`curses.ascii.ascii()` = `& 0x7f`）：把中文草稿填进编辑区，
+   提交后原文变成 `I?c\x07`。**这是数据损坏级的坑**，测试用中文当草稿正文时当场暴露。
+   最终设计：中文正文不进编辑区，`_restore_draft` 把它交回调用方直接落盘。
+2. ⚠️ **`export_notes(book_id, "~/books")` 造出一个名叫 `books` 的文件**：目录不存在时
+   `is_dir()` 为假 → 走"按文件复制"。改成调用方拼完整文件名。
+3. ⚠️ **分页只看 `stdin.isatty()` 会永久挂住**：`capture_output=True` 的子进程（stdout 被捕获、
+   stdin 仍是终端）会卡在第一页 —— 实测把 `verify_notes.py` 整个挂死，只能 `pkill`。
+   判据改成"两端都是 tty"，工具里再加 `stdin=subprocess.DEVNULL`。
+4. `flock` **不可重入**（同进程不同 fd 也会等自己）→ 内部已有锁时只能调不加锁的 `_write_index`。
+5. 编辑区内容 `_save_note` 与"中文草稿"两条路要**共用一个 `_commit_note`**，否则清空逻辑会各写一遍。
+
 ## 待办 / 下一步
 
-按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools""成就 Phase 1"四项已移除）：
+按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools""成就 Phase 1""笔记 Phase 3"五项已移除）：
 
 0. **成就 Phase 2/3**（实时按键事件 + 屏内 5 秒通知 + 地理 `geo.py` / 环境 `env.py`）——
    规格与拆分见 `progress.md` 待办 **0b**；Phase 1 已落地的接口是
    `achievements.check_achievements(event, data)` 与 `EVENTS` 白名单（`key` / `resize` 还没加）。
 
-1. **笔记落盘（Phase 3）**——最高优先级的未完成功能。现在 `m` 标记 + `o` 面板已经能用，
-   但 `Ctrl+S` 存下的笔记只在 `Pager.notes`（内存）里，退出阅读器即消失。要做的事：
-   新增 `wreader/notes.py`（纯函数 + 纯文本存储，遵守硬约束），存到 `~/.wreader/notes/<book_id>.json`，
-   字段沿用 `{"quote", "text", "created"}` 再补 `line`（源行号，与书签/章节同一套坐标）；
-   `open_reader` 里加载、`save_session` 路径上写回；`werd notes <book_id>` 之类 CLI 入口可选。
-   ⚠️ 落盘时**只写源行号**（`mark_start` 的屏幕行会随终端宽度变化，不能当坐标存）。
+1. **笔记的小尾巴**（Phase 3 已交付，这两条是新发现的、当初没计划的）：
+   - 编辑区仍**打不进中文**（`Textbox.do_command` 只认 `curses.ascii.isprint`），
+     且 `gather()` 会把字符截成 7 位 → 要支持得自己接管插入与回读（见坑 #29）；
+   - 笔记**没记源行号**，所以还不能"从笔记跳回原文"。要加就在 `notes.save_note` 补 `line`
+     （与书签同一套坐标：`正文.split("\n")` 的下标）。
 2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
    `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
 3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。

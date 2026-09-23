@@ -45,7 +45,7 @@ the next launch resumes exactly where you stopped.
 | 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
 | 🈶 Translation | **Pluggable engines**: Google (keyless, the default) / Baidu / Youdao / Tencent Cloud / DeepSeek / local Argos; configure with the `werd config translate` wizard. Chapter-level translation with an on-disk cache — translate once, reuse forever |
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
-| 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. ⚠️ Kept in memory only for now — see "Known issues" |
+| 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. Notes are **written to markdown** (`~/.wreader/notes/<book_id>.md`) and read back with `werd notes`; the editor keeps a crash draft every 30 seconds |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
 | 🏆 Achievements | 28 achievements (first book, night owl, hundred-day streak, weekend warrior, …) unlocked by **events**, with per-category progress bars, an unlock animation and a bell |
 | ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
@@ -258,6 +258,7 @@ At a glance:
 | `werd stats` | Reading statistics and a heatmap (`--json` for scripts) |
 | `werd achievements` | Achievement list and unlock progress |
 | `werd toc <book_id>` | Show a book's table of contents (chapters + progress %); `--rebuild` re-parses it |
+| `werd notes [book_id]` | Notes: no id lists the books that have notes; with an id it pages through them (space / `q`); `--export` writes the markdown out |
 | `werd config` | View or edit settings |
 
 Exit codes: `0` on success; `1` for a bad argument, nothing found (`no book matches ...`) or a translation
@@ -434,6 +435,39 @@ Real output:
 (`1/28 unlocked` and the unlocked entries with their timestamps, then `进行中` = "in progress": the
 remaining ones grouped by category, one progress bar each.)
 
+### `werd notes`
+
+```bash
+werd notes                          # list the books that have notes (count / last modified / preview, newest first)
+werd notes 3e027c4de949             # page through one book's notes (space = next, q = quit)
+werd notes 3e027c4de949 --export    # write it out to ~/books/notes_3e027c4de949.md
+```
+
+The notes themselves are plain markdown under `~/.wreader/notes/`:
+
+```markdown
+# 三体
+
+书籍ID: 3e027c4de949
+创建时间: 2026-09-23T15:10:00
+
+## 笔记 #1 — 2026-09-23 15:10
+
+汪淼看到了一串数字在眼前跳动。
+我的想法：
+
+这段和《球状闪电》呼应。
+```
+
+- One file per book (`<book_id>.md`); the directory and the file header are created on the first
+  write, and every later note is **appended, never overwritten**.
+- `index.json` is a **derived index** (title / count / last modified / preview): delete it and it is
+  rebuilt, and editing the markdown by hand cannot make it lie.
+- Two writers at once (two terminals, or two machines over ssh) are serialised by the
+  `index.json.lock` file lock, so no note is lost.
+- When the output is redirected or piped, `werd notes <id>` does **not** wait for keypresses -- it
+  prints everything (otherwise `| less` would hang forever).
+
 ### `werd config`
 
 ```bash
@@ -536,12 +570,15 @@ Useful details:
 - **Taking notes**: `m` starts mark mode → select with `h/j/k/l` (or the arrow keys) → `y` copies it
   (truncated at 2000 characters, with a message when it bites) → `o` opens the panel, the quote area shows the
   selection and you write in the editor → `Ctrl+S` saves. While folded, the hint bar shows
-  `📝 N条笔记 | 按o展开` ("N notes, press o to expand"). Three caveats worth knowing:
+  `📝 N条笔记 | 按o展开` ("N notes, press o to expand"). Four things worth knowing:
   1. the editor is a `curses.textpad.Textbox`, so **typing Chinese depends on your IME** — in practice
      it is an English / pinyin editor;
   2. the panel's `Ctrl+S` needs XON/XOFF flow control to be off (the reader tries to clear `IXON` on startup);
-  3. ⚠️ notes live **in memory only** — they are gone when the reader exits; persistence is left for a later
-     release (see "Known issues").
+  3. **notes do hit the disk**: `Ctrl+S` appends to `~/.wreader/notes/<book_id>.md` (plain markdown, editable
+     by hand), and closing the panel with `Esc` commits whatever is still uncommitted;
+  4. the editor keeps a **crash draft every 30 seconds** (`<book_id>.draft.md`), so a crash, a power cut or a
+     `Ctrl-C` loses nothing: the next time you open the panel the text is back. `Ctrl-C` only leaves a draft;
+     `Esc` commits a real note.
 - **Slow chapters** (more than 30 minutes spent in one chapter) make the hint bar suggest pressing `c` for Chinese.
 - **`Ctrl-C` mid-session loses nothing**: the position and the session duration are still saved on the way out.
 
@@ -692,6 +729,7 @@ tells you to run `werd config translate`.
 | Library index | `~/.wreader/library.json` | `$WREADER_HOME` |
 | Achievements state | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | Vocabulary notebook | `~/.wreader/vocab.json` | `$WREADER_HOME` |
+| Notes | `~/.wreader/notes/<book_id>.md` (one markdown per book) + `index.json` (derived index) + `<book_id>.draft.md` (uncommitted draft) | `$WREADER_HOME` |
 | Translation cache | `~/.wreader/cache/<book_id>/ch0_en.txt`, `ch0_bilingual.txt` | `translator.cache_dir` |
 | Book text (UTF-8) | `~/novels/<title>_utf8.txt` | `$WREADER_NOVELS_DIR`, `library.novels_dir` |
 
@@ -877,11 +915,13 @@ wreader/
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
 │   ├── __init__.py          __version__ and the module map (19 lines)
-│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, file lock (768 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1266 lines)
+│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, file lock (715 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1450 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (1007 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes (3342 lines)
+│   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (81 lines)
+│   ├── notes.py             notes: one markdown per book + a derived index + crash drafts (558 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes (3515 lines)
 │   ├── translator.py        chapter cache / batching / paragraph mapping + the engine adapter (1199 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement definitions, celebration (785 lines)
@@ -897,18 +937,19 @@ wreader/
 │   │   └── local.py         local Argos Translate (offline, optional dependency)
 │   └── data/
 │       └── achievements.json  the 28 achievement definitions (198 lines)
-└── tests/                   683 tests, all offline (see "Running the tests" below)
+└── tests/                   727 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_achievements.py 35 tests — word counting, range dedup, event accounting, state file, locking, unlock checks
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
-    ├── test_reader.py       192 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
+    ├── test_notes.py        30 tests — markdown appends, parsing, the derived index, export, drafts, the file lock
+    ├── test_reader.py       198 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
     ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
     ├── test_translator.py   77 tests — language detection, batching, cache, engine adapter, error mapping
     ├── test_translate.py    49 tests — engine registry, each provider's signature/request building, errors
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
     ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
-    └── test_cli.py          41 tests — argument parsing, every sub-command's output, exit codes, the engine wizard
+    └── test_cli.py          49 tests — argument parsing, every sub-command's output, exit codes, the notes list/pager, the engine wizard
 ```
 
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,
@@ -1089,12 +1130,11 @@ These are the limitations that genuinely exist today; better to write them down 
 - **Numeric values under `progress` in `library.json` are not coerced**: a hand written string
   (`"current_line": "12"`) still works because every consumer wraps it in `int(...)`, but it is not
   turned back into a number for you.
-- **Notes live in memory only**: `m` (mark) plus the `o` note panel work today, but whatever `Ctrl+S`
-  stores disappears with the reading session — **nothing is written to disk yet** (a later release will
-  put it in a plain text file under `~/.wreader/`).
 - **The note editor is essentially English / pinyin**: it is built on `curses.textpad.Textbox`, so typing
   Chinese depends on your IME; and its `Ctrl+S` requires XON/XOFF flow control to be off (the reader tries
-  to clear `IXON` on startup, but the save key never arrives when it cannot).
+  to clear `IXON` on startup, but the save key never arrives when it cannot).  Note also that
+  `Textbox.gather()` masks every character to 7 bits, so **Chinese is never fed into the editor**: a
+  Chinese draft body is written to the note by the engine directly (see `_restore_draft`).
 
 Ten former issues that are now fixed, kept here so they are not mistaken for pending work:
 

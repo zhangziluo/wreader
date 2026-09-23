@@ -20,6 +20,8 @@ import json
 import sys
 # datetime：daily_open 事件要带上"什么时候打开的"
 from datetime import datetime
+# --export 要拼出 ~/books/notes_<id>.md 这样的路径
+from pathlib import Path
 # 类型注解：Callable 表示"可调用的函数"，其余是容器和可选类型
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -30,8 +32,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 # rich 的表格，list/search/vocab/stats 都用它排版
 from rich.table import Table
 
-# 同包内引用：版本号 + 配置 + 书库 + 统计 + 成就事件
-from . import __version__, achievements, config, library, stats
+# 同包内引用：版本号 + 配置 + 书库 + 统计 + 成就事件 + 笔记
+from . import __version__, achievements, config, library, notes, stats
 
 # 对外只暴露这两个函数：构造解析器和程序入口
 __all__ = ["build_parser", "main"]
@@ -247,6 +249,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--rebuild",
         action="store_true",
         help="re-parse the book text and rewrite the cache",
+    )
+
+    # werd notes [book_id]：看笔记清单，或翻看某一本的笔记
+    notes_parser = subparsers.add_parser(
+        "notes", help="list your notes, or page through one book's notes",
+    )
+    # 位置参数 book_id 可省略：不给就是"列出所有有笔记的书"
+    notes_parser.add_argument(
+        "book_id",
+        nargs="?",
+        help="id of the book to page through (omit it to list every book)",
+    )
+    # --export：把这本书的笔记导出成 markdown
+    notes_parser.add_argument(
+        "--export",
+        action="store_true",
+        help="export this book's notes to ~/books (needs a book id)",
     )
 
     # 把组装好的解析器交还给调用方
@@ -1079,6 +1098,170 @@ def _heatmap_text(report: Dict[str, Any]) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Notes (`werd notes`).
+# --------------------------------------------------------------------------- #
+#: Where ``werd notes <id> --export`` drops the markdown (a directory -- the file
+#: name inside it is ``notes_<book_id>.md``).
+# --export 默认落在哪：~/books，文件名由 notes.export_notes 补成 notes_<id>.md
+DEFAULT_NOTES_EXPORT_DIR = "~/books"
+# 翻看笔记时引用前面那个符号（与阅读器引用区一致）
+_NOTE_QUOTE_PREFIX = "> "
+
+
+def _read_one_key() -> str:
+    """Read a single keypress without waiting for Enter.
+
+    A pipe gets an empty string (nothing to wait for), and a terminal without
+    ``termios`` (Windows) falls back to a line of input -- so the pager below
+    always terminates instead of hanging.
+    """
+    # 非交互（管道 / 测试里的 capsys）：没有按键可等
+    if not sys.stdin.isatty():
+        return ""
+    try:
+        # 局部导入：Windows 上这两个模块不存在
+        import termios
+        import tty
+    except ImportError:  # pragma: no cover - 只有 Windows 会走到
+        try:
+            # 退化成"按回车继续"
+            return input()
+        except (EOFError, KeyboardInterrupt):
+            return "q"
+    # 单字符原始模式：按空格立刻返回，不必再敲回车
+    descriptor = sys.stdin.fileno()
+    saved = termios.tcgetattr(descriptor)
+    try:
+        tty.setraw(descriptor)
+        return sys.stdin.read(1)
+    except (OSError, KeyboardInterrupt):  # pragma: no cover - 终端消失等少见情况
+        return "q"
+    finally:
+        # 无论怎么退出都把终端属性还原回去
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
+
+
+def _paging_is_interactive() -> bool:
+    """Whether ``werd notes <id>`` should wait for keypresses.
+
+    Both ends must be a terminal: stdout being redirected (``| less``, a CI log)
+    means paging has nobody to page to -- and waiting there would hang the caller
+    forever.  Same rule as the reader's tty check.
+    """
+    # 输入输出都是终端才算"有人在按键"
+    return bool(sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _notes_table() -> int:
+    """Print every book that has notes, newest first."""
+    try:
+        entries = notes.list_all_notes()
+    except notes.NotesError as exc:
+        return _fail(str(exc))
+    # 一条笔记都没有：给一句引导，不是错误
+    if not entries:
+        console.print("[dim]还没有笔记：阅读时按 m 标记、y 复制，再按 o 打开面板写[/dim]")
+        return 0
+    # 按最后修改时间倒序（ISO 字符串的字典序就是时间序）
+    rows = sorted(
+        entries.items(),
+        key=lambda item: str(item[1].get("last_modified") or ""),
+        reverse=True,
+    )
+    table = Table(title="笔记", title_justify="left")
+    table.add_column("book", style="bold")
+    table.add_column("id", style="cyan", no_wrap=True)
+    table.add_column("条数", justify="right")
+    table.add_column("最后修改", style="dim")
+    for book_id, entry in rows:
+        table.add_row(
+            str(entry.get("title") or book_id),
+            book_id,
+            str(entry.get("count") or 0),
+            str(entry.get("last_modified") or ""),
+        )
+    console.print(table)
+    # 预览单独列在表格下面：塞进表格会被挤没
+    for book_id, entry in rows:
+        if entry.get("preview"):
+            console.print("[dim]{} · {}[/dim]".format(book_id, entry["preview"]))
+    return 0
+
+
+def _page_notes(book_id: str, stored: Sequence[Dict[str, Any]]) -> int:
+    """Show one book's notes one screen at a time (space = next, q = stop)."""
+    total = len(stored)
+    console.print(
+        "[dim]{} · {} 条笔记 · 空格看下一条，q 退出[/dim]".format(book_id, total)
+    )
+    for position, note in enumerate(stored, start=1):
+        # 每一条前面画一条分隔线（规格里的 --- 分隔）
+        console.print("---")
+        console.print(
+            "[bold]#{} {}[/bold]".format(note.get("index"), note.get("time") or "")
+        )
+        # 引用按灰字显示，正文正常显示
+        if note.get("quote"):
+            console.print("[dim]{}{}[/dim]".format(_NOTE_QUOTE_PREFIX, note["quote"]))
+        if note.get("content"):
+            console.print(str(note["content"]))
+        # 最后一条不用等按键
+        if position >= total:
+            break
+        # 管道 / CI：不等按键，把余下的都打出来
+        if not _paging_is_interactive():
+            continue
+        # 空格（或回车）看下一条；q / Ctrl-C / Esc 退出
+        choice = _read_one_key()
+        if choice and choice.lower() in ("q", "\x03", "\x1b"):
+            console.print()
+            return 0
+    return 0
+
+
+def cmd_notes(args: argparse.Namespace) -> int:
+    """Handle ``werd notes [book_id] [--export]``.
+
+    Without a book id it lists every book that has notes (a derived index, see
+    :mod:`wreader.notes`).  With one it pages through that book's notes, and
+    ``--export`` copies the markdown out to ``~/books`` so it can be shared.
+    """
+    # 位置参数可以省略
+    book_id = getattr(args, "book_id", None)
+    if getattr(args, "export", False):
+        # 导出必须说明是哪本书
+        if not book_id:
+            return _fail("--export needs a book id: werd notes <book_id> --export")
+        # 目标写成完整的文件名：目录还不存在时 export_notes 会先建目录，
+        # 否则（把 ~/books 当成文件）会导出一个名叫 books 的文件
+        target = Path(DEFAULT_NOTES_EXPORT_DIR).expanduser() / notes.EXPORT_TEMPLATE.format(
+            book_id
+        )
+        try:
+            written = notes.export_notes(book_id, target)
+        except notes.NotesError as exc:
+            return _fail(str(exc))
+        console.print("已导出到 [bold]{}[/bold]".format(written))
+        return 0
+    # 没给 id：列清单
+    if not book_id:
+        return _notes_table()
+    try:
+        stored = notes.load_notes(book_id)
+    except notes.NotesError as exc:
+        return _fail(str(exc))
+    # 这本书还没写过笔记
+    if not stored:
+        console.print(
+            "[dim]{} 还没有笔记：阅读时按 m 标记、y 复制，再按 o 打开面板写[/dim]".format(
+                book_id
+            )
+        )
+        return 0
+    return _page_notes(book_id, stored)
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """Handle ``werd stats`` -- reading time totals plus a 30 day heatmap grid.
 
@@ -1234,6 +1417,7 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "achievements": cmd_achievements,
     "config": cmd_config,
     "toc": cmd_toc,
+    "notes": cmd_notes,
 }
 
 

@@ -43,11 +43,13 @@
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 19 | `__version__`、模块地图 | `["__version__"]` |
-| `wreader/achievements.py` | 768 | **事件驱动成就引擎**：状态文件、文件锁、事件累加、解锁判定、字数去重 | 17 个（`check_achievements`/`record_event`/…） |
-| `wreader/cli.py` | 1266 | argparse 定义 + 子命令处理函数（含 `toc`、`config translate` 向导） | `["build_parser", "main"]` |
+| `wreader/achievements.py` | 715 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重 | 17 个（`check_achievements`/`record_event`/…） |
+| `wreader/cli.py` | 1450 | argparse 定义 + 子命令处理函数（含 `toc`、`notes`、`config translate` 向导） | `["build_parser", "main"]` |
 | `wreader/config.py` | 1007 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/library.py` | 1159 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读 | **无 `__all__`** |
-| `wreader/reader.py` | 3342 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、标记/笔记、译文弹窗 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/lock.py` | 81 | **跨进程文件锁**（POSIX `flock`；Windows 退化为"只有原子替换"） | 3 个 |
+| `wreader/notes.py` | 558 | **笔记存储**：每本书一个 markdown + 派生索引 + 崩溃草稿 | 17 个 |
+| `wreader/reader.py` | 3515 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、标记/笔记、译文弹窗 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 785 | 指标、热力图、连续天数、**成就定义加载**与庆祝动画 | 27 个 |
 | `wreader/toc.py` | 474 | 目录：章节提取、epub nav/ncx 解析、百分比、可重建缓存 | 10 个 |
 | `wreader/translator.py` | 1199 | 章节缓存 + 分批 + 段落映射 + 语言规范化 + 引擎适配（`EngineBackend`） | 26 个 |
@@ -147,6 +149,18 @@
   退化成"只有原子替换"）。写盘一律 `mkstemp` + `os.replace`。
 - **容错姿态**：状态文件坏 → 改名成 `achievements.json.broken` 再从空状态开始；
   定义文件坏 / 指标写错 → 只是"这次不判定"，绝不让阅读或命令失败。
+
+### 9. 笔记：markdown 为源 + 派生索引 + 崩溃草稿（`notes.py`）
+- **存储**：`<data dir>/notes/<book_id>.md`，一本书一个文件，第一次写时落文件头
+  （`# 书名` / `书籍ID:` / `创建时间:`），之后每一条 `## 笔记 #N — YYYY-MM-DD HH:MM` **只追加**。
+- **`index.json` 是派生缓存**：书名 / 条数 / 最后修改 / 预览。`count` 由 `.md` 里的小节**数出来**
+  （不是盲目 `+1`），`list_all_notes()` 每次都从 `.md` 重建并回写，所以手改文件也不会让索引说谎。
+- **崩溃草稿**：编辑区每 30 秒把"还没提交的内容"写进 `<book_id>.draft.md`。`Esc` = 提交成正式笔记
+  （并删草稿），`Ctrl-C` = 只留草稿。下次打开面板自动捞回来 → **掉电/崩溃一个字都不丢**。
+- **一个锁管一个目录**：`save_note` 的"追加 + 刷新索引"都在 `file_lock(index_file())` 里
+  （`index.json.lock`）。一次只拿一把锁，避免了"笔记文件 → 索引"这种锁顺序问题。
+- **CLI 分页只在两端都是 tty 时等按键**（`_paging_is_interactive`），否则 `werd notes <id> | less`
+  会永远挂着（详见坑 #31）。
 
 ## 关键实现路径（改动时必看）
 
@@ -272,4 +286,23 @@
     `parse_condition` 不报错、进程不崩，但那条成就**永远解锁不了** —— 静默失效最难查。
     `tests/test_achievements.py::test_packaged_conditions_only_use_metrics_that_exist`
     专门拦这个：拿 `compute_metrics()` 的键集合逐个对拍，加新指标/新成就时它会立刻失败。
+29. ⚠️ **`Textbox.gather()` 会把字符截成 7 位，中文进编辑区必坏**：它内部用
+    `chr(curses.ascii.ascii(self.win.inch(y, x)))` 拼字符串，`ascii()` 是 `& 0x7f` ——
+    实测 `草稿正文` 读回来变成 `I?c\x07`（草→`I`、稿→`?`、正→`c`、文→BEL）。
+    所以**中文草稿绝不能经编辑区**：`_restore_draft` 只把 ASCII 正文填进窗口，
+    非 ASCII 正文原样交给 `_commit_note` 直接落盘（并在消息行说一句）。
+    写测试时如果拿中文当"草稿正文"，会撞上这个 7 位截断 —— 这不是 bug，是 curses 的限制。
+30. ⚠️ **`~` 展开 + 不存在的目录会造出"名叫 books 的文件"**：`export_notes(book_id, "~/books")`
+    在 `~/books` 尚不存在时，`Path("~/books").is_dir()` 为假 → 走"按文件复制"分支 →
+    真的写出一个文件叫 `~/books`。**导出必须由调用方拼出完整文件名**
+    （`~/books/notes_<id>.md`），或先确保目录存在。
+31. ⚠️ **CLI 分页必须"两端都是 tty"才等按键**：只看 `stdin.isatty()` 时，
+    `subprocess.run(..., capture_output=True)` 之类的场景（stdout 被管道/捕获，stdin 还是终端）
+    会让 `werd notes <id>` 卡在第一页等键 —— 实测把 `tools/verify_notes.py` 整个挂死，
+    只能 `pkill`。规则与阅读器一致：`sys.stdin.isatty() and sys.stdout.isatty()`。
+    给这类工具起子进程时也顺手 `stdin=subprocess.DEVNULL`。
+32. ⚠️ **`flock` 不可重入（同一进程也不行）**：`file_lock(path)` 每次都新开一个 `.lock` 句柄，
+    所以**在同一个 `with` 里再调用一次公共写函数会死锁**（第二个 `flock(LOCK_EX)` 等自己）。
+    `notes.py` 因此把不加锁的 `_write_index` 留给"已经持锁"的内部调用，
+    公共的 `update_index()` 自己拿锁 —— 两者的 docstring 都写明"别在持锁时调用"。
 

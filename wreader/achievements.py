@@ -33,17 +33,17 @@ import re
 import tempfile
 # 数汉字要判断东亚宽度
 import unicodedata
-# contextmanager 写文件锁
-from contextlib import contextmanager
 # datetime：daily_open 要判断几点、是不是周末
 from datetime import datetime
 # 状态文件路径
 from pathlib import Path
 # 类型注解
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # 同包引用：数据目录、书库索引（迁移用）、指标与成就定义
 from . import config, library, stats
+# 跨进程文件锁：与 notes.py 共用同一份实现
+from .lock import file_lock
 
 # 模块对外暴露的名字
 __all__ = [
@@ -374,59 +374,6 @@ def weekend_seconds(start: Any, end: Any, seconds: int) -> Tuple[str, int]:
     return "", 0
 
 
-def _lock_file(handle: Any) -> bool:
-    """Take an exclusive lock on *handle*; ``False`` when locking is unavailable.
-
-    POSIX gets a real ``flock``.  Windows has no ``fcntl`` -- there the write is
-    still atomic (temp file + ``os.replace``), it is just not serialised against
-    a second terminal, which is an acceptable trade for a local notebook file.
-    """
-    try:
-        # 局部导入：Windows 上没有 fcntl，不能放在模块顶部
-        import fcntl
-    except ImportError:  # pragma: no cover - 只有 Windows 会走到
-        return False
-    try:
-        # 独占锁：第二个进程会在这里等到第一个写完
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-    except OSError:  # pragma: no cover - 文件系统不支持锁
-        return False
-    return True
-
-
-def _unlock_file(handle: Any) -> None:
-    """Release a lock taken by :func:`_lock_file`, ignoring failures."""
-    try:
-        # 与加锁对称：解锁失败也不该抛给调用方
-        import fcntl
-    except ImportError:  # pragma: no cover - 只有 Windows 会走到
-        return
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:  # pragma: no cover - 关文件时也会顺带解锁
-        pass
-
-
-@contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
-    """Serialise the read-modify-write of a state file across processes."""
-    # 锁文件放在状态文件旁边（<name>.lock），与状态文件一一对应
-    handle = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(str(path) + ".lock", "a+", encoding="utf-8")
-    except OSError:
-        # 目录不可写：退化成"不加锁"，但原子替换仍然保证文件不会写坏
-        handle = None
-    _lock_file(handle) if handle is not None else None
-    try:
-        yield
-    finally:
-        if handle is not None:
-            _unlock_file(handle)
-            handle.close()
-
-
 def load_state(path: Optional[Path] = None) -> Dict[str, Any]:
     """Read the achievements state, seeding it from ``library.json`` once.
 
@@ -665,7 +612,7 @@ def check_achievements(
     """
     # 目标状态文件
     target = state_path(path)
-    with _file_lock(target):
+    with file_lock(target):
         state = _load_state_or_reset(target)
         # 先把事件本身累加进去（计数、日期、字数）
         record_event(state, event_type, data, now)
