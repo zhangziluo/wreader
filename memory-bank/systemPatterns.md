@@ -226,4 +226,10 @@
 22. **测试替身必须复刻真函数的语义**：被 monkeypatch 掉的 `cli._prompt_line` 一开始直接返回队列里的
     空串，漏掉了真函数"空输入 = 用默认值"的行为，于是"回车保留当前引擎"这条路径**静默失去覆盖**
     （向导把空串当成不认识的名字而取消）。替身要照着真函数的契约写。
+23. **`params()` 是厂商专有的，不在 `Translator` 基类上**：只有 `BaiduTranslator` /
+    `YoudaoTranslator` 定义了它，`translate/base.py` 的契约里只有 `translate()` 与 `pause()`。
+    所以把引擎变量注解成（或被推断成）基类 `Translator` 之后再调 `.params()`，静态检查会报
+    「无法访问类 Translator 的属性 params」。写法：**直接构造具体类**，或对 `make_engine()`
+    的返回值用 `isinstance` 收窄。`make_engine()` 声明返回基类类型是**故意**的（它要能返回六家
+    引擎），别为了让临时脚本好写就把 `params` 提到基类 —— 那会变成"每个引擎都得实现"的假契约。
 

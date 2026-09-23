@@ -861,6 +861,29 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 - 单个引擎**没有超时重试 / 退避**：一次失败就按 `TranslateError`（单章失败）或
   `TranslateUnavailable`（整本中止）处理，没有自动重试。
 
+### ㉓ 修掉临时脚本 `/tmp/check_translate.py` 的 `Translator.params` 类型报错（2026-09-23）
+
+报错是 `无法访问类 Translator 的属性 params`（Pylance）。根因**不是逻辑坏了，是静态类型用错了基类**：
+`params()` 只定义在 `BaiduTranslator` / `YoudaoTranslator` 上，基类 `Translator` 的契约里只有
+`translate()` / `pause()`；而 `make_engine()` 的声明返回类型正是基类。修法 = 让变量落到**具体类**
+（直接构造，或 `isinstance` 收窄，见 `systemPatterns.md` 坑 #23）。
+
+该文件此前已从 `/tmp` 消失（`read_files` 直接 ENOENT，`/tmp` 旧脚本备份与 VS Code 本地历史里
+都没有它），所以是按报错信息**重建**成正牌离线自检：百度 MD5 签名 / 有道 v3 签名 + `truncate`、
+三条解析失败路径（`error_code` / 空 `trans_result` / 非对象响应）、凭证标签与 `configured` /
+`available`、未知引擎、`engine_from_settings({}) -> None`、本地引擎可用性随可选包变化。
+
+| 项 | 结果 |
+| --- | --- |
+| `.venv/bin/python /tmp/check_translate.py` | `RESULT: 全部通过`（24 项，退出码 0，全程不发请求） |
+| `npx pyright /tmp/check_translate.py` | **0 errors / 0 warnings** |
+| 反向对照（把 `.params()` 故意调在基类上，验完已删） | `error: Cannot access attribute "params" for class "Translator"` —— 与 IDE 报的一字不差，证明 pyright 确实在分析这个 `/tmp` 文件、且修法有效 |
+
+**这条的教训**：临时脚本的报错常常是**基类 / 具体类的类型边界**，不是逻辑 bug；`assert isinstance(...)`
+收窄既过静态检查，又能在真跑时兜住"工厂换了引擎"。重建时我自己还写错过一条断言（有道的 `zh-CHS`
+该断言在 `from` 上，却写成了 `to`），是脚本自己 FAIL 出来的 —— **自检脚本必须自己会 FAIL**，
+否则等于没有检查。
+
 ## 待办 / 下一步
 
 按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools"三项已移除）：
