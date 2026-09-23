@@ -18,7 +18,7 @@
 | 入口 | console script `werd` → `wreader.cli:main` |
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **54 个跟踪文件**，与远端同步 |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **59 个跟踪文件**，与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求
@@ -65,7 +65,7 @@
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-23）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3164** 条语句上方没有紧邻注释行
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3819** 条语句上方没有紧邻注释行
   （`test_reader.py`、`reader.py` 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"。
 

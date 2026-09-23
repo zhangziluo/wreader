@@ -17,12 +17,18 @@
         └───────────────────┴───────────────────┴──────────────┘
                             │  ✔ 事件（daily_open / session_end / book_add …）
                             ▼
-                    achievements.py         ← 记事件 + 判解锁 + 写状态（flock 串行化）
+                    achievements.py         ← 记事件 + 判解锁 + 写状态
+                            │
+                            ▼
+                       notes.py             ← 笔记 markdown + 派生索引 + 草稿
+                            │
+                            ▼
+                        lock.py             ← 两者共用：flock 串行化 + 原子替换
                             ▼
                        config.py            ← 数据目录、settings.toml、SCHEMA 驱动
                             ▼
                   ~/.wreader/{settings.toml, library.json, vocab.json,
-                              achievements.json, cache/}
+                              achievements.json, notes/, cache/}
                   ~/novels/<书名>_utf8.txt
 
   纯数据层之外的特例：
@@ -177,11 +183,13 @@
 | 翻页 | `handle_key` → `Pager.next_page/previous_page` → `next_top/previous_top(page_budget, viewport_width)` → `move_to(行, 段内偏移)` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行**；屏顶坐标是 `(position, line_offset)` |
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` + `bump_translations` → `save_library` |
-| 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
 | 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
 | 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
 | 标记选字 | `handle_key`（`m`，此后 `pager.mark_mode` 走 `_handle_mark_key`）→ `_enter_mark` / `_mark_move`（作用于 `Pager.viewport` 的纯函数）；高亮在 `_draw` → `_mark_row_span` + `_draw_marked_row`（`A_REVERSE`）；`y` → `_copy_selection` → `_mark_selection` → `Pager.note_buffer` |
-| 笔记面板 | `handle_key`（`o`）→ `_note_panel`（模态循环：`_draw_note_panel` + `_draw_quote`；逐键 `_note_validate` → `curses.textpad.Textbox.do_command`；`Tab` 切 `note_focus`；`Ctrl+S` → `_save_note` → `Pager.notes`；`Esc` 关闭）；子窗口由 `reader._sub_window()` 建 |
+| 笔记面板（写一条） | `handle_key`（`o`）→ `_note_panel`（模态循环，200ms 节拍：`_draw_note_panel` + `_draw_quote`；逐键 `_note_validate` → `Textbox.do_command`；`Tab` 切 `note_focus`；`Ctrl+S` → `_save_note` → `_commit_note` → `notes.save_note` 落盘 markdown；`Esc` = 提交、`Ctrl-C` = 留草稿）；子窗口由 `reader._sub_window()` 建 |
+| 笔记草稿 | 面板每 30 秒（`NOTE_AUTOSAVE_SECONDS`）→ `_autosave_draft` → `notes.save_draft`；关面板 `_finish_note_panel`（提交或留草稿）；重开面板 `_restore_draft`（ASCII 正文填编辑区、中文正文交回调用方直接落盘） |
+| 成就解锁 | `cli.main` / `cmd_import` / `open_reader` → `achievements.check_achievements(事件, 数据)` → `record_event` → `compute_metrics`（`stats.compute_metrics` ∪ 状态指标）→ `stats.evaluate_condition` → 写 `achievements.json` → `_celebrate_achievements` → `stats.celebrate` |
+| 笔记 CLI | `cmd_notes` → `notes.list_all_notes`（清单）/ `notes.load_notes` + `_page_notes`（翻看）/ `notes.export_notes`（导出） |
 | 终端流控 | `_run` → `_disable_flow_control()`（POSIX 用 `termios` 清 `IXON|IXOFF`，让 `Ctrl+S` 到得了程序；`endwin()` 负责还原） |
 
 ## 值得记住的坑（血泪）

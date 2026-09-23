@@ -132,6 +132,9 @@ werd achievements
 werd config [<section.key> [value]] [--path] [--reset]
 werd config translate           # 交互式向导：选翻译引擎 + 填密钥 + 当场自查
 werd toc <book_id> [--rebuild]  # 查看目录（章节表）；--rebuild 强制重解析并覆写缓存
+werd notes                        # 列笔记清单（有笔记的书 + 条数 + 最后修改）
+werd notes <book_id>              # 逐条翻看（空格看下一条，q 退出）
+werd notes <book_id> --export     # 导出到 ~/books/notes_<book_id>.md
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
 git status                                    # 动手前先看工作区是否干净
@@ -143,7 +146,7 @@ GIT_TERMINAL_PROMPT=0 git push                # 自动化场景：认证失败�
 git check-ignore -v book                      # 确认 `book/` 仍被忽略（切勿 `git add -f`）
 
 # 开发
-pytest                                        # 545 项，约 3~25 秒
+pytest                                        # 727 项，约 3~25 秒
 python -m pytest tests/test_reader.py -q      # 单文件
 python -m pytest -k "streak or heatmap" -q    # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings

@@ -9,12 +9,12 @@
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
 | 测试 | **727 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3405** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3819** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**54 个跟踪文件**（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**59 个跟踪文件**（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 **36 个** .py 通过（wreader 17 + tests 10 + tools 9） |
-| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项、笔记 5 项、翻译 4 项 |
+| 编译 | `py_compile` 全部 **41 个** .py 通过（wreader 20 + tests 12 + tools 9） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项、笔记 20 项、翻译 4 项、配色干净退出 |
 
 ## 已完成（可用的功能）
 
@@ -190,13 +190,13 @@
 
 ### 低优先级
 4. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，需要拍板）：
-   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **2279** 条不满足
-   （`test_reader.py` 447、`reader.py` 399、`translator.py` 189、`library.py` 165 …）。
+   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **3819** 条不满足
+   （2026-09-22 首次测得 2279，数字随代码量自然上涨：`test_reader.py`、`reader.py`、`translator.py` 最多）。
    三个选项：
    (a) 把约定口径改成"一段逻辑配一段中文注释"，不再声称 100%
    —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条）；
    (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
-   (c) 全量补齐 2279 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
+   (c) 全量补齐 3819 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
 5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
 6. **标签的命令行入口**：`books[].tags` 与 `werd search '#tag'` 都已支持，
    但只能手改 `library.json` 才能加标签。
