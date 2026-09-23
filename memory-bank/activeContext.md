@@ -9,6 +9,8 @@
 （`main` 跟踪 `origin/main`）。
 ⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3164** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
+⚠️ IDE 里还飘着一个**幽灵告警**：`cli.py:24: 未定义"Optional"`。实测**无法复现**，
+来源是仓库根那个野生 `cli.py`（㉒ 坑 #1，早已删除）的陈旧诊断，详见 **㉔** —— 下次再看到别去改代码。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
@@ -884,6 +886,38 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 该断言在 `from` 上，却写成了 `to`），是脚本自己 FAIL 出来的 —— **自检脚本必须自己会 FAIL**，
 否则等于没有检查。
 
+### ㉔ 核实"`cli.py:24: 未定义『Optional』"—— 幽灵告警，零代码改动（2026-09-23）
+
+**报告**：Pylance 指出 `cli.py` 第 24 行 `Optional` 未定义。**结论：现盘代码没有这个错误**，
+报错对象是**仓库根**那个野生 `cli.py`（㉒ 坑 #1 里 `editor` 工具"假成功"写出来的 143 行碎片，
+当时已删），不是 `wreader/cli.py`。
+
+**为什么判定是它**：IDE 给的路径是工作区根的 `cli.py`，而该路径**根本不存在**
+（`read_files` 直接 ENOENT）；全仓 `find -iname 'cli.py*'` 只命中 `wreader/cli.py`，
+`git log --diff-filter=ADR -- '*cli.py'` 显示历史上只跟踪过 `wreader/cli.py`。
+那份碎片的第 24 行恰好是 `Optional[...]` 用法、又没带 `from typing import Optional`，
+症状与报错**逐字吻合**。
+
+**实测证据（2026-09-23）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `sed -n '20,28p' wreader/cli.py` | 第 **22** 行就是 `from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple`；第 24 行是注释 |
+| `grep -n Optional wreader/cli.py` | **22**（import）/ **427** / **748** / **1213**，用到的都来自那一行 import |
+| `npx pyright`（1.1.414，全仓 + 单文件各跑一次） | **0 errors / 0 warnings / 0 informations** |
+| `py_compile` + `.venv/bin/python -c "import wreader.cli"` | 过；`c.Optional` 能取到 `typing.Optional` |
+| AST 自检（`/tmp/check_typing_names.py`） | 扫 **36** 个 `.py`：用 `Optional` 的 **18** 个**全都** import 了它；`MISSING TYPING NAMES: none` |
+| `pytest tests/` | **654 passed**（`test_cli.py` 单独跑 41 passed） |
+
+**给用户的处置**：这是编辑器侧的陈旧诊断，代码无需改 —— 关掉根目录那个 `cli.py` 标签页，
+然后 **Developer: Reload Window**（或 `Python: Restart Language Server`）即可。
+VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到该路径的痕迹，
+说明它只活在**当时那个运行中的 Pylance 会话**内存里。
+
+**教训（接 ㉒ 坑 #1）**：那条"`editor` 假成功"不只是脏文件问题 ——
+**它还会在 IDE 里留下指向不存在文件的告警**。以后看到"某文件某行未定义 X"，
+先 `ls` 那个路径、再 `grep` 真实文件，**别直接照报错改代码**。
+
 ## 待办 / 下一步
 
 按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools"三项已移除）：
@@ -942,6 +976,8 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 - ⚠️ **`editor` 工具超长替换会"假成功"**：实测一次 ~5900 字符的替换返回"File created successfully"，
   却在**仓库根**留下一个野生 `cli.py`（目标文件只改了一半）。**收尾时务必 `git status` 扫一眼有没有
   莫名其妙的新文件**，大改动要拆小块并 `grep` 确认落地。
+  （㉔ 补充：野文件删了之后，**IDE 里它的告警还在飘** —— `cli.py:24 未定义 Optional` 就是这么来的，
+  代码没坏，别照它改代码。）
 - **子包的文件行数不进 `check_doc_numbers.py`**：名字会跟包根撞车（都有 `__init__.py`）。
   所以 README 的子包条目只写职责、不写行数；行数记在 `techContext.md`。
 - **测试替身必须复刻真函数的语义**：`cli._prompt_line` 的"空输入 = 用默认值"被替身漏掉后，
