@@ -1128,6 +1128,10 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 
 ## 已知会话级注意事项
 
+- **数字的权威快照在 `memory-bank/README.md`**：「本目录现状」记着最近一次**全量复核**的实测值
+  （**727** 项测试 / **41** 个 `.py` / **59** 个跟踪文件 / 注释缺口 **3819** / `tools/` **9** 个脚本）。
+  写任何数字前先看那里，或直接重跑 `tools/check_doc_numbers.py` 与 `tools/check_comments.py` ——
+  别凭记忆写"大概"。
 - **维护协议在 `.clinerules/memory-bank.md`**（对每次会话自动生效）：读取顺序、何时更新哪个
   文件、写作纪律、项目硬性约束都在那里。要调整协议只改那一个文件，别在 `memory-bank/` 里重复。
 - **不要用 `read_files` 读刚改过的同一段**：本会话中该工具多次返回
