@@ -1282,3 +1282,10 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 - **给 `daily_open` 钉时间的测试要避开节日**：现在有「节日读者」成就，`2026-01-01` 这种"看起来中立"
   的日期会让它意外解锁。固定时刻用 `2026-01-15 12:00` 这类既不在 05:00-07:00、也不在
   `achievements.HOLIDAYS` / `LUNAR_HOLIDAYS` 里的时间。
+- ⚠️ **推送依赖那台代理（`http://127.0.0.1:7897`）**（2026-09-23 会话末尾实测）：
+  代理没开时 `git push` 立刻报 `Failed to connect to 127.0.0.1 port 7897`，
+  而"绕过代理"的 `git -c http.proxy= push` **会挂在直连上**（实测挂了几分钟没结果，
+  只能 `pkill git-remote-https`）—— 直连 GitHub 在这台机器上是不通的，
+  所以**别把"绕过代理"当成万能解**。判据：先
+  `curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x http://127.0.0.1:7897 https://github.com`，
+  200 才推得动；两个提交留在本地也不影响任何验证（测试/pyright/工具全离线可跑）。
