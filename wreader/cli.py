@@ -5,8 +5,8 @@ declared in :func:`build_parser` and wired to a handler function through
 ``_HANDLERS``.
 
 Every command is wired up: ``import``, ``list``, ``search``, ``read``,
-``continue``, ``translate``, ``vocab``, ``stats``, ``achievements`` and
-``config``.
+``continue``, ``translate``, ``vocab``, ``stats``, ``achievements``, ``config``
+and ``toc``.
 """
 
 # 延迟求值类型注解，避免运行时解析注解带来的开销和顺序问题
@@ -194,6 +194,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--reset",
         action="store_true",
         help="restore every setting to its default",
+    )
+
+    # werd toc <book_id>：查看某本书的目录（章节表）
+    toc_parser = subparsers.add_parser(
+        "toc", help="show a book's table of contents (chapters)",
+    )
+    # 位置参数 book_id：看哪本书的目录
+    toc_parser.add_argument("book_id", help="id of the book")
+    # --rebuild：忽略缓存，重新解析正文并覆写缓存
+    toc_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="re-parse the book text and rewrite the cache",
     )
 
     # 把组装好的解析器交还给调用方
@@ -465,6 +478,51 @@ def cmd_continue(args: argparse.Namespace) -> int:
         return 0
     # 复用书库表格：id 列直接摆出来，抄给 werd read 就能接着读
     console.print(_book_table("最近在读 (recent)", books))
+    return 0
+
+
+def cmd_toc(args: argparse.Namespace) -> int:
+    """Handle ``werd toc <book_id>`` -- print or rebuild a book's table of contents.
+
+    The cache is reused while it is still fresh (``--rebuild`` forces a re-parse),
+    so listing the chapters of a big book is instant after the first time.
+    """
+    # 延迟导入 toc：不用这个命令时就不加载
+    from . import toc
+
+    # 按 id 找书
+    book = library.get_book(args.book_id)
+    # 查不到就报错退出
+    if book is None:
+        return _fail("unknown book id: {}".format(args.book_id))
+    # 读目录（--rebuild 会忽略缓存重新解析）
+    entries = toc.load_toc(args.book_id, book, rebuild=args.rebuild)
+    # 一个字都没识别出来：给个温和提示，退出码仍是 0
+    if not entries:
+        console.print(
+            "没有识别出章节 —— 可用 [bold]werd config toc.patterns[/bold] 加自定义正则"
+        )
+        return 0
+    # 四列：序号 / 章节名 / 起始行（按 1 起始显示）/ 进度百分比
+    table = Table(
+        title="{} · {} chapter(s)".format(book.get("title") or args.book_id, len(entries)),
+        title_justify="left",
+    )
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("chapter")
+    table.add_column("line", justify="right", style="dim")
+    table.add_column("%", justify="right", style="dim")
+    # 从 1 开始编号；行号也按"给人看的 1 起始"显示
+    for position, entry in enumerate(entries, start=1):
+        table.add_row(
+            str(position),
+            str(entry.get("title") or ""),
+            str(int(entry.get("line") or 0) + 1),
+            "{:.1f}".format(float(entry.get("percentage") or 0.0)),
+        )
+    console.print(table)
+    # 顺带告诉用户缓存文件在哪，方便手动清理
+    console.print("[dim]cache: {}[/dim]".format(toc.toc_cache_path(args.book_id)))
     return 0
 
 
@@ -998,6 +1056,7 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "stats": cmd_stats,
     "achievements": cmd_achievements,
     "config": cmd_config,
+    "toc": cmd_toc,
 }
 
 

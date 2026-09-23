@@ -29,16 +29,17 @@
 其余模块都是**纯函数 + 普通数据**，不依赖终端、不依赖全局状态（除 `translator` 的
 可注入后端与 `config` 的带戳缓存）。这让分页数学、章节边界、统计指标、成就条件都能脱离 TTY 测试。
 
-## 模块职责与规模（2026-09-22 实测）
+## 模块职责与规模（2026-09-23 实测）
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 18 | `__version__`、模块地图 | `["__version__"]` |
-| `wreader/cli.py` | 1028 | argparse 定义 + 10 个子命令处理函数 | `["build_parser", "main"]` |
-| `wreader/config.py` | 989 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
-| `wreader/library.py` | 1099 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读 | **无 `__all__`** |
-| `wreader/reader.py` | 2287 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸 | 11 个（`Pager`/`open_reader`…） |
+| `wreader/cli.py` | 1087 | argparse 定义 + 11 个子命令处理函数（含 `toc`） | `["build_parser", "main"]` |
+| `wreader/config.py` | 993 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁 | 30+ 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
+| `wreader/library.py` | 1159 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读 | **无 `__all__`** |
+| `wreader/reader.py` | 2517 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层 | 11 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 849 | 指标、热力图、连续天数、成就判定与庆祝动画 | 28 个 |
+| `wreader/toc.py` | 474 | 目录：章节提取、epub nav/ncx 解析、百分比、可重建缓存 | 10 个 |
 | `wreader/translator.py` | 1305 | Google/DeepSeek 后端 + 章节缓存 + 语言规范化 | 25 个 |
 | `wreader/vocab.py` | 436 | 生词本增删查、复习、Anki 导出 | 14 个（含逐项中文注释） |
 | `wreader/data/achievements.json` | — | 10 个成就定义（可被 `$WREADER_HOME` 覆盖） | — |
@@ -108,6 +109,8 @@
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` + `bump_translations` → `save_library` |
 | 成就解锁 | `_celebrate_achievements` → `stats.check_achievements` → `evaluate_condition`（表达式）→ `stats.celebrate` |
+| 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
+| 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
 
 ## 值得记住的坑（血泪）
 
@@ -154,3 +157,11 @@
     另外**窗口变宽会让折屏行变少**，旧偏移可能越界：`_walk_forward` 会把偏移夹到
     「这一行的最后一条」，`visible_rows` 还有一层「offset 一条都取不出来就退回行首」的兜底 ——
     少了这两层会画出**空白屏**。
+13. **目录浮层写到右下角会让整行消失**：面板**最后一行**必须只填 `panel - 1` 列 ——
+    `_addstr` 撞上 curses「不能写右下角」的限制后会静默 `pass`，那一行就**整行不见**。
+    非最后一行的最右列是安全的（状态栏早就在用 `room = width - 1` 规避这个）。
+14. **ncx 的 `navPoint` 是嵌套结构**：`point.iter()` 会把子 `navPoint` 的 `<text>` / `<content>`
+    也算到父节点上 → 标题重复。只取**直接子节点**（`list(point)`）。
+15. **epub 的 nav 行号只在内置提取器路径上成立**：`extract_epub_builtin` 是把各 spine 文档用 `\n`
+    拼起来的，"每份文档的起始行"可算；换成外部 `ebook-convert`，正文布局完全不同。判据是
+    「spine 布局总行数 == 正文行数」，不符就退回正则 —— 宁可标题退化，也不给错行号（错行号比没有更糟）。

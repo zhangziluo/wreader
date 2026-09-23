@@ -14,7 +14,7 @@ import curses
 # 注入固定日期/时间
 from datetime import date, datetime
 # 类型注解
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # pytest.raises / parametrize / fixture
 import pytest
@@ -44,6 +44,8 @@ class FakeStdscr:
         self.cursor_column = 0
         # 屏幕快照：二维字符数组，用来断言"画出来长什么样"
         self.screen: List[List[str]] = [[" "] * width for _ in range(height)]
+        # 需要读键的循环（目录浮层）预置的按键队列
+        self.keys: List[Any] = []
 
     # -- the window API the reader uses ---------------------------------
     def getmaxyx(self) -> Tuple[int, int]:
@@ -73,6 +75,12 @@ class FakeStdscr:
         # 记录光标位置
         self.cursor_row = row
         self.cursor_column = column
+
+    def get_wch(self) -> Any:
+        # 目录浮层会一直读键；队列空了就当 Ctrl-C，保证测试不会死循环
+        if not self.keys:
+            raise KeyboardInterrupt
+        return self.keys.pop(0)
 
     def addstr(self, *args: Any) -> None:
         # Copy into a list first: pyright narrows the ``*args`` tuple itself on the
@@ -1693,3 +1701,78 @@ def test_enable_mouse_survives_a_terminal_without_mouse_support(monkeypatch) -> 
 
 
 
+
+
+# --------------------------------------------------------------- toc overlay
+def test_toc_panel_width_reserves_room_for_the_text() -> None:
+    # 100 列的 40% 就是 40 列
+    assert reader._toc_panel_width(100) == 40
+    # 窄屏时至少给正文留 8 列，面板退到 2 列
+    assert reader._toc_panel_width(10) == 2
+
+
+def test_toc_window_keeps_the_cursor_visible() -> None:
+    # 一屏装得下：全部显示
+    assert reader._toc_window(3, 1, 5) == (0, 3)
+    # 条目多于行数：窗口跟着光标走
+    assert reader._toc_window(100, 50, 10) == (45, 55)
+    # 光标在末尾：窗口贴住右端，不越界
+    assert reader._toc_window(100, 99, 10) == (90, 100)
+    # 没有条目：空窗口
+    assert reader._toc_window(0, 0, 10) == (0, 0)
+
+
+def test_toc_move_cursor_clamps_at_both_ends() -> None:
+    # 两端都夹住
+    assert reader._toc_move_cursor(3, 0, curses.KEY_UP) == 0
+    assert reader._toc_move_cursor(3, 2, curses.KEY_DOWN) == 2
+    # 正常移动
+    assert reader._toc_move_cursor(3, 1, curses.KEY_DOWN) == 2
+    # j/k 也能移动（浮层是模态的，与翻页键不冲突）
+    assert reader._toc_move_cursor(3, 0, "j") == 1
+    # 空列表：光标恒为 0
+    assert reader._toc_move_cursor(0, 5, curses.KEY_DOWN) == 0
+
+
+# 造一份两章的目录条目（line 与 BOOK_LINES 的章节起点对齐）
+def _toc_entries() -> List[Dict[str, Any]]:
+    return [
+        {"title": "第一章 科学边界", "line": 0, "percentage": 0.0},
+        {"title": "第二章 台球", "line": 5, "percentage": 75.0},
+    ]
+
+
+def test_tab_opens_the_overlay_and_jumps_to_the_chapter(window, pager_factory) -> None:
+    pager = pager_factory(toc_entries=_toc_entries())
+    # Tab 打开浮层 -> ↓ 移到第二章 -> 回车确认
+    window.keys = [curses.KEY_DOWN, "\n"]
+    reader.handle_key(window, pager, "\t")
+    # 跳到了第二章的起始行，提示里带着章节名
+    assert pager.position == 5
+    assert "第二章 台球" in pager.current_message()
+    # 右侧面板确实画过（标题行里有"目录"）
+    assert any("目录" in text for _, _, text, _ in window.writes)
+
+
+def test_toc_overlay_can_be_cancelled(window, pager_factory) -> None:
+    pager = pager_factory(toc_entries=_toc_entries())
+    pager.move_to(3)
+    # q 关闭浮层：位置一点都没动
+    window.keys = ["q"]
+    reader.handle_key(window, pager, "\t")
+    assert pager.position == 3
+
+
+def test_toc_overlay_filter_narrows_and_jumps(window, pager_factory) -> None:
+    pager = pager_factory(toc_entries=_toc_entries())
+    # / 进入过滤 -> 输入"台球" -> 回车结束输入 -> 回车确认（过滤后只剩第二章）
+    window.keys = ["/", "台", "球", "\n", "\n"]
+    reader.handle_key(window, pager, "\t")
+    assert pager.position == 5
+
+
+def test_toc_overlay_without_chapters_reports_it(window, pager_factory) -> None:
+    # 没有章节表（toc_entries 默认空）：给一句提示，而不是弹一个空面板
+    pager = pager_factory()
+    reader.handle_key(window, pager, "\t")
+    assert "没有识别出章节" in pager.current_message()

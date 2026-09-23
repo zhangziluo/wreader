@@ -4,15 +4,16 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`545 passed`、`pyright 0 errors / 0 warnings`、
+代码库处于**干净、全绿**状态：`570 passed`、`pyright 0 errors / 0 warnings`、
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2279** 条语句上方没有紧邻注释行
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2565** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
 新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
-**CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**。
+**CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
+**目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -619,6 +620,76 @@ werd read f1ba2379642f
 | `tools/check_doc_numbers.py` | **RESULT: ALL OK** |
 | `bash -n install.sh` | 通过（仍 219 行） |
 | 残留检查 | 全仓 grep：**命令名已无 `wreader`**；剩余 `wreader` 只剩包名 / 数据目录 / 仓库名 / 许可证 / 包内文档字符串 |
+
+### ⑳ 目录（章节表）与章节跳转（2026-09-23）
+
+**用户诉求**：给 `werd` 加"目录 / 章节跳转"——TXT 用正则提取章节、EPUB 解析 `nav.xhtml` / `toc.ncx`，
+结果缓存；阅读中呼出目录浮层选章跳转；带进度百分比；源文件变了自动失效；`werd toc --rebuild` 手动重建。
+
+**先说清与现状的关系**（本功能最容易做重的地方）：项目**早就有**章节基础设施 ——
+`library.parse_chapters` 在导入时就把 `chapters[{title,line_start}]` 写进 `library.json`，
+`[` / `]` 已在翻章，跳转原语是 `Pager.move_to(line)`。所以这是"增强"而非"从零建"：
+在既有章节表之上补 **百分比 + epub 自带标题 + 独立可重建缓存 + 浮层 UI + CLI**。
+
+**新增 `wreader/toc.py`（474 行，纯函数）**：
+- `build_toc(lines, extra)`：内置 `library.is_chapter_heading` + 用户自定义正则 → `[{title,line,percentage}]`；
+  百分比复用 `library.position_percentage`（与状态栏同口径，**不另造一套算法**）。
+- `parse_nav(archive)`：EPUB3 `properties="nav"` 的 XHTML、EPUB2 由 `<spine toc>` 指向的 ncx 都认；
+  返回 `[(title, zip 内路径)]`（href 按 nav 文档所在目录解析、丢掉 `#fragment`）。
+- `_spine_layout(archive)`：镜像内置提取器的拼接方式（各 spine 文档用 `\n` 连接），给出"每份文档的起始行"。
+- `build_toc_from_epub(...)`：nav 标题 + spine 行号；**只有"spine 布局算出的总行数 == 正文行数"时才信 nav 的行号**
+  （否则说明正文来自外部 `ebook-convert`、结构不同），并额外校验行号不倒挂，任一不满足就**整体退回正则**。
+- `load_toc` / `save_toc` / `toc_cache_path`：缓存在 `~/.wreader/cache/<book_id>_toc.json`，
+  **以"转换后正文的 mtime"为唯一失效判据**；缓存坏 / 缺 / mtime 不符就重建；`source` 字段留着源 epub 路径，
+  供 `--rebuild` 再读一次 nav。
+
+**`library.py`**：新增 `epub_spine_texts(archive)`（把 `extract_epub_builtin` 的核心抽出来给 toc 复用）、
+`_epub_package_path(archive)`（从 `_epub_content_files` 里抽出的 opf 定位）、
+以及 `_cache_epub_toc(...)`——在 `import_books` 里对 `.epub` **尽力**写一次目录缓存
+（索引里只留转换后的 txt，**导入是唯一还能读到 nav 的时刻**）；整段 try/except 兜住，绝不拖垮导入。
+
+**`reader.py`**：`Pager` 新增 `toc` 字段（`open_reader` 用 `toc.load_toc` 备好后传入）；
+新增 `_toc_overlay()` 模态小循环 + `_draw_toc` / `_draw_toc_panel`（右侧 40% 面板、左侧正文 `A_DIM` 变暗）+
+`_toc_window` / `_toc_move_cursor` / `_toc_panel_width`（纯函数，可单测）；
+`handle_key` 绑定 **`Tab`** → `_jump_via_toc`。
+⚠️ 面板文本一律走 `_clip_line` / `_pad_line`（汉字 2 列）；**最后一行只用 `panel-1` 列**，
+否则会撞 curses 的右下角限制 → 整行静默消失。
+
+**`config.py`**：新增 section `[toc]`（`patterns`，默认 `""`）→ SCHEMA **24 → 25 键**、**5 → 6 个 section**。
+自定义正则写成**单个字符串**（`|` 或换行分隔）——SCHEMA 只支持 str/int/float/bool，压成字符串最省事、也最纯文本友好。
+
+**`cli.py`**：新增 `werd toc <book_id> [--rebuild]`，用 rich 表格打印 `# / chapter / line / %`。
+
+**与规格不同的地方（用户已确认"按你的建议来"）**：
+1. `j` 已被"下一页"占用 → 目录键用 **`Tab`**。
+2. 规格里的 `advance_by_page` 不存在 → 用既有原语 `Pager.move_to(line)`。
+3. 规格写 `~/.werd` → 实际数据目录仍是 **`~/.wreader`**（与 translator 的 `<book_id>/` 缓存同目录）。
+4. 规格说"更新 last_session 的 chapter / line" → 数据模型没有 `chapter` 字段；跳转后 `current_line` 照旧落库，
+   `chapter` 永远由 `current_line` 现算（`chapter_index_at`），**刻意不加持久化字段**（守住"行号坐标唯一"）。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest` | **570 passed**（原 545 + `test_toc` 18 + `test_reader` 新增 7） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` | **RESULT: OK** |
+| `tools/check_doc_numbers.py` | **RESULT: ALL OK**（两份 README 的行数 / 测试数已同步，含新增的 `toc.py`、`test_toc.py`） |
+| `tools/verify_wrap.py` | `OK: 40077 checks passed` |
+| `tools/verify_draw.py` | `OK: 420 draw checks passed` |
+| `tools/verify_mouse.py` | `RESULT: 全部通过`（8 项） |
+| 端到端（320 章 TXT 沙箱） | 导入即识别 **320 章**；`toc.load_toc` 320 条（首条 line 0 / 0.1%，末条 line 957 / 99.8%）；缓存带 mtime 戳；`werd toc <id>` rc 0 打出表格；`--rebuild` rc 0；未知 id rc 1 |
+
+**踩到的坑**：
+1. `parse_nav` 里 `navPoint` 是**嵌套**的：`point.iter()` 会把子节点的 `<text>` / `<content>` 也算到父节点上 →
+   必须只看**直接子节点**（`list(point)`），否则标题重复。
+2. pyright：从 `isinstance(x, dict)` 收窄出的 `dict[Unknown, Unknown]`，`get()` 返回 `Unknown | None`，
+   直接 `int(...)` 会报 `reportArgumentType`；先赋给 `Dict[str, Any]` 变量再取值即可。
+3. `test_schema_has_a_default_for_every_path` 写死了 SCHEMA 键数（24）→ 加 `toc.patterns` 后必须同步改成 25。
+   这是**故意**的守卫：动配置键就得动这个断言，免得文档悄悄漂移。
+4. `FakeStdscr`（在 `tests/test_reader.py` 里，不在 conftest）原本没有 `get_wch`：
+   给浮层的"按键脚本"测试补了一个**预置按键队列**的 `get_wch`，队列空时抛 `KeyboardInterrupt`，
+   保证测试**永不**卡在浮层的阻塞读里（否则会挂死）。
 
 ## 待办 / 下一步
 

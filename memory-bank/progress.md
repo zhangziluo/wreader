@@ -7,13 +7,13 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **545 passed**，全离线、不碰真实数据，约 3~25 秒 |
+| 测试 | **570 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2279** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2565** 条语句上方没有紧邻注释行（口径与处置见待办 #4；注释密度反而略升：2279/12491 ≈ 0.182 → 2565/15414 ≈ 0.166） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**41 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**43 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 **23 个** .py 通过（wreader 8 + tests 8 + tools 7） |
+| 编译 | `py_compile` 全部 **25 个** .py 通过（wreader 9 + tests 9 + tools 7） |
 | 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过 |
 
 ## 已完成（可用的功能）
@@ -30,6 +30,14 @@
   表格复用 `_book_table`（带 id），把 id 抄给 `werd read` 就能续读；一本都没读过时给提示并返回 `0`。
   纯函数在 `library.recent_books(limit=3)`：跳过 `last_read` 为空的书，时间戳是定长 ISO 字符串，
   所以直接按字典序倒排（不解析 datetime）。
+
+### 目录 / 章节跳转（2026-09-23 新增）
+- `wreader/toc.py`：章节提取（内置正则 + `toc.patterns` 自定义）、epub `nav.xhtml` / `toc.ncx` 解析、
+  百分比、可重建缓存（`~/.wreader/cache/<book_id>_toc.json`，按转换后正文的 mtime 失效）。
+- 阅读器按 `Tab` 呼出**目录浮层**（右侧 40%、左侧正文变暗）：`↑↓` / `j` / `k` 选章、`回车` 跳转、
+  `/` 实时过滤、`q` / `Esc` 关闭。
+- `werd toc <book_id> [--rebuild]`：命令行查看 / 强制重建目录。
+- 跳转仍走 `Pager.move_to(line)`（与 `g` / 搜索 / `[` `]` 同一套行号坐标）。
 
 ### 阅读器（curses）
 - 三种视图：中文 / 英文 / 双语对照（`l` 循环、`c` 直达中文）；切视图时按需翻译，原文语言零成本。
@@ -178,3 +186,4 @@
 | **2026-09-22** | 新增 `werd continue` 列"最近打开阅读的三本书" | 用户诉求是「重启之后一到两行就能开 werd 看书」：原先必须 `werd list` 找 id 再 `werd read`。`progress.last_read` 其实**早就在退出阅读器时写好了**，缺的只是一个入口。**故意只"列 id"、不自动打开第一本** —— 最近读的不一定是此刻想读的，程序不该替用户猜；而且"列 id + 抄 id"正好就是用户要的「一到两行」 |
 | **2026-09-22** | 新增 `./install.sh`，把安装压成「三行命令」（clone → cd → install.sh） | 用户诉求：简化安装流程。原先要 `venv` → `activate` → `pip install -e .` 三步，且"重启后能用 werd"还得**另外**配别名（散在两节文档里）。脚本把这些串成**一条幂等命令**。别名写入做成**自动但可跳过**（`--no-alias`），而不是不做 —— 用户明确选了"自动写入、装完重启即可用"；同时保留"手动安装"作为 Windows / 脚本跑不动时的退路 |
 | **2026-09-23** | CLI 命令改名 `wreader` → `werd`（`pyproject.toml` 的 console script + `cli.py` 的 `prog` + `install.sh` 的别名与路径 + 全部文档示例）；**包名 / 仓库名 / 数据目录仍叫 `wreader`** | 用户诉求：命令行太长不好敲。刻意把"命令名"与"包名 / 数据目录"分开 —— 数据目录 `~/.wreader`、环境变量 `WREADER_HOME`、`python -m wreader.cli`、`from wreader import` 一律不动，换来的好处是**零数据迁移**、旧配置与既有测试照常可用；真正变的只有用户敲的那个词 |
+| **2026-09-23** | 新增目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`；缓存放 `~/.wreader/cache/<book_id>_toc.json` | 用户诉求是"目录/章节跳转 + 进度百分比 + 缓存 + 源文件变了失效"。**没有从零造章节系统** —— 章节表导入时早就有（`library.parse_chapters`），跳转原语也是现成的（`Pager.move_to`），所以只补了"百分比 + epub nav 标题 + 可重建缓存 + UI + CLI"。**目录键用 `Tab` 而不是规格里的 `j`**：`j` 已是"下一页"，占用它会毁掉翻页。**epub nav 的行号只在内置提取器路径上可信**（用"spine 布局总行数 == 正文行数"当判据），外部 `ebook-convert` 产出的正文一律退回正则 —— 宁可标题退化，也不给错行号。百分比复用 `library.position_percentage`，**不另造一套**，否则目录与状态栏会互相打脸 |

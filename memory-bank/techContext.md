@@ -65,11 +65,12 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 | 书库索引 | `~/.wreader/library.json` | `$WREADER_HOME` |
 | 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
 | 译文缓存 | `~/.wreader/cache/<book_id>/ch{N}_en.txt`、`ch{N}_bilingual.txt` | `translator.cache_dir` |
+| 目录缓存 | `~/.wreader/cache/<book_id>_toc.json`（随正文 mtime 自动失效，可随时删） | 同 `translator.cache_dir` |
 | 正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
-## settings.toml 的 5 个 section（共 24 个键）
+## settings.toml 的 6 个 section（共 25 个键）
 
 | section | 键 |
 | --- | --- |
@@ -78,14 +79,15 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true |
 | `vocab` | `highlight_in_reader`=true、`auto_add_on_mark`=true |
 | `library` | `novels_dir`（留空 = `~/novels`） |
+| `toc` | `patterns`（**追加**的章节标题正则，多个用 `\|` 分隔；内置规则始终生效） |
 
 ## 仓库顶层结构（非包内容）
 
 | 路径 | 说明 |
 | --- | --- |
-| `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
+| `wreader/` | 包本体（9 个模块 + `data/achievements.json`） |
 | `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
-| `tests/` | 8 个测试文件（含 `conftest.py`），545 项 |
+| `tests/` | 9 个测试文件（含 `conftest.py`），570 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -121,6 +123,7 @@ werd vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page N]
 werd stats [--json]
 werd achievements
 werd config [<section.key> [value]] [--path] [--reset]
+werd toc <book_id> [--rebuild]  # 查看目录（章节表）；--rebuild 强制重解析并覆写缓存
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
 git status                                    # 动手前先看工作区是否干净
@@ -168,21 +171,22 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 测试纪律：**绝不联网、绝不碰真实数据、不需要终端**。唯一"注定失败"的路径是
 `open_reader` 的 tty 检查，正好拿来断言那条报错。
 
-## 当前测试规模（2026-09-22 实测）
+## 当前测试规模（2026-09-23 实测）
 
 | 文件 | 项数 |
 | --- | --- |
 | `tests/test_cli.py` | 35 |
 | `tests/test_config.py` | 51 |
 | `tests/test_library.py` | 119 |
-| `tests/test_reader.py` | **159** |
+| `tests/test_reader.py` | **166** |
 | `tests/test_stats.py` | 76 |
+| `tests/test_toc.py` | 18 |
 | `tests/test_translator.py` | 74 |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **545** |
+| **合计** | **570** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 新增 `werd continue`，
-> 行数、测试总数 **545**、`test_reader.py` **159**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 新增目录 / 章节跳转，
+> 行数、测试总数 **570**、`test_reader.py` **166**、新文件 `test_toc.py` **18**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 
 ## 样例数据

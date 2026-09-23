@@ -27,7 +27,8 @@ view          what is drawn
 
 ``t`` translates only what is on screen and deliberately never caches it; ``T``
 translates the whole chapter and caches it in ``~/.wreader/cache/<book>/``; ``v`` looks
-up a single word and offers to file it in :mod:`wreader.vocab`.
+up a single word and offers to file it in :mod:`wreader.vocab`.  ``Tab`` opens the
+table of contents overlay (see :mod:`wreader.toc`) and jumps to the chapter picked there.
 
 Settings
 --------
@@ -69,8 +70,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、书库、统计成就、翻译、生词本
-from . import config, library, stats, translator, vocab
+# 同包引用：配置、书库、统计成就、目录、翻译、生词本
+from . import config, library, stats, toc, translator, vocab
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
@@ -163,7 +164,14 @@ _SEARCH_PROMPT = "搜索: "
 _WORD_PROMPT = "生词: "
 
 # 底部常驻的快捷键提示
-_HINT = "q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文"
+_HINT = "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文"
+
+# 目录浮层占屏幕宽度的比例（靠右显示），其余留给正文
+_TOC_WIDTH_RATIO = 0.4
+# 目录浮层底部的快捷键提示
+_TOC_HINT = "↑↓ 选择  Enter 跳转  / 过滤  q/Esc 关闭"
+# Tab 键：get_wch 多数情况返回 "\t"，个别终端上报 KEY_TAB
+_TAB_KEYS = ("\t", int(getattr(curses, "KEY_TAB", 9)))
 # 抓拉丁单词（长度至少 3）用于"查词时默认选中的词"
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]{2,}")
 
@@ -485,6 +493,8 @@ class Pager:
         highlight_vocab: bool = True,
         # 查词后是否自动入库
         auto_add_on_mark: bool = True,
+        # 目录条目（章节表 + 百分比），供 Tab 浮层使用
+        toc_entries: Sequence[Dict[str, Any]] = (),
     ) -> None:
         # 拷贝成列表，避免外部改动影响内部状态
         self.lines = list(lines)
@@ -538,6 +548,9 @@ class Pager:
         #: file a looked up word without asking (``vocab.auto_add_on_mark``)
         # 查词后是否免确认直接入库
         self.auto_add_on_mark = bool(auto_add_on_mark)
+        #: the table of contents: ``[{"title", "line", "percentage"}, ...]``
+        # 目录条目（由 toc.load_toc 备好），Tab 浮层直接读它
+        self.toc = [dict(entry) for entry in toc_entries]
         #: chapters already translated or cached on demand this session
         # 本次会话已尝试过自动翻译的章节（每章最多一次）
         self.auto_translated: Set[int] = set()
@@ -1614,6 +1627,216 @@ def _search(stdscr: Any, pager: Pager) -> None:
         pager.say("没有找到「{}」".format(needle))
 
 
+def _toc_panel_width(width: int) -> int:
+    """Return how many columns the table-of-contents panel takes."""
+    # 目标：屏幕宽度的 40%
+    panel = int(round(width * _TOC_WIDTH_RATIO))
+    # 至少给正文留 8 列：窄终端上别让浮层把正文挤没
+    return max(1, min(panel, max(1, width - 8)))
+
+
+def _toc_window(count: int, cursor: int, rows: int) -> Tuple[int, int]:
+    """Return the ``(first, last)`` entry indices the *rows* rows can show.
+
+    The cursor stays inside the window and the window sticks to either end
+    instead of scrolling past them.
+    """
+    # 没有条目、或一行都放不下：空窗口
+    if count <= 0 or rows <= 0:
+        return 0, 0
+    # 一屏就装得下全部：全都显示
+    if count <= rows:
+        return 0, count
+    # 尽量让光标落在窗口中段，滚到两端时窗口贴住边界
+    first = min(max(0, cursor - rows // 2), count - rows)
+    return first, first + rows
+
+
+def _toc_move_cursor(count: int, cursor: int, key: Any) -> int:
+    """Return the new cursor index for *key*, clamped to the entry list."""
+    # 没有条目：光标恒为 0
+    if count <= 0:
+        return 0
+    if key in (curses.KEY_UP, "k"):
+        cursor -= 1
+    elif key in (curses.KEY_DOWN, "j"):
+        cursor += 1
+    elif key == curses.KEY_PPAGE:
+        cursor -= 10
+    elif key == curses.KEY_NPAGE:
+        cursor += 10
+    elif key == curses.KEY_HOME:
+        cursor = 0
+    elif key == curses.KEY_END:
+        cursor = count - 1
+    # 夹进合法范围，光标永远指向真实条目
+    return max(0, min(cursor, count - 1))
+
+
+def _draw_toc_panel(
+    stdscr: Any,
+    pager: Pager,
+    entries: Sequence[Dict[str, Any]],
+    indices: Sequence[int],
+    cursor: int,
+    filter_text: str,
+    typing: bool,
+    height: int,
+    width: int,
+    panel: int,
+) -> None:
+    """Paint the chapter list into the right hand panel."""
+    # 面板最左边的列号
+    left = max(0, width - panel)
+    # 最后一行留出最后一列：curses 写不了右下角那个格子
+    last_room = max(1, panel - 1)
+    # 标题行："当前第几 / 共几条"（过滤后是过滤结果数）
+    heading = "目录  {}/{}".format(cursor + 1, len(indices)) if indices else "目录  0/0"
+    _addstr(stdscr, 0, left, _pad_line(heading, panel), curses.A_REVERSE)
+    # 条目列表能用的行数：扣掉标题行、过滤行、提示行
+    list_rows = max(1, height - 3)
+    first, last = _toc_window(len(indices), cursor, list_rows)
+    # 正在读的那一章（用来加粗标记）
+    current = pager.current_chapter()
+    for offset, position in enumerate(range(first, last)):
+        entry = entries[indices[position]]
+        # 百分比右对齐 + 标题；按显示列数裁剪（汉字占 2 列）
+        label = "{:>5.1f}%  {}".format(
+            float(entry.get("percentage") or 0.0), str(entry.get("title") or "")
+        )
+        attr = curses.A_NORMAL
+        # 光标所在行反白
+        if position == cursor:
+            attr = curses.A_REVERSE
+        # 其它行里"当前章节"加粗，一眼看出读到哪
+        elif indices[position] == current:
+            attr = curses.A_BOLD
+        _addstr(stdscr, 1 + offset, left, _pad_line(label, panel), attr)
+    # 过滤行：输入态反白并带光标符号，普通态暗色
+    prompt = "过滤: {}{}".format(filter_text, "_" if typing else "")
+    _addstr(
+        stdscr,
+        height - 2,
+        left,
+        _pad_line(prompt, panel),
+        curses.A_REVERSE if typing else curses.A_DIM,
+    )
+    # 最后一行是快捷键提示（用 last_room 留出右下角那一格）
+    _addstr(stdscr, height - 1, left, _pad_line(_TOC_HINT, last_room), curses.A_DIM)
+
+
+def _draw_toc(
+    stdscr: Any,
+    pager: Pager,
+    entries: Sequence[Dict[str, Any]],
+    indices: Sequence[int],
+    cursor: int,
+    filter_text: str,
+    typing: bool,
+) -> None:
+    """Repaint one frame: text dimmed on the left, chapter list on the right."""
+    # 终端尺寸
+    height, width = stdscr.getmaxyx()
+    # 正文区行数（扣掉两行状态栏）
+    text_rows = max(1, height - _STATUS_ROWS)
+    # 右侧目录面板宽度
+    panel = _toc_panel_width(width)
+    # 左侧正文可用宽度（第 0 列是书签位，所以再减 1）
+    text_width = max(1, width - panel - 1)
+    # 清屏后先重画左侧正文
+    stdscr.erase()
+    for screen_row, (_, text) in enumerate(pager.visible_rows(text_rows, text_width)):
+        # 内容不变，只是变暗（视觉上退到背景）
+        _addstr(stdscr, screen_row, 1, _clip_line(text, text_width), curses.A_DIM)
+    # 再画右侧目录面板
+    _draw_toc_panel(
+        stdscr, pager, entries, indices, cursor, filter_text, typing, height, width, panel
+    )
+    # 提交这一帧
+    stdscr.refresh()
+
+
+def _toc_overlay(stdscr: Any, pager: Pager) -> Optional[int]:
+    """Show the table of contents; return the source line to jump to.
+
+    A modal mini loop: the reading text stays visible (dimmed) on the left while
+    the chapters are browsed on the right.  ``/`` turns the footer into a live
+    filter box, ``Enter`` picks the highlighted chapter and ``q``/``Esc`` closes
+    without moving.  ``None`` means "nothing was chosen".
+    """
+    entries = pager.toc
+    # 没识别出章节：提示一句，别弹一个空面板
+    if not entries:
+        pager.say("这本书没有识别出章节，无法打开目录")
+        return None
+    # 打开时光标停在"正在读的那一章"上
+    cursor = max(0, pager.current_chapter())
+    filter_text = ""
+    typing = False
+    # 模态：阻塞等键；退出时在 finally 里恢复主循环的 1 秒轮询
+    stdscr.timeout(-1)
+    try:
+        while True:
+            indices = toc.filter_toc(entries, filter_text)
+            # 过滤后光标可能越界：夹回来
+            cursor = max(0, min(cursor, max(0, len(indices) - 1)))
+            _draw_toc(stdscr, pager, entries, indices, cursor, filter_text, typing)
+            try:
+                # 等一个按键（模态，-1 表示一直等）
+                key = stdscr.get_wch()
+            except curses.error:
+                # 少见的瞬时错误：重画再等
+                continue
+            except KeyboardInterrupt:
+                # Ctrl-C：当作取消
+                return None
+            # ---- 过滤输入态：按键当文本编辑 ----
+            if typing:
+                if key in ("\n", "\r", curses.KEY_ENTER, 10, 13):
+                    typing = False
+                elif key == "\x1b":
+                    # Esc：清空过滤内容并退出输入态
+                    filter_text = ""
+                    typing = False
+                elif key in ("\x7f", "\b", curses.KEY_BACKSPACE, 127, 8):
+                    filter_text = filter_text[:-1]
+                elif isinstance(key, str) and key.isprintable():
+                    filter_text += key
+                continue
+            # ---- 浏览态 ----
+            if key in ("q", "Q", "\x1b"):
+                return None
+            if key == "/":
+                # 进入过滤输入态（保留已有内容，方便接着改）
+                typing = True
+                continue
+            if key in ("\n", "\r", curses.KEY_ENTER, 10, 13):
+                # 确认跳转：返回该章起始行（没有可选项就当取消）
+                if not indices:
+                    return None
+                return int(entries[indices[cursor]].get("line") or 0)
+            # 其它键当作光标移动
+            cursor = _toc_move_cursor(len(indices), cursor, key)
+    finally:
+        # 恢复主循环的轮询间隔，否则界面会卡在阻塞读上
+        stdscr.timeout(_TICK_MS)
+
+
+def _jump_via_toc(stdscr: Any, pager: Pager) -> None:
+    """``Tab``: browse the table of contents and jump to the chapter picked."""
+    # 浮层返回选中章节的起始行；取消（None）就什么都不做
+    chosen = _toc_overlay(stdscr, pager)
+    if chosen is None:
+        return
+    # 走和 g / 搜索 / 章节跳转同一套原语：回到该行行首并同步章节计时
+    pager.move_to(chosen)
+    # 提示跳到了哪一章（拿不到章节名就退化成行号）
+    title = pager.chapter_title
+    pager.say(
+        "已跳到「{}」".format(title) if title else "已跳到第 {} 行".format(chosen + 1)
+    )
+
+
 def _cycle_mode(stdscr: Any, pager: Pager) -> None:
     """``l``: cycle 中文 -> 英文 -> 双语对照, translating the screen as needed."""
     order = MODE_ORDER
@@ -1801,6 +2024,9 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     # ]：下一章
     elif key == "]":
         pager.next_chapter()
+    # Tab：呼出目录浮层，选中就跳到那一章
+    elif key in _TAB_KEYS:
+        _jump_via_toc(stdscr, pager)
     # /：搜索
     elif key == "/":
         _search(stdscr, pager)
@@ -2212,6 +2438,8 @@ def open_reader(book_id: str) -> int:
     progress = book.get("progress") or {}
     # 自动识别书的语言，决定初始视图
     language = detect_book_language(lines)
+    # 目录（章节表 + 百分比）：优先读缓存，缺失/过期则现建
+    book_toc = toc.load_toc(str(book_id), book, settings)
     # 组装 Pager：所有配置都在这里被"翻译"成运行时参数
     pager = Pager(
         lines=lines,
@@ -2244,6 +2472,8 @@ def open_reader(book_id: str) -> int:
         auto_translate_chapter=bool(translator_settings.get("auto_translate_chapter")),
         highlight_vocab=bool(vocab_settings.get("highlight_in_reader", True)),
         auto_add_on_mark=bool(vocab_settings.get("auto_add_on_mark", True)),
+        # Tab 目录浮层用的条目（带百分比）
+        toc_entries=book_toc,
     )
     # 载入生词集合，正文里会给它们加下划线
     _reload_vocab(pager)

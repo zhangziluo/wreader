@@ -728,6 +728,33 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
 
+def _epub_package_path(archive: zipfile.ZipFile) -> Optional[str]:
+    """Return the zip path of the OPF package document inside *archive*.
+
+    The reading order (and therefore the TOC) lives in the OPF, whose location is
+    announced by ``META-INF/container.xml``.  ``None`` means the caller should
+    fall back to a plain file-name sort, exactly like before.
+    """
+    # zip 里所有文件的路径
+    names = set(archive.namelist())
+    # 阅读顺序写在 META-INF/container.xml 指向的 opf 里
+    container = "META-INF/container.xml"
+    if container not in names:
+        return None
+    try:
+        root = ElementTree.fromstring(archive.read(container))
+    except (ElementTree.ParseError, KeyError):
+        # container.xml 坏了：交给调用方走兜底顺序
+        return None
+    # 遍历 XML 节点，找 <rootfile full-path="...">
+    for node in root.iter():
+        if _local_name(node.tag) == "rootfile" and node.get("full-path"):
+            candidate = node.get("full-path")
+            # 只认真实存在的 opf
+            return candidate if candidate in names else None
+    return None
+
+
 def _epub_content_files(archive: zipfile.ZipFile) -> List[str]:
     """Return the content documents of *archive*, in spine order when possible."""
     # zip 里所有文件的路径
@@ -737,23 +764,10 @@ def _epub_content_files(archive: zipfile.ZipFile) -> List[str]:
         name for name in names if name.lower().endswith((".xhtml", ".html", ".htm"))
     )
 
-    # 尝试按 epub 规范找到"阅读顺序"：先读 META-INF/container.xml 找 opf 位置
-    package_path = None
-    container = "META-INF/container.xml"
-    if container in names:
-        try:
-            container_root = ElementTree.fromstring(archive.read(container))
-        except ElementTree.ParseError:
-            # container.xml 坏了就退回文件名排序
-            container_root = None
-        if container_root is not None:
-            # 遍历 XML 节点，找 <rootfile full-path="...">
-            for node in container_root.iter():
-                if _local_name(node.tag) == "rootfile" and node.get("full-path"):
-                    package_path = node.get("full-path")
-                    break
+    # 尝试按 epub 规范找到"阅读顺序"：opf 的位置由 container.xml 指向
+    package_path = _epub_package_path(archive)
     # 没有 opf（或它不在包里）：直接用兜底顺序
-    if not package_path or package_path not in names:
+    if not package_path:
         return documents
 
     try:
@@ -819,6 +833,29 @@ def html_to_text(markup: str) -> str:
     return "\n".join(line.strip() for line in text.splitlines() if line.strip())
 
 
+def epub_spine_texts(archive: zipfile.ZipFile) -> List[Tuple[str, str]]:
+    """Return ``[(zip name, plain text), ...]`` of *archive*, in spine order.
+
+    Kept separate from :func:`extract_epub_builtin` so the table of contents can
+    rebuild the very same layout (each document's first line) without duplicating
+    the decoding rules.
+    """
+    # 结果：每个内容文档的文件名 + 它提取出的纯文本
+    documents: List[Tuple[str, str]] = []
+    for name in _epub_content_files(archive):
+        try:
+            # 按 epub 规范正文是 UTF-8；解不了就用替换字符兜住
+            markup = archive.read(name).decode("utf-8", errors="replace")
+        except KeyError:
+            # 上面列出的文件实际读不到（少见）：跳过
+            continue
+        text = html_to_text(markup)
+        # 非空才保留
+        if text:
+            documents.append((name, text))
+    return documents
+
+
 def extract_epub_builtin(source: Path) -> str:
     """Extract the text of *source* using only the standard library."""
     try:
@@ -831,21 +868,8 @@ def extract_epub_builtin(source: Path) -> str:
         ) from exc
     # with 保证 zip 句柄被关闭
     with archive:
-        # 每个 XHTML 文档提取出的纯文本
-        chunks = []
-        for name in _epub_content_files(archive):
-            try:
-                # 按 epub 规范正文是 UTF-8；解不了就用替换字符兜住
-                markup = archive.read(name).decode("utf-8", errors="replace")
-            except KeyError:
-                # 上面列出的文件实际读不到（少见）：跳过
-                continue
-            text = html_to_text(markup)
-            # 非空才保留
-            if text:
-                chunks.append(text)
-    # 各章之间用换行连接
-    return "\n".join(chunks)
+        # 各内容文档之间用换行连接，行号就是在这个拼接结果上数的
+        return "\n".join(text for _, text in epub_spine_texts(archive))
 
 
 def extract_epub(source: Path, destination: Path) -> str:
@@ -996,11 +1020,47 @@ def import_books(path: str) -> ImportResult:
         record = build_record(title, author, destination, encoding, text)
         books[book_id] = record
         result.imported.append((book_id, record))
+        # epub 的 nav/toc 只在这个时刻还拿得到（索引里只留转换后的 txt）
+        if candidate.suffix.lower() == ".epub":
+            _cache_epub_toc(book_id, candidate, destination, text)
 
     # 只要有新书入库，就把索引写回磁盘
     if result.imported:
         save_library(document)
     return result
+
+
+def _cache_epub_toc(
+    book_id: str,
+    source: Path,
+    converted: Path,
+    text: str,
+) -> None:
+    """Best-effort: cache a nav aware table of contents for one epub.
+
+    The index keeps only the converted UTF-8 text, so this is the one moment an
+    epub's own ``nav``/``toc`` documents can still be read.  Any failure here is
+    swallowed on purpose: a missing table of contents must never break an import.
+    """
+    try:
+        # 延迟导入：toc 依赖 library，模块级互相 import 会打结
+        from . import toc
+
+        # 行号与阅读器共用一套坐标（转换后的 txt 按 \n 切）
+        lines = text.split("\n")
+        # 设置里可能有自定义章节正则
+        settings = config.load_config()
+        # 转成 epub 自带的 nav/toc 标题 + 行号
+        entries = toc.build_toc_from_epub(source, lines, toc.extra_patterns(settings))
+        # 记下转换后正文的 mtime，以后正文一变就让缓存失效
+        try:
+            mtime: Optional[float] = converted.stat().st_mtime
+        except OSError:
+            mtime = None
+        toc.save_toc(book_id, entries, mtime, source=source, settings=settings)
+    except Exception:
+        # 目录只是锦上添花：解析/写盘出任何问题都直接跳过
+        return
 
 
 def _is_subsequence(needle: str, haystack: str) -> bool:

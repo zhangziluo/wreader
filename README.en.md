@@ -39,7 +39,7 @@ the next launch resumes exactly where you stopped.
 | --- | --- |
 | 📚 Import | Scans a directory recursively, accepts `.txt` / `.epub`; detects the encoding (a BOM for UTF-8/UTF-16/UTF-32 → chardet → UTF-8 → GB18030) and stores everything as UTF-8, so you never deal with encodings again |
 | 🆔 Deduplication | A book's id is the SHA-1 of its text, so importing the same book twice is a no-op instead of a second copy |
-| 🔖 Chapters | Chapter headings (`第一章`, `Chapter 1`, …) are detected at import time, which enables chapter navigation |
+| 🔖 Chapters | Chapter headings (`第一章`, `Chapter 1`, …) are detected at import time; press `Tab` while reading for a **table-of-contents overlay** (filter with `/`, jump with `Enter`), or list them with `werd toc <id>`; for epubs the book's own `nav` / `toc` titles win |
 | 🔍 Search | Fuzzy library search over title, author and tags, with subsequence matching too (`hptr` finds *Harry Potter*) |
 | 📖 Reader | A curses pager: line jumps, chapter jumps, highlighted search, bookmarks, a status bar and automatic progress saving; wraps to the terminal width (CJK counted as two columns) and follows the terminal theme / transparency |
 | 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
@@ -256,6 +256,7 @@ At a glance:
 | `werd vocab` | Vocabulary notebook: list / review / search / remove / export |
 | `werd stats` | Reading statistics and a heatmap (`--json` for scripts) |
 | `werd achievements` | Achievement list and unlock progress |
+| `werd toc <book_id>` | Show a book's table of contents (chapters + progress %); `--rebuild` re-parses it |
 | `werd config` | View or edit settings |
 
 Exit codes: `0` on success; `1` for a bad argument, nothing found (`no book matches ...`) or a translation
@@ -451,6 +452,25 @@ Settings are addressed by **dotted path** (`reader.page_height`); the flat names
 A typo produces a suggestion instead of being written to the file, and a type mismatch (say `abc` for a
 boolean) is refused with the file left untouched.
 
+### `werd toc <book_id>`
+
+```bash
+werd toc 3e027c4de949            # list the chapters, with their start line and progress %
+werd toc 3e027c4de949 --rebuild  # ignore the cache, re-parse the text and rewrite it
+```
+
+- Chapters are found by **regex on the heading** (`第一章`, `Chapter 1`, `第N节`, `卷X`, …); for epubs the
+  book's own `nav.xhtml` / `toc.ncx` titles are preferred (the regex is the fallback when no line mapping
+  is available).
+- The result is cached at `~/.wreader/cache/<book_id>_toc.json` and **rebuilt automatically whenever the
+  converted text changes** (its mtime is the stamp), so there is nothing to clean up; use `--rebuild` to
+  force it.
+- Nothing detected, or a heading style the built-ins miss (`### 楔子`)? Add a regex in `[toc]`:
+  ```bash
+  werd config toc.patterns '^### |^第.+回'
+  ```
+- `Tab` in the reader opens the very same table of contents (plus a live filter).
+
 ---
 
 ## Reader key bindings
@@ -459,7 +479,7 @@ The hint bar **at the bottom of the reader shows this list by default** (a trans
 replaces it), so there is nothing to memorise:
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文
 ```
 
 | Key | Action |
@@ -473,6 +493,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | `G` | Jump to the last line of the book |
 | `[` | Jump to the start of the previous chapter |
 | `]` | Jump to the start of the next chapter |
+| `Tab` | Open the **table-of-contents overlay** (right 40% of the screen): `↑↓` to move, `Enter` to jump, `/` to filter live, `q` / `Esc` to close; the text on the left dims but stays put |
 | `/` | Search (Chinese input works); jumps to the first hit and highlights all of them |
 | `n` | Next hit (wraps around) |
 | `b` | Toggle a bookmark on the current line; the status bar shows how many you have |
@@ -506,7 +527,7 @@ Useful details:
 
 ## Settings
 
-Everything lives in `~/.wreader/settings.toml`, split into 5 sections. Edit the file directly, or use
+Everything lives in `~/.wreader/settings.toml`, split into 6 sections. Edit the file directly, or use
 `werd config <section.key> <value>`. **Deleting any line falls back to that setting's default**, so you cannot
 really break it.
 
@@ -592,6 +613,12 @@ How the two backends differ:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `novels_dir` | `""` | Directory for the UTF-8 text; empty means `~/novels` |
+
+### `[toc]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `patterns` | `""` | **Extra** chapter-heading regexes; separate several with `\|` (the built-ins always apply), for styles like `### 楔子` |
 
 ---
 
@@ -747,23 +774,25 @@ wreader/
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
 │   ├── __init__.py          __version__ and the module map (18 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1028 lines)
-│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (989 lines)
-│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1099 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2287 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1087 lines)
+│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (993 lines)
+│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (2517 lines)
 │   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
+│   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   545 tests, all offline (see "Running the tests" below)
+└── tests/                   570 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
-    ├── test_reader.py       159 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel
+    ├── test_reader.py       166 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
     ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
+    ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
     └── test_cli.py          35 tests — argument parsing, every sub-command's output, exit codes, continue
 ```
 

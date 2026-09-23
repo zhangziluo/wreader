@@ -18,7 +18,7 @@
 | 入口 | console script `werd` → `wreader.cli:main` |
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **40 个跟踪文件**，工作区干净且与远端同步 |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **43 个跟踪文件**，工作区干净且与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求
@@ -34,6 +34,9 @@
 6. **统计与成就**：阅读时长、热力图、连续天数；`wreader/data/achievements.json` 里 10 个成就，
    条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
 7. **配置**：`~/.wreader/settings.toml`；`werd config <section.key> [value]` 读写，`--reset` 复原。
+8. **目录**：章节表由正则识别（`toc.patterns` 可加自定义正则），epub 优先用书自带的 `nav` / `toc`；
+   阅读中按 `Tab` 呼出目录浮层（`/` 过滤、回车跳转），`werd toc <id> [--rebuild]` 可查看 / 重建；
+   缓存在 `~/.wreader/cache/<book_id>_toc.json`，按正文 mtime 自动失效。
 
 ## 硬性技术约束（不要破坏）
 

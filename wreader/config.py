@@ -230,6 +230,10 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
     "library": (
         ("novels_dir", None, "留空 = ~/novels"),
     ),
+    # 目录（章节表）相关
+    "toc": (
+        ("patterns", "", "追加的章节标题正则，多个用 | 分隔"),
+    ),
 }
 
 # 默认值，按 section 嵌套：DEFAULTS["reader"]["page_height"]

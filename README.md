@@ -40,7 +40,7 @@
 | --- | --- |
 | 📚 导入 | 递归扫描目录，认 `.txt` / `.epub`；自动识别编码（BOM 认 UTF-8/UTF-16/UTF-32 → chardet → UTF-8 → GB18030），统一转成 UTF-8 存好，之后再也不碰编码问题 |
 | 🆔 去重 | 书号是正文的 SHA-1，同一本书重复导入直接跳过，不会出现两份 |
-| 🔖 章节 | 导入时自动识别章节标题（`第一章`、`Chapter 1` 等），之后可以按章跳转 |
+| 🔖 章节 | 导入时自动识别章节标题（`第一章`、`Chapter 1` 等）；阅读中按 `Tab` 呼出**目录浮层**（可搜索过滤、回车跳转），也能用 `werd toc <id>` 单独看；epub 会优先采用它自带的 `nav` / `toc` 标题 |
 | 🔍 搜索 | 模糊搜索书库：标题、作者、标签都认，还能首字母跳跃匹配（`hptr` 找得到 *Harry Potter*） |
 | 📖 阅读器 | curses 分页阅读：跳行、跳章、搜索高亮、书签、状态栏、自动保存进度；按终端宽度自动折行（汉字按 2 列算），配色跟随终端主题与透明背景 |
 | 🌍 三种视图 | `中文` / `英文` / `双语对照`，按 `l` 循环切换；本来就是中文的书看中文视图不需要翻译，离线也能读 |
@@ -248,6 +248,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `werd vocab` | 生词本：列表 / 复习 / 搜索 / 删除 / 导出 |
 | `werd stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
 | `werd achievements` | 成就清单与解锁进度 |
+| `werd toc <book_id>` | 查看某本书的目录（章节 + 进度百分比）；`--rebuild` 强制重解析 |
 | `werd config` | 查看 / 修改设置 |
 
 退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）、
@@ -426,6 +427,23 @@ error: unknown setting 'reader.pag_height' (did you mean 'reader.page_height'?)
 设置用**点分路径**（`reader.page_height`），旧版 `config.json` 里的扁平名字（`page_height`、`novels_dir`……）依然能用，会自动迁移到对应 section。
 写错名字会给出拼写建议，而不是把错键写进文件。类型不匹配（比如给布尔项写 `abc`）也会报错并保持原样。
 
+### `werd toc <book_id>`
+
+```bash
+werd toc 3e027c4de949            # 列出目录：章节名 + 起始行 + 进度百分比
+werd toc 3e027c4de949 --rebuild  # 忽略缓存，重新解析正文并覆写缓存
+```
+
+- 章节来自**正则识别标题**（`第一章`、`Chapter 1`、`第N节`、`卷X` 等内置规则）；
+  epub 会优先采用它自带的 `nav.xhtml` / `toc.ncx` 标题（拿不到行号时再退回正则）。
+- 结果缓存在 `~/.wreader/cache/<book_id>_toc.json`，**转换后正文的修改时间一变就自动重建**，
+  所以不需要手动清缓存；想立刻重建用 `--rebuild`。
+- 识别不出章节、或想认别的写法（例如 `### 楔子`），在 `settings.toml` 的 `[toc]` 里追加正则：
+  ```bash
+  werd config toc.patterns '^### |^第.+回'
+  ```
+- 阅读器里按 `Tab` 打开的目录与这里同源（多一个实时过滤）。
+
 ---
 
 ## 阅读器快捷键
@@ -433,7 +451,7 @@ error: unknown setting 'reader.pag_height' (did you mean 'reader.page_height'?)
 阅读器**底部提示栏默认就写着这排按键**（有临时消息时才临时被替换掉），所以不用背：
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 l语言 t翻屏 T翻章 c中文
 ```
 
 | 按键 | 作用 |
@@ -447,6 +465,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | `G` | 跳到全书最后一行 |
 | `[` | 跳到上一章开头 |
 | `]` | 跳到下一章开头 |
+| `Tab` | 打开**目录浮层**（屏幕右侧 40%）：`↑↓` 选章、`回车` 跳转、`/` 实时过滤、`q` / `Esc` 关闭；左侧正文变暗但内容不动 |
 | `/` | 搜索关键词（中文也能输；命中后自动跳到第一个匹配并高亮） |
 | `n` | 跳到下一个匹配（循环） |
 | `b` | 在当前行加 / 删书签，状态栏显示书签数量 |
@@ -477,7 +496,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 
 ## 设置项
 
-设置都在 `~/.wreader/settings.toml` 里，分 5 个 section。可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
+设置都在 `~/.wreader/settings.toml` 里，分 6 个 section。可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
 **删掉任意一行都会回落到默认值**，所以不用担心改坏。
 
 ### `[reader]`
@@ -558,6 +577,12 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `novels_dir` | `""` | UTF-8 正文存放目录，留空 = `~/novels` |
+
+### `[toc]`
+
+| 键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `patterns` | `""` | **追加**的章节标题正则；多个用 `\|` 分隔（内置规则始终生效），用来认 `### 楔子` 这类写法 |
 
 ---
 
@@ -712,23 +737,25 @@ wreader/
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（18 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1028 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（989 行）
-│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1099 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2287 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1087 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（993 行）
+│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（2517 行）
 │   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
+│   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   545 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   570 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
-    ├── test_reader.py       159 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮与触摸
+    ├── test_reader.py       166 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
     ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
+    ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
     └── test_cli.py          35 项 —— 参数解析、各子命令输出、退出码、continue
 ```
 
