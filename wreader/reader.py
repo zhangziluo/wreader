@@ -54,8 +54,12 @@ import curses
 import curses.textpad
 # curses.ascii：判断可打印字符、取 NL 等控制码（自定义 validator 要用）
 import curses.ascii
+# 读会话现场（JSON）与写会话现场
+import json
 # 设置 locale，让 curses 正确显示中文宽字符
 import locale
+# 写会话现场时记下进程号，方便排查谁留下的
+import os
 # 高亮生词、句子边界识别要用正则
 import re
 # 判断 stdin/stdout 是不是真实终端
@@ -74,22 +78,40 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、书库、统计成就、成就事件、目录、翻译、生词本、笔记
-from . import achievements, config, library, notes, stats, toc, translator, vocab
+# 同包引用：配置、环境探测、地理、书库、统计成就、成就事件、目录、翻译、生词本、笔记
+from . import (
+    achievements,
+    config,
+    env,
+    geo,
+    library,
+    notes,
+    stats,
+    toc,
+    translator,
+    vocab,
+)
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
     "DEFAULT_PAGE_OVERLAP",
     "DEFAULT_STATUS_FORMAT",
+    "NOTICE_SECONDS",
     "Pager",
+    "SESSION_MARKER_FILENAME",
     "STATUS_TOKENS",
+    "clear_marker",
     "format_status_bar",
+    "help_lines",
+    "marker_path",
     "open_reader",
     "read_lines",
+    "read_marker",
     "reading_streak",
     "save_position",
     "save_session",
     "status_segment",
+    "write_marker",
 ]
 
 # 状态栏占 2 行（一行信息、一行提示/消息）
@@ -170,7 +192,7 @@ _WORD_PROMPT = "生词: "
 # 底部常驻的快捷键提示
 _HINT = (
     "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 "
-    "m标记 o笔记 l语言 t翻屏 T翻章 c中文"
+    "m标记 o笔记 l语言 t翻屏 T翻章 c中文 ?帮助"
 )
 
 # 目录浮层占屏幕宽度的比例（靠右显示），其余留给正文
@@ -195,6 +217,8 @@ NOTE_MAX_CHARS = 2000
 _NOTE_QUOTE_PREFIX = "> "
 # 引用区还没有内容时显示的引导语
 _NOTE_QUOTE_EMPTY = "还没有引用：在正文里按 m 标记、y 复制"
+# 引用区里译文那一小块的引导语（与落盘 markdown 里的词完全一致）
+_NOTE_TRANSLATION_MARK = "译文："
 # Tab 键：get_wch 多数情况返回 "\t"，个别终端上报 KEY_TAB
 _TAB_KEYS = ("\t", int(getattr(curses, "KEY_TAB", 9)))
 # Esc：get_wch 一般返回 "\x1b"（字符串），个别终端上报 int 27，两种都认
@@ -211,8 +235,109 @@ _TRANSLATION_POPUP_RATIO = 0.4
 _TRANSLATION_POPUP_TICK_MS = 100
 # 弹窗最后一行的说明文字
 _TRANSLATION_POPUP_HINT = "翻译（临时，不缓存）· 任意键关闭"
+# 标记模式 t 之后弹窗的说明文字：译文属于下一条笔记，按 o 才会落盘
+_MARK_TRANSLATION_HINT = "引用与译文已备好 · 按 o 打开笔记面板写想法 · 任意键关闭"
 # 抓拉丁单词（长度至少 3）用于"查词时默认选中的词"
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]{2,}")
+
+# -- 成就的屏内通知 ---------------------------------------------------------
+# 解锁成就时在屏幕右上角闪的那块提示停留多久（秒）——规格要求 5 秒
+#: Seconds the in-screen achievement notice stays on top of the text.
+NOTICE_SECONDS = 5.0
+# 通知框里最多列几个成就名（再多就只报个数，别把正文全盖住）
+_NOTICE_MAX_ITEMS = 3
+# 通知框左边留一列空隙，右边也留一列（最后一列 curses 写不了）
+_NOTICE_PADDING = 2
+# 通知框的标题与脚注
+_NOTICE_TITLE = "🏆 成就解锁"
+_NOTICE_FOOTER = "任意键继续读 · 5 秒后自动消失"
+
+# -- 意外中断恢复 -----------------------------------------------------------
+# 阅读会话的"在场证明"：进入阅读器时写、正常退出时删。下次开书时它还在，
+# 说明上一次不是正常退出的（崩溃 / 断电 / kill），于是可以问一句要不要接着读。
+#: Marker file proving a reading session is still in progress.
+SESSION_MARKER_FILENAME = "reading_session.json"
+# 恢复提示的按钮说明（_confirm 的 hint）
+_RECOVER_HINT = "[y] 接着上次读    其他键 从头开始"
+# 恢复提示里最多显示几行正文预览
+_RECOVER_PREVIEW_LINES = 2
+
+# -- 帮助页 -----------------------------------------------------------------
+# 帮助页底部的操作提示
+_HELP_FOOTER = "↑↓/j/k 滚动  q/Esc/Enter 关闭"
+# 帮助页的正文：一行一条，`?` 打开的浮层按原样画（太宽会被裁）
+_HELP_LINES: Tuple[str, ...] = (
+    "werd 阅读器 · 快捷键一览",
+    "",
+    "【翻页】",
+    "  j / 空格 / 回车 / ↓ / PgDn   下一页",
+    "  k / ↑ / PgUp                 上一页",
+    "  滚轮 / 触摸拖动               逐行滚动（手机上就是靠它）",
+    "  g                            跳到指定行（输入行号）",
+    "  G                            跳到全书末尾",
+    "",
+    "【章节】",
+    "  [ / ]                        上一章 / 下一章",
+    "  Tab                          目录浮层（/ 过滤，回车跳转）",
+    "",
+    "【查找与标记】",
+    "  /关键词                      搜索，n 跳到下一个命中",
+    "  b                            加 / 删书签（行首的 ★）",
+    "  v                            查词并收进生词本",
+    "  m                            标记模式：h/j/k/l 选字、y 复制、t 翻译、Esc 取消",
+    "",
+    "【翻译与视图】",
+    "  l                            循环切换 中文 / 英文 / 双语对照",
+    "  c                            直接切回中文",
+    "  t                            翻译当前屏（弹窗几秒，不缓存）",
+    "  T                            翻译整章并缓存到磁盘",
+    "",
+    "【笔记】",
+    "  o                            笔记面板：Tab 切焦点、Ctrl+S 保存、Esc 关闭",
+    "  标记后按 o                   把引用（与译文）写进一条笔记",
+    "",
+    "【其它】",
+    "  ?                            本帮助页",
+    "  q / Q / Ctrl-C               退出并保存进度",
+    "  意外中断后再打开              会问要不要接着上次的位置读",
+    "",
+    "设置文件 ~/.wreader/settings.toml：werd config reader.page_height 40",
+)
+
+# -- 成就的实时记账（Phase 2）-----------------------------------------------
+# "连续翻页"认这些键：往下翻的、往上翻的、以及方向键都算一次翻页
+# （KEY_* 一定存在，不像 KEY_TAB 那样要 getattr 兜底）
+_PAGE_KEYS = (
+    "j",
+    "k",
+    " ",
+    "\n",
+    "\r",
+    curses.KEY_DOWN,
+    curses.KEY_UP,
+    curses.KEY_NPAGE,
+    curses.KEY_PPAGE,
+)
+# "方向键"只认这四个：PageUp/PageDown 是独立按键，不算怀旧路线
+_ARROW_KEYS = (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT)
+# 会打断"只用方向键读这一章"的键：别的翻页方式与跳转（上面那四个方向键不在其中）
+_ARROW_BREAKERS = (
+    "j",
+    "k",
+    " ",
+    "\n",
+    "\r",
+    "g",
+    "G",
+    "[",
+    "]",
+    "n",
+    curses.KEY_NPAGE,
+    curses.KEY_PPAGE,
+    "\t",
+)
+# 一章里至少按了几下方向键才算"用方向键读完"（否则在章界上戳一下 ↓ 就能解锁）
+_ARROW_CHAPTER_MIN_KEYS = 5
 
 # 关掉生词高亮时传给渲染器的空集合（避免每次新建）
 #: Passed to the renderer when ``vocab.highlight_in_reader`` is off.
@@ -632,6 +757,9 @@ class Pager:
         #: the text copied out of the last selection with ``y``
         # 最近一次选中并复制的文字（y 写入），面板的引用区显示它
         self.note_buffer = ""
+        #: translation staged for the next note (mark mode ``t``); ``""`` for none
+        # 已经备好的译文（标记模式 t 翻译选区后暂存），保存笔记时一起写入
+        self.note_translation = ""
         #: notes saved this session: ``[{"quote", "text", "created"}, ...]``
         # 这本书的笔记（打开时从磁盘读入，保存后追加）：与 notes.load_notes 同一形状
         self.notes: List[Dict[str, Any]] = [dict(entry) for entry in notes]
@@ -644,6 +772,49 @@ class Pager:
         #: the rows ``_draw`` actually put on screen last frame
         # 上一帧真正画出的可见行 ``[(源行号, 文本), ...]``；标记模式靠它定位与取词
         self.viewport: List[Tuple[int, str]] = []
+        # -- achievements: the reader's half of the bookkeeping (Phase 2) -----
+        #: metrics as they stood when the book was opened (``{}`` = engine unreadable)
+        # 开书那一刻的指标快照：判断"刚刚越过门槛了吗"要以它为基线
+        self.baseline: Dict[str, int] = {}
+        #: ``{metric: (required, ...)}`` parsed out of the achievement definitions
+        # 成就定义里的门槛表（指标 -> 需要达到的数）；空表 = 本次会话不做实时判定
+        self.thresholds: Dict[str, Tuple[int, ...]] = {}
+        #: ``(metric, threshold)`` pairs already reported this session
+        # 本次会话已经报过的门槛：同一条线不重复触发（也就不会重复写状态文件）
+        self.fired: List[Tuple[str, int]] = []
+        #: session counters reported to the engine as *deltas*
+        # 本次会话累计的增量指标（方向键读完的章数、翻译次数、窄屏秒数……）
+        # 类型是 float：窄屏秒数要按小数累积，报给引擎时才截断成整数
+        self.key_counters: Dict[str, float] = {
+            name: 0.0 for name in achievements.COUNTER_METRICS
+        }
+        #: what those counters were at the last report (never cleared on its own)
+        # 上次汇报时的取值：只有真的发出去了才推进，没撞门槛的增量不会丢
+        self.reported: Dict[str, int] = {name: 0 for name in achievements.COUNTER_METRICS}
+        #: session peaks reported to the engine as *maxima*
+        # 本次会话的峰值指标（最长的空格连击、最长的一次连续翻页）
+        self.key_maxima: Dict[str, int] = {name: 0 for name in achievements.MAX_METRICS}
+        #: the runs currently being counted (a different key resets them)
+        # 正在累积的两个连击长度（换了别的键就断）
+        self.space_run = 0
+        self.page_run = 0
+        #: one chapter's "purity" for 方向键怀旧 / 窄屏挑战
+        # 本章是否一个非方向键的翻页键都没用过、以及按了几个方向键
+        self.arrow_only = True
+        self.arrow_keys = 0
+        #: when the terminal got narrower than ``achievements.NARROW_COLUMNS``
+        # 终端进入"极限窄"（≤40 列）的时刻；None = 现在不窄（秒表停着）
+        self.narrow_started: Optional[float] = None
+        #: the terminal's real column count (``note_width``), 0 = not measured yet
+        # 终端的真实列数（与 viewport_width 不同：那个是正文区宽度，已经扣掉书签列）
+        self.terminal_width = 0
+        #: marker left by an interrupted session, when it belongs to this book
+        # 上一次"没正常退出"留下的现场（同一本书才有值，见 _offer_recovery）
+        self.resume_marker: Dict[str, Any] = {}
+        #: the in-screen notice (achievement unlocks while reading) and its deadline
+        # 屏内通知的正文与过期时刻：解锁成就时在右上角亮 5 秒，不挡任何按键
+        self.notice = ""
+        self.notice_until = 0.0
         # 临时消息及其过期时刻
         self.message = ""
         self.message_until = 0.0
@@ -1090,6 +1261,8 @@ class Pager:
             self.chapter_seconds[self._chapter_index] = (
                 self.chapter_seconds.get(self._chapter_index, 0.0) + spent
             )
+            # 换章 = 上一章读完了：方向键怀旧 / 窄屏挑战在这里结算
+            self.note_chapter_change()
         # 切到新章节，重新开始计时
         self._chapter_index = index
         self._chapter_entered = now
@@ -1137,6 +1310,154 @@ class Pager:
         if self.message and time.monotonic() < self.message_until:
             return self.message
         # 过期了：返回空串，界面会退回显示快捷键提示
+        return ""
+
+    # -- achievements: what the reader counts while you read ---------------
+    def note_key(self, key: Any) -> None:
+        """Count one key press for the 操作彩蛋 achievements.
+
+        Two different runs, both straight from the wording of the specification:
+
+        * ``space_combo`` counts **consecutive spaces** -- any other key breaks it,
+        * ``page_streak`` counts **consecutive page turns** -- opening a search box,
+          jumping to a line or leaving the page keys breaks it.
+
+        Arrow keys additionally feed ``arrow_keys`` (and leave ``arrow_only`` alone),
+        which is what 方向键怀旧 needs: a whole chapter read without j/k/space/enter.
+        """
+        # 空格连击：是空格就 +1，其它任何键都清零
+        self.space_run = self.space_run + 1 if key == " " else 0
+        # 连续翻页：翻页键都算一次，别的键清零
+        self.page_run = self.page_run + 1 if key in _PAGE_KEYS else 0
+        # 峰值只往大里记（会话中间断了也不回退，这才是"最长的一次"）
+        self.key_maxima["space_combo"] = max(self.key_maxima["space_combo"], self.space_run)
+        self.key_maxima["page_streak"] = max(self.key_maxima["page_streak"], self.page_run)
+        # 方向键：数一下，并且不打断"这一章只用方向键"
+        if key in _ARROW_KEYS:
+            self.arrow_keys += 1
+            return
+        # 别的翻页/跳转键：本章不再是"纯方向键"路线
+        if key in _ARROW_BREAKERS:
+            self.arrow_only = False
+
+    def note_chapter_change(self) -> None:
+        """Settle the chapter we just left: 方向键怀旧 and 窄屏挑战 both land here.
+
+        A chapter counts as read with arrow keys only when at least
+        ``_ARROW_CHAPTER_MIN_KEYS`` arrow presses happened inside it -- otherwise
+        tapping ↓ once across a chapter boundary would be enough.  It counts as a
+        narrow-screen read when the terminal was at most
+        ``achievements.NARROW_CHAPTER_COLUMNS`` columns wide.  Either way the per
+        chapter bookkeeping restarts for the new chapter.
+        """
+        # 方向键怀旧：本章一个别的翻页键都没按过，而且真的翻了几下
+        if self.arrow_only and self.arrow_keys >= _ARROW_CHAPTER_MIN_KEYS:
+            self.key_counters["arrow_chapters"] += 1
+        # 窄屏挑战：这一章是在窄窗口里读完的（宽度未知时不算）
+        width = self.terminal_width
+        if 0 < width <= achievements.NARROW_CHAPTER_COLUMNS:
+            self.key_counters["narrow_chapters"] += 1
+        # 新的一章重新记账
+        self.arrow_only = True
+        self.arrow_keys = 0
+
+    def note_width(self, width: int, now: Optional[float] = None) -> None:
+        """Account the time spent at terminal *width* (the 极限尺寸 stopwatch).
+
+        Only a window no wider than :data:`achievements.NARROW_COLUMNS` runs the clock,
+        and the time is booked when the width *changes* -- never per frame, so a slow
+        laptop does not spend its battery timing nothing.
+        """
+        # 单调时钟：系统改时间也不会让秒数变成负数
+        moment = time.monotonic() if now is None else float(now)
+        # 先结算上一段：还窄就继续计时，不窄就停表
+        self._close_narrow(moment, keep_going=width <= achievements.NARROW_COLUMNS)
+        # 刚进入窄窗口：从这里开始计时
+        if width <= achievements.NARROW_COLUMNS and self.narrow_started is None:
+            self.narrow_started = moment
+        # 记住终端的真实列数：窄屏挑战与事件载荷都读它
+        self.terminal_width = max(1, int(width))
+
+    def close_width_window(self, now: Optional[float] = None) -> None:
+        """Stop the narrow-window stopwatch and book what it measured (on exit)."""
+        # 会话结束：把最后这一段窄屏时间也算进去
+        self._close_narrow(time.monotonic() if now is None else float(now), keep_going=False)
+
+    def _close_narrow(self, moment: float, keep_going: bool) -> None:
+        """Book the seconds the narrow window has been open, then restart or stop it."""
+        # 秒表没走：没什么可结算的
+        if self.narrow_started is None:
+            return
+        spent = max(0.0, float(moment) - self.narrow_started)
+        self.key_counters["narrow_seconds"] += spent
+        # 还窄就从现在接着走，不窄就停表
+        self.narrow_started = moment if keep_going else None
+
+    def pending_deltas(self) -> Dict[str, int]:
+        """Return the counters that grew since the last report, as whole numbers.
+
+        Nothing is cleared here on purpose: a delta is only marked as reported once
+        the engine has actually been told about it (:meth:`commit_report`), so a
+        session that never crosses a threshold still hands its counters over at the
+        end (``session_end``) instead of losing them.
+        """
+        deltas: Dict[str, int] = {}
+        for name in achievements.COUNTER_METRICS:
+            # 浮点累积（窄屏秒数）在这里截断成整数
+            grown = int(self.key_counters.get(name, 0)) - int(self.reported.get(name, 0))
+            if grown > 0:
+                deltas[name] = grown
+        return deltas
+
+    def commit_report(self, deltas: Dict[str, int]) -> None:
+        """Remember that *deltas* have been handed to the engine."""
+        # 逐项推进"已汇报"水位（引擎那边是累加，重复发会多算）
+        for name, step in deltas.items():
+            self.reported[name] = int(self.reported.get(name, 0)) + int(step)
+
+    def current_maxima(self) -> Dict[str, int]:
+        """Return the session peaks, which the engine folds in with ``max``."""
+        # 峰值可以重复上报（引擎取 max），所以不需要"已汇报"水位
+        return {
+            name: int(self.key_maxima.get(name, 0)) for name in achievements.MAX_METRICS
+        }
+
+    def metric_values(self) -> Dict[str, int]:
+        """What each tracked metric is believed to be right now.
+
+        Baseline (read once when the book was opened) plus this session's own counting.
+        The reader deliberately does not re-read the state file mid-session: the engine
+        owns the real numbers, and the deltas it receives in the event payload are
+        exactly the ones counted here.
+        """
+        values: Dict[str, int] = {}
+        # 增量类：基线 + 本次会话累计
+        for name in achievements.COUNTER_METRICS:
+            values[name] = int(self.baseline.get(name, 0)) + int(
+                self.key_counters.get(name, 0)
+            )
+        # 峰值类：基线与会话峰值取大的那个
+        for name in achievements.MAX_METRICS:
+            values[name] = max(
+                int(self.baseline.get(name, 0)), int(self.key_maxima.get(name, 0))
+            )
+        return values
+
+    def announce(self, text: str, seconds: float = NOTICE_SECONDS) -> None:
+        """Show *text* in the corner of the screen for a few seconds.
+
+        Deliberately **not** a modal popup: the notice lives in the frame (``_draw``
+        paints it while it lasts), so nothing blocks the reading loop and no key press
+        is swallowed -- unlike the translation popup, which waits for a key.
+        """
+        self.notice = str(text)
+        self.notice_until = time.monotonic() + max(0.0, float(seconds))
+
+    def current_notice(self) -> str:
+        """The in-screen notice to paint right now, or ``""`` once it expired."""
+        # 没过期就显示；过期了返回空串，界面照常画正文
+        if self.notice and time.monotonic() < self.notice_until:
+            return self.notice
         return ""
 
 
@@ -1509,12 +1830,17 @@ def _note_status(pager: Pager) -> str:
     return "📝 {}条笔记 | 按o展开".format(len(pager.notes))
 
 
-def _message_row(pager: Pager, room: int) -> str:
+def _message_row(pager: Pager, room: int, notice: str = "") -> str:
     """The bottom row: a transient message, else hints plus the long chapter nudge.
 
     *room* counts terminal columns, not characters, so the row is measured the
-    same way the terminal draws it.
+    same way the terminal draws it.  *notice* carries the achievement notice when the
+    corner box does not fit on this terminal (see :func:`_draw`); it wins over the
+    hints and the message because an unlock is the more interesting thing to know.
     """
+    # 成就通知在窗口里画不下：这一行顶上（比快捷键提示重要）
+    if notice:
+        return _pad_line("🏆 " + notice, room)
     # 有临时消息就先显示它
     message = pager.current_message()
     if message:
@@ -1614,7 +1940,12 @@ def format_status_bar(
 
 
 def _draw_status(
-    stdscr: Any, pager: Pager, moment: datetime, height: int, width: int
+    stdscr: Any,
+    pager: Pager,
+    moment: datetime,
+    height: int,
+    width: int,
+    notice: str = "",
 ) -> None:
     """Draw the two status rows: the configured segments, then messages."""
     # 留出最后一列，避免写到右下角触发 curses 报错
@@ -1625,8 +1956,8 @@ def _draw_status(
     # 倒数第二行：信息栏（反白显示）。按显示宽度补齐到整行，免得留下上一帧的残影
     status = _pad_line(format_status_bar(pager, moment, room), room)
     _addstr(stdscr, height - 2, 0, status, curses.A_REVERSE)
-    # 最后一行：消息/快捷键提示（暗色）
-    _addstr(stdscr, height - 1, 0, _message_row(pager, room), curses.A_DIM)
+    # 最后一行：消息/快捷键提示（暗色）；成就通知放不下时由它顶上
+    _addstr(stdscr, height - 1, 0, _message_row(pager, room, notice), curses.A_DIM)
 
 
 def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
@@ -1682,9 +2013,67 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
         # 记下这条屏幕行属于哪个源行，供下一轮判断
         previous_index = index
     # 最后画状态栏两行
-    _draw_status(stdscr, pager, moment, height, width)
+    # 成就通知：能画就画在正文右上角；窗口太小就交给消息行（_message_row 顶上）
+    notice = pager.current_notice()
+    fits = bool(notice) and _notice_layout(notice, height, width) is not None
+    _draw_status(stdscr, pager, moment, height, width, notice if not fits else "")
+    if fits:
+        _draw_notice(stdscr, pager, height, width)
     # 提交这一帧
     stdscr.refresh()
+
+
+def _notice_layout(
+    text: str, height: int, width: int
+) -> Optional[Tuple[int, int, int, int]]:
+    """Return ``(rows, cols, top, left)`` for the achievement notice, or ``None``.
+
+    The box sits in the **top right corner**, three rows tall (title, names, footer) and
+    only as wide as the longest of the three lines.  ``None`` means the terminal is too
+    small to show it without covering everything -- the message row still gets the text
+    as a fallback, see :func:`_achievement_tick`.
+    """
+    # 太小就别画了（给状态栏和正文留活路）
+    if height < 6 or width < 24:
+        return None
+    widest = max(_text_width(_NOTICE_TITLE), _text_width(text), _text_width(_NOTICE_FOOTER))
+    cols = min(widest + _NOTICE_PADDING, width - 1)
+    # 窄到放不下一行字：交给消息行
+    if cols < 14:
+        return None
+    # 顶端贴边，右侧留最后一列（curses 写不了右下角）
+    return 3, cols, 0, max(0, width - cols - 1)
+
+
+def _draw_notice(stdscr: Any, pager: Pager, height: int, width: int) -> None:
+    """Paint the in-screen achievement notice while it lasts (top right corner)."""
+    text = pager.current_notice()
+    # 没有通知：什么都不画（屏幕上就只是正文）
+    if not text:
+        return
+    layout = _notice_layout(text, height, width)
+    # 放不下：不画，消息行会顶上
+    if layout is None:
+        return
+    rows, cols, top, left = layout
+    # 整块反白（连续三行，视觉上就是一块"牌子"）
+    for row in range(rows):
+        _addstr(stdscr, top + row, left, " " * cols, curses.A_REVERSE)
+    # 第一行标题、第二行成就名、第三行脚注，都按显示宽度裁到块内
+    body = max(1, cols - 1)
+    _addstr(
+        stdscr, top, left, _pad_line(_clip_line(_NOTICE_TITLE, body), cols), curses.A_BOLD
+    )
+    _addstr(
+        stdscr, top + 1, left, _pad_line(_clip_line(" " + text, body), cols), curses.A_NORMAL
+    )
+    _addstr(
+        stdscr,
+        top + 2,
+        left,
+        _pad_line(_clip_line(_NOTICE_FOOTER, body), cols),
+        curses.A_DIM,
+    )
 
 
 def _prompt(stdscr: Any, label: str, initial: str = "") -> Optional[str]:
@@ -1754,15 +2143,24 @@ def _prompt(stdscr: Any, label: str, initial: str = "") -> Optional[str]:
         stdscr.timeout(_TICK_MS)
 
 
-def _confirm(stdscr: Any, title: str, body: Sequence[str]) -> bool:
-    """Show a small centred popup and return whether the user said yes."""
+def _confirm(
+    stdscr: Any,
+    title: str,
+    body: Sequence[str],
+    hint: str = "[y] 加入生词本    其他键 取消",
+) -> bool:
+    """Show a small centred popup and return whether the user said yes.
+
+    *hint* is the last line of the box (what ``y`` and the other keys do), because the
+    same popup serves the vocabulary lookup and the crash-recovery question.
+    """
     height, width = stdscr.getmaxyx()
     # 弹窗内每行最多的显示列数
     limit = max(12, width - 6)
     # 标题 + 正文 + 空行 + 操作提示（按显示宽度裁：一个汉字占两列）
     lines = [_clip_line(line, limit) for line in [title] + list(body)]
     lines.append("")
-    lines.append("[y] 加入生词本    其他键 取消")
+    lines.append(hint)
     # 边框各占 1 行/列，所以内容区再加 2
     box_height = min(len(lines) + 2, height - 2)
     # 宽度按最宽那一行的显示列数算（用字符数算的话中文会被挤掉）
@@ -1909,13 +2307,19 @@ def _translation_popup_layout(height: int, width: int) -> Optional[Tuple[int, in
 
 
 def _show_translation_popup(
-    stdscr: Any, pager: Pager, text: str, seconds: float = TRANSLATION_POPUP_SECONDS
+    stdscr: Any,
+    pager: Pager,
+    text: str,
+    seconds: float = TRANSLATION_POPUP_SECONDS,
+    hint: str = _TRANSLATION_POPUP_HINT,
 ) -> None:
     """Show *text* in a panel at the bottom of the screen for a few seconds.
 
     Any key dismisses it early, and it disappears on its own after *seconds*, so
     the reading loop is never stuck behind it.  A screen too small for the panel
     degrades to the usual one-line message instead of drawing a squashed box.
+    *hint* is the dim line at the bottom, so the mark-mode translation can say
+    what happens to the result.
     """
     # 终端尺寸
     height, width = stdscr.getmaxyx()
@@ -1940,7 +2344,7 @@ def _show_translation_popup(
     for offset, line in enumerate(lines):
         _addstr(window, offset, 0, line, curses.A_NORMAL)
     _addstr(
-        window, rows - 1, 0, _pad_line(_TRANSLATION_POPUP_HINT, room), curses.A_DIM
+        window, rows - 1, 0, _pad_line(hint, room), curses.A_DIM
     )
     window.refresh()
     # 展示期间改成短轮询：按键能立刻关掉，时间到也能自己消失
@@ -2241,6 +2645,129 @@ def _jump_via_toc(stdscr: Any, pager: Pager) -> None:
     )
 
 
+def help_lines() -> List[str]:
+    """Return the reader's help page as plain text lines.
+
+    Kept as a function over a constant so the content can be asserted without a
+    terminal (``?`` is the only way in for the user, but a test can read it directly).
+    """
+    # 拷贝一份，调用方改坏了也影响不到模块常量
+    return list(_HELP_LINES)
+
+
+def _help_layout(
+    height: int, width: int, lines: Sequence[str]
+) -> Optional[Tuple[int, int, int, int, int]]:
+    """Return ``(rows, cols, top, left, visible)`` for the help box, or ``None``.
+
+    The box is centred, never taller/wider than the screen, and keeps one row for the
+    title and one for the footer.  ``None`` means the terminal is too small to hold a
+    readable help page at all, and the caller says so instead of drawing a mess.
+    """
+    # 没有内容，或者窗口小到放不下标题 + 1 行内容 + 脚注
+    if not lines or height < 6 or width < 20:
+        return None
+    # 最宽的一行决定盒子宽度（按显示列数算：汉字占 2 列）
+    widest = max(_text_width(line) for line in lines)
+    rows = min(len(lines) + 2, height - 2)
+    cols = min(widest + 2, width - 1)
+    # 太窄的盒子连一行都放不下：放弃
+    if rows < 4 or cols < 12:
+        return None
+    visible = rows - 2
+    # 居中（放不下时靠左上）
+    top = max(0, (height - rows) // 2)
+    left = max(0, (width - cols) // 2)
+    return rows, cols, top, left, visible
+
+
+def _draw_help(
+    stdscr: Any, lines: Sequence[str], offset: int, height: int, width: int
+) -> None:
+    """Paint the help box with *offset* as its first visible line."""
+    layout = _help_layout(height, width, lines)
+    # 放不下就不画（调用方会先检查，这里再兜一次底）
+    if layout is None:
+        return
+    rows, cols, top, left, visible = layout
+    # 先用暗色空格把这块区域盖掉（下面的正文不再露出来）
+    blank = " " * cols
+    for row in range(rows):
+        _addstr(stdscr, top + row, left, blank, curses.A_DIM)
+    # 标题行反白
+    _addstr(stdscr, top, left, _pad_line(" " + _HELP_LINES[0], cols), curses.A_REVERSE)
+    # 内容逐行画（按显示宽度裁到盒子里）
+    for step, line in enumerate(lines[offset : offset + visible]):
+        _addstr(
+            stdscr,
+            top + 1 + step,
+            left,
+            _pad_line(_clip_line(line, cols), cols),
+            curses.A_NORMAL,
+        )
+    # 脚注：还有内容没显示完就把剩余行数报出来
+    rest = len(lines) - (offset + visible)
+    hint = _HELP_FOOTER if rest <= 0 else "{}  还有 {} 行".format(_HELP_FOOTER, rest)
+    _addstr(stdscr, top + rows - 1, left, _pad_line(_clip_line(hint, cols), cols), curses.A_DIM)
+    stdscr.refresh()
+
+
+def _help_overlay(stdscr: Any, pager: Pager) -> None:
+    """``?``: the key map, in a scrollable box on top of the text.
+
+    A modal mini loop in the same style as the table of contents overlay: block on
+    keys, repaint every iteration (so a resize mid-help is picked up), and restore the
+    1 second tick in ``finally``.  Opening it is also what the 帮助迷 achievement
+    counts, and the report is best effort: a broken achievements file must never stop
+    the help page from showing.
+    """
+    lines = help_lines()
+    # 屏幕放不下就直接说一句，别弹一个空盒子
+    height, width = stdscr.getmaxyx()
+    if _help_layout(height, width, lines) is None:
+        pager.say("屏幕太小，放不下帮助页")
+        return
+    offset = 0
+    # 记一次"打开了帮助页"（帮助迷）：失败也不影响看帮助
+    _fire_event(pager, "help")
+    # 模态：阻塞等键；退出时在 finally 里恢复主循环的 1 秒轮询
+    stdscr.timeout(-1)
+    try:
+        while True:
+            # 每帧重读尺寸：用户可能一边看帮助一边把窗口拉大
+            height, width = stdscr.getmaxyx()
+            layout = _help_layout(height, width, lines)
+            # 缩到放不下了：直接关掉（比画一团乱码强）
+            if layout is None:
+                return
+            visible = layout[4]
+            # 滚动位置夹进合法范围（窗口变小后原来的 offset 可能越界）
+            offset = max(0, min(offset, max(0, len(lines) - visible)))
+            _draw_help(stdscr, lines, offset, height, width)
+            try:
+                # 等一个按键（模态，-1 表示一直等）
+                key = stdscr.get_wch()
+            except curses.error:
+                # 少见的瞬时错误：重画再等
+                continue
+            except KeyboardInterrupt:
+                # Ctrl-C：当作关闭帮助
+                return
+            # 关闭键：q / Esc / 回车 / 再按一次 ?
+            if key in ("q", "Q", "?", "\x1b", "\n", "\r", curses.KEY_ENTER, 10, 13):
+                return
+            # 往下滚
+            if key in ("j", " ", curses.KEY_DOWN, curses.KEY_NPAGE):
+                offset += 1
+                continue
+            # 往上滚
+            if key in ("k", curses.KEY_UP, curses.KEY_PPAGE):
+                offset -= 1
+    finally:
+        # 恢复主循环的轮询间隔，否则界面会卡在阻塞读上
+        stdscr.timeout(_TICK_MS)
+
+
 def _enter_mark(pager: Pager) -> None:
     """``m``: start marking from the top left of the screen.
 
@@ -2256,11 +2783,11 @@ def _enter_mark(pager: Pager) -> None:
     pager.mark_mode = True
     pager.mark_start = (0, 0)
     pager.mark_end = (0, 0)
-    pager.say("标记：h/j/k/l 或方向键选字 · y 复制 · Esc 取消")
+    pager.say("标记：h/j/k/l 或方向键选字 · y 复制 · t 翻译 · Esc 取消")
 
 
-def _handle_mark_key(pager: Pager, key: Any) -> None:
-    """Act on one key while marking: move, copy or cancel -- never scroll."""
+def _handle_mark_key(stdscr: Any, pager: Pager, key: Any) -> None:
+    """Act on one key while marking: move, copy, translate or cancel -- never scroll."""
     # Esc：取消标记，回阅读
     if key in _ESCAPE_KEYS:
         pager.mark_mode = False
@@ -2271,6 +2798,10 @@ def _handle_mark_key(pager: Pager, key: Any) -> None:
     # y：把选中的文字收进引用缓冲区，然后回阅读
     if key == "y":
         _copy_selection(pager)
+        return
+    # t：翻译选中的这一段，并把"引用 + 译文"备好（回阅读，接着按 o）
+    if key == "t":
+        _translate_mark_selection(stdscr, pager)
         return
     # h/j/k/l 或方向键：移动光标扩展选区
     if key in (
@@ -2307,6 +2838,8 @@ def _copy_selection(pager: Pager) -> None:
         return
     # 存进引用缓冲区并退出标记模式
     pager.note_buffer = text
+    # 手动复制的选区没有译文：把上一段留下的译文清掉，免得错配到这一条笔记
+    pager.note_translation = ""
     pager.mark_mode = False
     pager.mark_start = None
     pager.mark_end = None
@@ -2319,6 +2852,76 @@ def _copy_selection(pager: Pager) -> None:
         )
     else:
         pager.say("已复制 {} 字 · 按 o 打开笔记面板".format(len(text)))
+
+
+def _translate_mark_selection(stdscr: Any, pager: Pager) -> None:
+    """``t`` while marking: translate the selection and stage a note template.
+
+    This is the seam between the reader and the translation engine
+    (:mod:`wreader.translate`): the marked text becomes the quote, its machine
+    translation is kept beside it, and the editor is deliberately left blank so
+    the note ends up as 引用 + 译文 + 你自己的想法 (:func:`notes.save_note_with_translation`).
+
+    Nothing is written to disk here -- ``o`` opens the panel and ``Ctrl+S``
+    commits.  Like the screen translation (``t`` in the reading view) this is a
+    single, uncached request, so it happens on the main thread and the status row
+    says so while it runs.
+    """
+    # 引擎没配好：给可操作的提示，别让请求先失败
+    ready, reason = _translation_ready()
+    if not ready:
+        pager.say("未配置翻译引擎：运行 werd config translate（{}）".format(reason))
+        return
+    # 起点或终点缺失（理论上不会发生）：退出标记，别把用户卡在选区里
+    if pager.mark_start is None or pager.mark_end is None:
+        pager.mark_mode = False
+        return
+    # 选区文字：与 y 用的是同一套提取（超长自动截断）
+    text, truncated = _mark_selection(pager.viewport, pager.mark_start, pager.mark_end)
+    text = text.rstrip()
+    # 选中的是空白：留在标记模式等用户换一段
+    if not text:
+        pager.say("选中的是空白，换一段再按 t")
+        return
+    # 翻成"书不是的那种语言"（中文书 -> 英文，英文书 -> 中文）
+    target = mode_language(MODE_BOTH, pager.language) or pager.target_language
+    # 网络请求可能慢：先把消息亮出来，用户才知道程序没死
+    pager.say("正在翻译选中的 {} 字…".format(len(text)))
+    try:
+        # 单次翻译，不写缓存（与 t 翻屏同一口径）
+        translation = translator.translate_text(
+            text, target=target, source=pager.source_language
+        )
+    except translator.TranslationUnavailable as exc:
+        # 后端不可达：留在标记模式，选区还在，用户可以重试或者改按 y
+        pager.say("翻译不可用：{}".format(exc))
+        return
+    except translator.TranslationError as exc:
+        pager.say("翻译失败：{}".format(exc))
+        return
+    # 后端返回空串：当作没翻出来
+    if not translation.strip():
+        pager.say("这一段没有译文，仍可按 y 只存引用")
+        return
+    # 记一次翻译使用（与 t / T / v 共用一个计数器）
+    pager.translations_used += 1
+    # 把"引用 + 译文"备好：保存时会一起落盘，编辑区留给用户自己的想法
+    pager.note_buffer = text
+    pager.note_translation = translation.strip()
+    # 退出标记模式（与 y 一致：模板已经就绪，接着按 o）
+    pager.mark_mode = False
+    pager.mark_start = None
+    pager.mark_end = None
+    # 先把译文弹出来看一眼（弹窗底部换成"已备好"的提示）
+    _show_translation_popup(
+        stdscr, pager, pager.note_translation, hint=_MARK_TRANSLATION_HINT
+    )
+    # 弹窗关掉后把下一步说清楚（被截断时也要说）
+    pager.say(
+        "已备好引用与译文{} · 按 o 打开笔记面板".format(
+            "（超过 {} 已截断）".format(NOTE_MAX_CHARS) if truncated else ""
+        )
+    )
 
 
 def _note_panel_layout(height: int, width: int) -> Optional[Tuple[int, int, int]]:
@@ -2499,9 +3102,31 @@ def _commit_note(pager: Pager, text: str, editor: Any = None) -> bool:
     if not text and not pager.note_buffer:
         pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
         return False
+    # 章节名取自打开这本书时建/读的目录缓存（toc.load_toc → Pager.chapters）
+    chapter = pager.chapter_title
     try:
-        # 真正落盘：追加到 markdown 并刷新索引
-        note = notes.save_note(pager.book_id, pager.title, pager.note_buffer, text)
+        # 有译文就走"引用 + 译文 + 自己的想法"那条写入口
+        if pager.note_translation:
+            note = notes.save_note_with_translation(
+                pager.book_id,
+                pager.title,
+                pager.note_buffer,
+                pager.note_translation,
+                text,
+                chapter_name=chapter,
+                # 成就判定由阅读器自己调：它要把"刚解锁的成就"回显到状态行上
+                check_achievements=False,
+            )
+        else:
+            # 真正落盘：追加到 markdown 并刷新索引
+            note = notes.save_note(
+                pager.book_id,
+                pager.title,
+                pager.note_buffer,
+                text,
+                chapter_name=chapter,
+                check_achievements=False,
+            )
     except (notes.NotesError, OSError) as exc:
         # 写不进去（目录只读、磁盘满）：内容留在编辑区，别让用户白写一遍
         pager.say("笔记保存失败：{}".format(exc))
@@ -2516,11 +3141,36 @@ def _commit_note(pager: Pager, text: str, editor: Any = None) -> bool:
     notes.clear_draft(pager.book_id)
     # 存完清空引用（以及编辑区，如果这一条是从编辑区来的）
     pager.note_buffer = ""
+    # 译文已经写进这一条，别再粘到下一条笔记上
+    pager.note_translation = ""
     if editor is not None:
         _clear_editor(editor)
-    # 规格要求：状态栏闪现"✓ 已保存"1.5 秒
-    pager.say("✓ 已保存", _NOTE_SAVED_SECONDS)
+    # 规格要求：状态栏闪现"✓ 已保存"1.5 秒（带上章节，并报出刚解锁的成就）
+    pager.say(_note_saved_flash(chapter), _NOTE_SAVED_SECONDS)
     return True
+
+
+def _note_saved_flash(chapter: Any) -> str:
+    """The message flashed after a note lands: 已保存 + 章节 + 刚解锁的成就.
+
+    Side effect: this is where the note triggers its achievement check
+    (:func:`wreader.notes.check_note_achievements`, the ``note_add`` event).  It
+    happens **after** the note is on disk and the file lock is released, and it
+    swallows every failure inside, so a badge can never block or break a save --
+    the message is just nicer when there is one.
+    """
+    message = "✓ 已保存"
+    # 章节名：让用户看见"当前章节"真的写进笔记元数据了
+    name = str(chapter or "").strip()
+    if name:
+        message += " · {}".format(name)
+    # 笔记总数可能刚好越过"笔记达人"的门槛：解锁就把名字报出来
+    unlocked = notes.check_note_achievements()
+    if unlocked:
+        message += " · 🏆 {}".format(
+            "、".join(str(item.get("name") or item.get("id")) for item in unlocked)
+        )
+    return message
 
 
 def _save_note(pager: Pager, editor: Any) -> bool:
@@ -2655,8 +3305,13 @@ def _finish_note_panel(
         pass
 
 
-def _draw_quote(window: Any, quote: str) -> None:
-    """Paint the read only quote area: ``"> "`` plus the copied selection."""
+def _draw_quote(window: Any, quote: str, translation: str = "") -> None:
+    """Paint the read only quote area: ``"> "`` plus the copied selection.
+
+    A translation staged with mark mode ``t`` is shown right under the quote, behind
+    a ``> 译文：`` line: that is exactly what gets written into the note when the
+    panel is saved, so the reader gets to see it before committing to it.
+    """
     # 子窗口尺寸
     rows, cols = window.getmaxyx()
     # 没有引用时给一句引导语，别留一片空白
@@ -2664,6 +3319,11 @@ def _draw_quote(window: Any, quote: str) -> None:
     # 折行按显示宽度算（汉字占 2 列），并给 "> " 和最后一列各留位置
     width = max(1, cols - len(_NOTE_QUOTE_PREFIX) - 1)
     lines = _wrap_line(text, width)
+    body = str(translation or "").strip()
+    # 备好译文时接在引用下面（同一块只读区；放不下只画前几行）
+    if body:
+        lines.append(_NOTE_TRANSLATION_MARK)
+        lines.extend(_wrap_line(body, width))
     # 引用区放不下就只画前几行（Phase 1+2 不做引用区滚动）
     for offset, line in enumerate(lines[:rows]):
         _addstr(window, offset, 0, _NOTE_QUOTE_PREFIX + line, curses.A_DIM)
@@ -2697,7 +3357,7 @@ def _draw_note_panel(
     stdscr.refresh()
     # 引用区：只读灰字
     quote_win.erase()
-    _draw_quote(quote_win, pager.note_buffer)
+    _draw_quote(quote_win, pager.note_buffer, pager.note_translation)
     quote_win.refresh()
     # 编辑区的内容由 Textbox 维护，这里只把它刷到屏幕上
     edit_win.refresh()
@@ -2861,6 +3521,101 @@ def _celebrate_achievements(
     return list(newly)
 
 
+def _announce_unlocks(pager: Pager, newly: Sequence[Dict[str, Any]]) -> None:
+    """Flash the freshly unlocked achievements on the in-screen notice.
+
+    Three names at most: past that the reader is told *how many* instead, because the
+    point is to notice that something happened without losing the page you were on.
+    """
+    # 成就名（没有名字就退回 id），最多列三个
+    names = [str(item.get("name") or item.get("id")) for item in newly]
+    shown = names[:_NOTICE_MAX_ITEMS]
+    text = "、".join(shown)
+    # 更多就只报个数
+    if len(names) > len(shown):
+        text = "{} 等 {} 个".format(text, len(names))
+    pager.announce(text)
+
+
+def _fire_event(
+    pager: Pager,
+    event_type: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Send one event from inside the reader and show what it unlocked.
+
+    Returns the newly unlocked achievements, or ``None`` when the engine could not be
+    reached at all (unreadable state file, unwritable data directory) -- the caller
+    uses that to decide whether to advance its own bookkeeping.  Reading must never
+    depend on the achievements file being sane, so nothing here raises.
+    """
+    try:
+        newly = achievements.check_achievements(event_type, payload)
+    except (achievements.AchievementsError, library.LibraryError, stats.StatsError):
+        # 成就系统坏了：静默跳过，阅读继续
+        return None
+    if newly:
+        _announce_unlocks(pager, newly)
+    return newly
+
+
+def _probe_achievements(
+    pager: Pager, event_type: str, payload: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Fire one event *before* the curses loop starts (env / geo) and queue its notice.
+
+    The notice is time based and lives on the :class:`Pager`, so announcing it here is
+    enough for the first frame to draw it -- there is no stdscr yet.  Failures are
+    swallowed exactly like in :func:`_fire_event`.
+    """
+    try:
+        newly = achievements.check_achievements(event_type, payload)
+    except (achievements.AchievementsError, library.LibraryError, stats.StatsError):
+        # 成就系统坏了：环境/地理探测就当没发生
+        return []
+    # 已经有值就说明这次解锁了什么：排进屏内通知
+    if newly:
+        _announce_unlocks(pager, newly)
+    return newly
+
+
+def _achievement_tick(pager: Pager, event_type: str) -> List[Dict[str, Any]]:
+    """Report the reader's counters to the engine -- but only when it matters.
+
+    A check costs a file lock and a full state rewrite, so it must not happen on every
+    key press.  The reader keeps its own running totals (``Pager.metric_values``) and
+    compares them with the thresholds taken from the achievement definitions; only when
+    one of those lines is *just* crossed does this talk to the engine -- which is also
+    exactly the moment the reader should see the notice.  Counters that never reach a
+    threshold are handed over in one go when the session ends.
+
+    Thresholds the baseline already satisfies are marked as fired up front (see
+    ``open_reader``), so an achievement unlocked days ago never triggers a write here.
+    """
+    hits = achievements.crossed_thresholds(
+        pager.metric_values(), pager.thresholds, pager.fired
+    )
+    # 一条线都没越过：攒着，不写盘
+    if not hits:
+        return []
+    # 没报过的增量随事件一起送（峰值可以重复送，引擎取 max）
+    deltas = pager.pending_deltas()
+    payload: Dict[str, Any] = {
+        "deltas": deltas,
+        "maxima": pager.current_maxima(),
+        "width": int(pager.terminal_width or 0),
+        "height": int(pager.viewport_rows),
+    }
+    newly = _fire_event(pager, event_type, payload)
+    # 引擎这次没接住：水位与门槛都不动，下一次接着报（一条数据都不丢）
+    if newly is None:
+        return []
+    # 真的发出去了才推进水位，并记住这几条线已经触发过
+    pager.commit_report(deltas)
+    pager.fired.extend(hits)
+    return newly
+
+
 def _mark_word(stdscr: Any, pager: Pager) -> None:
     """``v``: look a word up, show its translation and offer to keep it.
 
@@ -2920,15 +3675,19 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     ``n`` follows the specification and moves to the next *search* hit, so
     chapter hopping lives on ``[`` and ``]`` instead.  ``m`` starts mark mode and
     ``o`` opens the note panel; while marking, every key goes to the selection, so
-    the screen never moves under the cursor.
+    the screen never moves under the cursor (``y`` copies it, ``t`` also translates
+    it into a note template).
     """
     # q / Q / Ctrl-C：退出（标记模式里也放行，免得用户被困在选区里出不来）
     if key in ("q", "Q", 3):
         return False
     # 标记模式：只处理选字相关的按键，翻页一律不响应
     if pager.mark_mode:
-        _handle_mark_key(pager, key)
+        _handle_mark_key(stdscr, pager, key)
         return True
+    # 数一下这个键：空格连击、连续翻页、方向键怀旧都从这里记账（标记模式里的
+    # h/j/k/l 是在挪光标而不是翻页，所以上面已经 return 掉，不算数）
+    pager.note_key(key)
     # 向下翻页：j、空格、回车、下方向键、PageDown
     if key in ("j", " ", "\n", "\r", curses.KEY_DOWN, curses.KEY_NPAGE):
         pager.next_page()
@@ -2970,9 +3729,13 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
         _cycle_mode(stdscr, pager)
     # t：翻译当前屏幕并弹窗显示几秒（临时，不缓存）
     elif key == "t":
+        # 记一次翻译键（翻译狂魔）；不管有没有配好引擎都算"按过了"
+        pager.key_counters["translate_hits"] += 1
         _translate_screen(stdscr, pager)
     # T：翻译并缓存整章
     elif key == "T":
+        # 同上：整章翻译也算一次
+        pager.key_counters["translate_hits"] += 1
         _translate_chapter(stdscr, pager)
     # c：直接切到中文视图
     elif key == "c":
@@ -2986,6 +3749,11 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     # o：展开 / 折叠笔记面板
     elif key == "o":
         _note_panel(stdscr, pager)
+    # ?：帮助页（快捷键一览；帮助迷也在这里记账）
+    elif key == "?":
+        _help_overlay(stdscr, pager)
+    # 数完了就看看有没有刚越过门槛的成就（没越过就是纯内存判断，不写盘）
+    _achievement_tick(pager, "key")
     # 每次按键后都看看要不要触发"进章自动翻译"
     _maybe_auto_translate(stdscr, pager)
     # True 表示继续阅读
@@ -3092,6 +3860,8 @@ def save_position(pager: Pager) -> bool:
     except library.LibraryError:
         # 索引写不了就当作失败（下一次自动保存再试）
         return False
+    # 顺手刷新"现场"：真崩了以后恢复的是最近一次自动保存的位置，而不是开书那一刻的
+    write_marker(pager)
     return True
 
 
@@ -3293,6 +4063,109 @@ def _mouse_event_delta(pager: Pager, drag: _DragScroll) -> int:
     return _mouse_scroll_delta(pager, int(bstate), int(y), drag)
 
 
+def marker_path() -> Path:
+    """Return the reading-session marker, ``<data dir>/reading_session.json``."""
+    # 跟数据目录走（$WREADER_HOME 一改，现场标记也跟着走）
+    return config.data_dir() / SESSION_MARKER_FILENAME
+
+
+def write_marker(pager: Pager, moment: Optional[datetime] = None) -> bool:
+    """Write the "a session is in progress" marker; ``False`` when it cannot be written.
+
+    The marker is small on purpose: the book, the line, the intra-line offset and a
+    one-line preview.  The *authoritative* position still lives in ``library.json``
+    (written by ``save_position``/``save_session``); this file only has to survive a
+    crash so the next start can ask "接不接着读？".  A torn write therefore costs the
+    question, never the position -- which is why a plain write is good enough here.
+    """
+    # 现场内容：够恢复就行（行号是唯一坐标，offset 只是显示态）
+    payload = {
+        "book_id": pager.book_id,
+        "title": pager.title,
+        "position": int(pager.position),
+        "offset": int(pager.line_offset),
+        "preview": _first_line(pager.lines[pager.position]) if pager.lines else "",
+        "started": _iso(moment or _now()),
+        "pid": os.getpid(),
+    }
+    try:
+        # 数据目录可能还没建（第一次阅读）
+        target = marker_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        # 写不了（目录只读）：放弃"防意外中断"，阅读照常
+        return False
+    return True
+
+
+def read_marker() -> Dict[str, Any]:
+    """Return the marker a previous session left behind, or ``{}``."""
+    target = marker_path()
+    # 没有现场：上一次是正常退出的（或者从没读过）
+    if not target.is_file():
+        return {}
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # 写了一半就被 kill：当作没有现场（顶多少问一次，不会丢位置）
+        return {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def clear_marker() -> None:
+    """Delete the marker: the session ended on purpose."""
+    try:
+        marker_path().unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:  # pragma: no cover - 目录只读之类
+        # 删不掉也无所谓：下次开书顶多多问一句"要不要接着读"
+        pass
+
+
+def _offer_recovery(stdscr: Any, pager: Pager, marker: Dict[str, Any]) -> bool:
+    """Ask whether to continue where the interrupted session stopped.
+
+    Only asked when the marker is left over *and* it is about the book being opened --
+    for any other book the question would be about somebody else's page, and the marker
+    is simply overwritten.  The answer is reported to the achievements engine
+    (恢复大师 / 我反悔); either way the marker is cleared by the caller, so the prompt
+    shows up exactly once per interruption.
+    """
+    # 现场里的行号也要夹进合法范围（书可能在两次阅读之间被重建过）
+    position = clamp(_as_position(marker.get("position")), pager.total)
+    offset = max(0, _as_position(marker.get("offset")))
+    # 提示内容：读到哪一行、什么时候、以及那一行长什么样
+    body = [
+        "上次读到第 {} 行 · 停在 {}".format(
+            position + 1, str(marker.get("started") or "时间不详")
+        ),
+    ]
+    preview = str(marker.get("preview") or "").strip()
+    if preview:
+        # 只显示一行预览（弹窗会自己按宽度裁）
+        body.append(preview)
+    accepted = _confirm(stdscr, "上次好像没有正常退出", body, hint=_RECOVER_HINT)
+    if accepted:
+        # 回到现场（offset 让长段落也从原来那条屏幕行接着显示）
+        pager.move_to(position, offset)
+    # 报给成就引擎：恢复成功算一次"接着读"，放弃算"我反悔"
+    _fire_event(pager, "recover", {"recovered": bool(accepted)})
+    return accepted
+
+
+def _as_position(value: Any) -> int:
+    """Coerce a marker field to a non-negative int (junk becomes 0)."""
+    try:
+        # 手改坏的现场文件不该让阅读器起不来
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _run(stdscr: Any, pager: Pager) -> None:
     """curses main loop: repaint on a tick, act on keys, never block forever."""
     # 让 curses 解析方向键等特殊键序列
@@ -3310,6 +4183,15 @@ def _run(stdscr: Any, pager: Pager) -> None:
     _disable_flow_control()
     # 触摸拖动用的状态机：记住手指上一次在哪一行
     drag = _DragScroll()
+    # 上次没正常退出、而且是同一本书：先问一句要不要接着上次读
+    if pager.resume_marker:
+        _offer_recovery(stdscr, pager, pager.resume_marker)
+        # 问过就不必再问（现场文件由 open_reader 在退出时清掉）
+        pager.resume_marker = {}
+    # 写上"我正在读这本书"的现场：正常退出会删掉它，崩溃时它会留下来
+    write_marker(pager)
+    # 先量一次终端宽度：极限尺寸的秒表从这里开始走
+    pager.note_width(stdscr.getmaxyx()[1])
     # get_wch 最多等 1 秒：这样时钟和状态栏能持续刷新
     stdscr.timeout(_TICK_MS)
     # 上次自动保存的时刻
@@ -3333,8 +4215,10 @@ def _run(stdscr: Any, pager: Pager) -> None:
         except KeyboardInterrupt:
             # Ctrl-C：退出阅读
             return
-        # 终端尺寸变化：不处理按键，直接重画
+        # 终端尺寸变化：先结算窄屏时间，再看有没有刚越过的成就门槛，然后重画
         if key == curses.KEY_RESIZE:
+            pager.note_width(stdscr.getmaxyx()[1])
+            _achievement_tick(pager, "resize")
             continue
         # 鼠标 / 触摸事件：滚轮一格滚 wheel_scroll_step 行，按住拖动按位移滚
         if key == curses.KEY_MOUSE:
@@ -3363,6 +4247,65 @@ def _prepare_terminal() -> None:
     except locale.Error:
         # locale 设置失败也不阻断（顶多是中文显示不好看）
         pass
+
+
+def _prepare_achievements(pager: Pager, document: Any) -> None:
+    """Load the thresholds and the baseline the real-time checks need.
+
+    Two reads, once per session: the numbers the conditions are written against (out of
+    the achievement definitions) and where every metric currently stands.  Both are best
+    effort -- with a broken definitions file the reader simply never fires a mid-session
+    check, and the session is still settled when it ends.
+    """
+    try:
+        # 门槛表来自定义文件（用户自己加的成就也算数）
+        pager.thresholds = achievements.metric_thresholds()
+    except stats.StatsError:
+        # 定义坏了：不做实时判定（`werd achievements` 会把原因报出来）
+        pager.thresholds = {}
+    # 基线：开书这一刻的指标快照（引擎读不出来就是空表）
+    pager.baseline = achievements.session_metrics(document=document)
+    # 基线就已经达标的线直接标成"已触发"：否则第一次按键会白写一遍状态文件
+    pager.fired = achievements.crossed_thresholds(pager.baseline, pager.thresholds)
+
+
+def _geo_cache_is_fresh(now: Optional[datetime] = None) -> bool:
+    """Whether ``geo.json`` is young enough that no lookup will be made.
+
+    Used only to decide whether to print the "正在确认位置" hint before curses takes over
+    the screen: the actual decision belongs to :func:`wreader.geo.load_location`.
+    """
+    try:
+        cached = geo.load_cached()
+    except geo.GeoError:
+        return False
+    moment = cached.get("fetched_at")
+    # 没有时间戳（文件被手改过）：当作过期，重新查
+    if not isinstance(moment, datetime):
+        return False
+    age = ((now or _now()) - moment).total_seconds()
+    return 0 <= age < geo.CACHE_SECONDS
+
+
+def _probe_geo(pager: Pager, settings: Any) -> List[Dict[str, Any]]:
+    """Report where this machine is, for the geography achievements.
+
+    Skipped entirely when ``stats.geo_lookup`` is off, and cached for an hour
+    (:data:`wreader.geo.CACHE_SECONDS`), so the lookup happens at most once an hour.
+    Because it can take a second or two the first time, a one line hint is printed
+    *before* curses takes over the screen -- silence there would look like a hang.
+    """
+    # 关了地理查询：一步网络都不发（地理成就保持锁定）
+    if not bool(settings.get("stats.geo_lookup", True)):
+        return []
+    # 真要去查了才提示（缓存还新鲜时保持安静）
+    if not _geo_cache_is_fresh():
+        console.print("[dim]正在确认所在位置（地理成就，一小时最多查一次）…[/dim]")
+    location = geo.load_location()
+    # 离线 / 接口挂了：什么都不记，阅读照常（地理成就是"锦上添花"里最花的那种）
+    if not location:
+        return []
+    return _probe_achievements(pager, "geo_change", dict(location))
 
 
 def open_reader(book_id: str) -> int:
@@ -3445,6 +4388,17 @@ def open_reader(book_id: str) -> int:
     # 载入生词集合，正文里会给它们加下划线
     _reload_vocab(pager)
 
+    # -- 成就：先备好"实时判定"要用的门槛表与基线（各读一次盘）--------------
+    _prepare_achievements(pager, document)
+    # 环境探测（云端书虫 / 穿越子系统 / 套娃终端 / 开发者模式）：纯读环境，不联网
+    _probe_achievements(pager, "env", {"flags": env.flags()})
+    # 位置探测（地理成就）：一小时最多查一次外网，关掉 stats.geo_lookup 就完全离线
+    _probe_geo(pager, settings)
+    # 上次留下的"现场"：同一本书才认（别的书的现场会被本次会话覆盖）
+    marker = read_marker()
+    if str(marker.get("book_id") or "") == str(book_id):
+        pager.resume_marker = marker
+
     # 设置 locale 后再启动 curses
     _prepare_terminal()
     started = _now()
@@ -3456,6 +4410,8 @@ def open_reader(book_id: str) -> int:
     except curses.error as exc:
         raise library.LibraryError("cannot start the pager: {}".format(exc)) from exc
     ended = _now()
+    # 停掉窄屏秒表：把最后一段"极限窄"窗口里的时间也算进成就
+    pager.close_width_window()
 
     # 本次会话时长（秒）
     seconds = max(0, int((ended - started).total_seconds()))
@@ -3468,6 +4424,8 @@ def open_reader(book_id: str) -> int:
         ended,
         record_history=bool(reader_settings.get("store_history", True)),
     )
+    # 正常退出：删掉现场标记，下次开书就不会再问"要不要接着读"
+    clear_marker()
     # 在普通终端里打印一行摘要
     console.print(
         "[dim]{} · 停在 {}/{} 行 ({:.1f}%) · 本次 {} · 书签 {} 个[/dim]".format(
@@ -3507,6 +4465,11 @@ def _session_achievements(
                 # 正文交给引擎，它自己按行号区间去重
                 "lines": pager.lines,
                 "ranges": list(pager.read_ranges),
+                # 本次会话攒下的按键/尺寸计数：没撞到门槛的那些在这里一次交账
+                "deltas": pager.pending_deltas(),
+                "maxima": pager.current_maxima(),
+                "width": int(pager.terminal_width or 0),
+                "height": int(pager.viewport_rows),
             },
         )
     except (achievements.AchievementsError, library.LibraryError, stats.StatsError) as exc:

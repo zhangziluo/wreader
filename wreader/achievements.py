@@ -33,34 +33,47 @@ import re
 import tempfile
 # 数汉字要判断东亚宽度
 import unicodedata
-# datetime：daily_open 要判断几点、是不是周末
-from datetime import datetime
+# datetime：daily_open 要判断几点、是不是周末；date：节日判定
+from datetime import date, datetime
 # 状态文件路径
 from pathlib import Path
 # 类型注解
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-# 同包引用：数据目录、书库索引（迁移用）、指标与成就定义
-from . import config, library, stats
+# 同包引用：数据目录、环境探测（前缀信号名）、地理（世仇组合）、书库索引（迁移用）、
+# 笔记（数笔记总数）、指标与成就定义
+from . import config, env, geo, library, notes, stats
 # 跨进程文件锁：与 notes.py 共用同一份实现
 from .lock import file_lock
 
 # 模块对外暴露的名字
 __all__ = [
+    "COUNTER_METRICS",
     "EARLY_END_HOUR",
     "EARLY_START_HOUR",
+    "EGG_NAMES",
     "EVENTS",
+    "HOLIDAYS",
+    "LUNAR_HOLIDAYS",
+    "MAX_METRICS",
+    "NARROW_CHAPTER_COLUMNS",
+    "NARROW_COLUMNS",
     "STATE_FILENAME",
     "AchievementsError",
     "check_achievements",
     "compute_metrics",
     "count_words",
+    "crossed_thresholds",
     "empty_state",
+    "empty_metrics",
+    "holiday_of",
     "list_achievements",
     "load_definitions",
     "load_state",
     "merge_ranges",
+    "metric_thresholds",
     "save_state",
+    "session_metrics",
     "state_path",
     "uncovered_words",
     "unlocked_ids",
@@ -78,6 +91,7 @@ EARLY_START_HOUR = 5
 EARLY_END_HOUR = 7
 
 # 事件名清单：调用方只允许用这几个名字，写错不会被静默吞掉
+#: The events every call site is allowed to report, in rough lifecycle order.
 EVENTS: Tuple[str, ...] = (
     "daily_open",
     "session_end",
@@ -86,8 +100,132 @@ EVENTS: Tuple[str, ...] = (
     "book_add",
     "book_finish",
     "word_add",
+    "note_add",
+    # Phase 2（阅读器里的实时事件）：按键计数、终端尺寸变化、帮助页、意外中断恢复
+    "key",
+    "resize",
+    "help",
+    "recover",
+    # Phase 3：环境探测、名字彩蛋、翻开成就页
+    "env",
+    "name_egg",
+    "achievements_view",
+    # check = 只做一次判定（`werd achievements` 以前用它，现在改用更具体的
+    # achievements_view；这个名字保留着，因为它是公开白名单，删掉会打断老脚本）
     "check",
 )
+
+# 阅读器可以在 "key" / "resize" / "session_end" 载荷里累加的指标（增量语义）
+#: Metrics the reader reports as *deltas* (they only ever grow).
+COUNTER_METRICS: Tuple[str, ...] = (
+    # 全程只用方向键读完的章节数（方向键怀旧）
+    "arrow_chapters",
+    # 按过多少次翻译键（翻译狂魔）
+    "translate_hits",
+    # 窄窗口（≤ NARROW_COLUMNS 列）里累计读了多少秒（极限尺寸）
+    "narrow_seconds",
+    # 窄窗口（≤ NARROW_CHAPTER_COLUMNS 列）里读完了几章（窄屏挑战）
+    "narrow_chapters",
+    # 打开过几次阅读器帮助页（帮助迷）
+    "help_opens",
+)
+
+# 阅读器上报的是**峰值**的指标（取 max，不累加）
+#: Metrics the reader reports as *maxima* (the longest run wins).
+MAX_METRICS: Tuple[str, ...] = (
+    # 最长的空格连击（手速达人）
+    "space_combo",
+    # 最长的一次连续翻页（翻页永动机）
+    "page_streak",
+)
+
+# 「极限尺寸」判定的列数上限：终端窄到这么多列才算"极限"
+#: The terminal width (columns) below which a reading session is "cramped".
+NARROW_COLUMNS = 40
+# 「窄屏挑战」判定的列数上限：比 NARROW_COLUMNS 宽松一档
+#: The terminal width (columns) below which a chapter counts as read "narrow".
+NARROW_CHAPTER_COLUMNS = 60
+
+# 状态文件 metrics 段里按**非负整数**存的指标（手改坏的值一律夹回 0）
+#: Metrics stored as non-negative ints in the state file.
+_INT_METRICS: Tuple[str, ...] = (
+    "early_open",
+    "words_read",
+    "space_combo",
+    "page_streak",
+    "arrow_chapters",
+    "translate_hits",
+    "narrow_seconds",
+    "narrow_chapters",
+    "help_opens",
+    "crash_recovers",
+    "recover_declined",
+    "achievement_views",
+)
+
+# 布尔型的指标：只关心"有没有发生过"，读回来一律夹成 0/1
+#: Metrics that are flags rather than counters.
+_FLAG_METRICS: Tuple[str, ...] = ("early_open",)
+
+# 状态文件 metrics 段里按**字符串列表**存的指标（读回来去重排序，坏项丢掉）
+#: Metrics stored as lists of strings in the state file.
+_LIST_METRICS: Tuple[str, ...] = (
+    # 打开过 werd 的日期
+    "days_opened",
+    # 在节日里打开过的日期
+    "holidays",
+    # 去过的国家代码 / 大洲名 / 命中的世仇组合
+    "countries",
+    "continents",
+    "feuds",
+    # 命中过的环境信号（cloud / wsl / tmux / editable）
+    "envs",
+    # 触发过的彩蛋名
+    "eggs",
+)
+
+# 固定日期的节日（公历 MM-DD -> 名字）：只要在这一天打开过 werd 就算"节日读者"
+#: Fixed-date holidays (Gregorian ``MM-DD``) that unlock 节日读者.
+HOLIDAYS: Dict[str, str] = {
+    "01-01": "元旦",
+    "02-14": "情人节",
+    "03-08": "妇女节",
+    "04-01": "愚人节",
+    "05-01": "劳动节",
+    "06-01": "儿童节",
+    "07-01": "建党节",
+    "08-01": "建军节",
+    "09-10": "教师节",
+    "10-01": "国庆节",
+    "12-24": "平安夜",
+    "12-25": "圣诞节",
+    "12-31": "跨年夜",
+}
+
+# 农历节日：公历日期每年不同，所以直接列官方公布的日期（2024-2030）。
+# ⚠️ 这张表刻意只到 2030：再往后得查天文台公布的历书，宁可让 2031 年之后
+# 退回 HOLIDAYS 里的公历节日，也不在这里编日期。
+#: Lunar festivals, whose Gregorian dates are listed explicitly for 2024-2030.
+LUNAR_HOLIDAYS: Dict[str, str] = {
+    "2024-02-10": "春节",
+    "2025-01-29": "春节",
+    "2026-02-17": "春节",
+    "2027-02-06": "春节",
+    "2028-01-26": "春节",
+    "2029-02-13": "春节",
+    "2030-02-03": "春节",
+    "2024-09-17": "中秋节",
+    "2025-10-06": "中秋节",
+    "2026-09-25": "中秋节",
+    "2027-09-15": "中秋节",
+    "2028-10-03": "中秋节",
+    "2029-09-22": "中秋节",
+    "2030-09-12": "中秋节",
+}
+
+# 彩蛋名字清单：`werd werd` / `werd word` / `werd --werd` 都算同一个成就
+#: Easter egg names the CLI may report (see ``werd werd`` / ``werd word``).
+EGG_NAMES: Tuple[str, ...] = ("werd", "word")
 
 # 周末的 weekday() 编号：周六 = 5、周日 = 6（周一为 0）
 _WEEKEND_DAYS = (5, 6)
@@ -107,6 +245,18 @@ def state_path(path: Optional[Path] = None) -> Path:
     return Path(path) if path is not None else config.data_dir() / STATE_FILENAME
 
 
+def empty_metrics() -> Dict[str, Any]:
+    """Return a fresh ``metrics`` block with every key present and empty."""
+    # 计数类指标全 0
+    metrics: Dict[str, Any] = {name: 0 for name in _INT_METRICS}
+    # 列表类指标全空
+    for name in _LIST_METRICS:
+        metrics[name] = []
+    # 周末时长是按天的桶，单独一个形状
+    metrics["weekend_seconds"] = {}
+    return metrics
+
+
 def empty_state() -> Dict[str, Any]:
     """Return a fresh state document with every section present."""
     # 结构固定，免得调用方到处写 setdefault
@@ -116,13 +266,9 @@ def empty_state() -> Dict[str, Any]:
         "unlocked": [],
         # 事件计数：{"daily_open": 12, "book_add": 3}
         "counters": {},
-        # 状态派生的指标：打开过的日期、清晨是否打开过、周末时长、读了多少字
-        "metrics": {
-            "days_opened": [],
-            "early_open": 0,
-            "weekend_seconds": {},
-            "words_read": 0,
-        },
+        # 状态派生的指标：打开过的日期、清晨是否打开过、周末时长、读了多少字、
+        # 以及在阅读器里实时攒下的那些（连击、翻页、窄屏、地理、环境……）
+        "metrics": empty_metrics(),
         # 每本书读过的行区间与已统计字数：用来给字数统计去重
         "books": {},
         # 每条成就的进度快照（`werd achievements` 直接读它）
@@ -204,16 +350,21 @@ def _normalise_state(raw: Any) -> Dict[str, Any]:
     state["unlocked"] = unlocked
     # 事件计数
     state["counters"] = _int_map(raw.get("counters"))
-    # 状态派生的指标
+    # 状态派生的指标：逐项按类型吸收，认不出的键直接丢掉（保持文件形状可控）
     metrics = raw.get("metrics")
     metrics = metrics if isinstance(metrics, dict) else {}
-    state["metrics"] = {
-        # 日期去重并排序，方便断言与调试
-        "days_opened": sorted(set(_string_list(metrics.get("days_opened")))),
-        "early_open": 1 if _as_int(metrics.get("early_open")) else 0,
-        "weekend_seconds": _int_map(metrics.get("weekend_seconds")),
-        "words_read": max(0, _as_int(metrics.get("words_read"))),
-    }
+    normalised_metrics: Dict[str, Any] = {}
+    for name in _INT_METRICS:
+        # 计数类：负数夹回 0（手改出 -5 时不该让进度倒退成负）
+        value = max(0, _as_int(metrics.get(name)))
+        # 布尔型的指标（置位就不再撤销）统一夹成 0/1
+        normalised_metrics[name] = 1 if (name in _FLAG_METRICS and value) else value
+    for name in _LIST_METRICS:
+        # 列表类：去重并排序，方便断言与调试（日期/国家代码都是定长字符串）
+        normalised_metrics[name] = sorted(set(_string_list(metrics.get(name))))
+    # 周末时长的桶
+    normalised_metrics["weekend_seconds"] = _int_map(metrics.get("weekend_seconds"))
+    state["metrics"] = normalised_metrics
     # 每本书的已统计字数与已计入的行区间
     books = raw.get("books")
     normalised: Dict[str, Dict[str, Any]] = {}
@@ -476,7 +627,7 @@ def load_definitions() -> List[Dict[str, Any]]:
 
 def _record_daily_open(state: Dict[str, Any], moment: datetime) -> None:
     """Remember that werd was opened today, and at what hour."""
-    metrics = state.setdefault("metrics", empty_state()["metrics"])
+    metrics = _metrics(state)
     # 打开过的日期去重后排序（百日筑基要的是"天数"而不是"次数"）
     days = _string_list(metrics.get("days_opened"))
     day = moment.date().isoformat()
@@ -486,6 +637,9 @@ def _record_daily_open(state: Dict[str, Any], moment: datetime) -> None:
     # 05:00-07:00 之间打开过就置位（一旦置位就不再撤销）
     if EARLY_START_HOUR <= moment.hour < EARLY_END_HOUR:
         metrics["early_open"] = 1
+    # 正好撞上节日（公历或表里的农历节日）：记下这一天，"节日读者"靠它
+    if holiday_of(moment):
+        _add_unique(state, "holidays", [day])
 
 
 def _record_session_end(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
@@ -495,10 +649,10 @@ def _record_session_end(state: Dict[str, Any], payload: Mapping[str, Any]) -> No
     # 落在周六/周日的会话才计入"周末战士"
     day, weekend = weekend_seconds(payload.get("started"), payload.get("ended"), seconds)
     if day:
-        buckets = state.setdefault("metrics", empty_state()["metrics"]).setdefault(
-            "weekend_seconds", {}
-        )
+        buckets = _metrics(state).setdefault("weekend_seconds", {})
         buckets[day] = _as_int(buckets.get(day)) + weekend
+    # 阅读器退出时也会把本次攒下的按键/尺寸计数一起送来（免得没撞到门槛就丢了）
+    _record_counters(state, payload)
     # 会话里带了正文与读过的行区间：顺便结算本次的字数
     _record_progress(state, payload)
 
@@ -536,6 +690,140 @@ def _record_progress(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
     metrics["words_read"] = max(0, _as_int(metrics.get("words_read"))) + gained
 
 
+def holiday_of(moment: Any) -> str:
+    """Return the name of the holiday on *moment*, or ``""`` for an ordinary day.
+
+    Accepts a :class:`datetime.date`, a :class:`datetime.datetime` or an ISO string.
+    Lunar festivals (春节 / 中秋节) come from the explicit table in
+    :data:`LUNAR_HOLIDAYS`; everything else is matched on the month and day, so the
+    answer does not depend on which year the table was written.
+    """
+    # 先把输入收成一个 date（datetime 是 date 的子类，但要多一步取出日期部分）
+    if isinstance(moment, datetime):
+        day = moment.date()
+    elif isinstance(moment, date):
+        day = moment
+    else:
+        # 字符串：容忍 "2026-02-17" 与 "2026-02-17T10:00:00" 两种写法
+        try:
+            day = date.fromisoformat(str(moment or "")[:10])
+        except ValueError:
+            # 格式不对：当作不是节日
+            return ""
+    stamp = day.isoformat()
+    # 农历节日查完整日期
+    if stamp in LUNAR_HOLIDAYS:
+        return LUNAR_HOLIDAYS[stamp]
+    # 公历节日只看"月-日"
+    return HOLIDAYS.get(stamp[5:], "")
+
+
+def _metrics(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the metrics block of *state*, creating it if it is missing."""
+    # 老状态文件（Phase 1 写的）缺新键：这里补一份完整的空块再往上写
+    block = state.setdefault("metrics", empty_metrics())
+    return block
+
+
+def _bump(state: Dict[str, Any], name: str, step: int = 1) -> None:
+    """Add *step* to one integer metric (never below zero)."""
+    # 负数没意义（回退不该让成就进度倒退）
+    metrics = _metrics(state)
+    metrics[name] = max(0, _as_int(metrics.get(name)) + int(step))
+
+
+def _record_counters(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
+    """Fold the reader's real time report into the metrics block.
+
+    The payload carries two shapes, because the two kinds of metric behave
+    differently: ``deltas`` are *added* (a counter can only grow: chapters read with
+    arrow keys, ``t`` presses, seconds read in a cramped window) and ``maxima`` are
+    *compared* (the longest space combo, the longest run of page turns -- reading
+    another book must not reset yesterday's record).
+    """
+    # 增量：只认白名单里的名字，别让手写的载荷往状态文件里塞新键
+    deltas = payload.get("deltas")
+    if isinstance(deltas, Mapping):
+        for name in COUNTER_METRICS:
+            step = _as_int(deltas.get(name))
+            # 0 与负数都跳过（增量语义里它们没有意义）
+            if step > 0:
+                _bump(state, name, step)
+    # 峰值：只保留更大的那个
+    peaks = payload.get("maxima")
+    if isinstance(peaks, Mapping):
+        metrics = _metrics(state)
+        for name in MAX_METRICS:
+            peak = _as_int(peaks.get(name))
+            if peak > _as_int(metrics.get(name)):
+                metrics[name] = peak
+
+
+def _add_unique(state: Dict[str, Any], name: str, values: Iterable[Any]) -> None:
+    """Merge *values* into the list metric *name*, ignoring blanks and repeats."""
+    metrics = _metrics(state)
+    current = _string_list(metrics.get(name))
+    for value in values:
+        # 空值（没有国家代码、没有名字）不算一条记录
+        text = str(value or "").strip()
+        if text and text not in current:
+            current.append(text)
+    metrics[name] = sorted(set(current))
+
+
+def _record_recover(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
+    """Count one run-in with the crash recovery prompt.
+
+    ``{"recovered": true}`` means the reader was interrupted last time **and** this
+    time the position was picked up again (恢复大师); ``False`` is the reader saying
+    "算了，从头读" (我反悔).
+    """
+    # 恢复成功与主动放弃各记一个指标，成就分别挂在两个指标上
+    if bool(payload.get("recovered")):
+        _bump(state, "crash_recovers")
+        return
+    _bump(state, "recover_declined")
+
+
+def _record_geo(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
+    """Remember where this machine was seen, for the geography achievements.
+
+    The payload is the mapping :func:`wreader.geo.load_location` returns
+    (``country_code`` / ``continent`` / ``country``); an empty one is silently
+    ignored, which is what "offline" looks like from here.
+    """
+    code = str(payload.get("country_code") or "").strip().upper()
+    # 没有国家代码：可能只是接口挂了，什么都别记
+    if not code:
+        return
+    # 国家与大洲各自去重
+    _add_unique(state, "countries", [code])
+    _add_unique(state, "continents", [payload.get("continent") or geo.continent_of(code)])
+    # 世仇组合要两边都去过：每次新增国家时重新算一遍（命中就记下来）
+    hit = geo.feud_hit(_string_list(_metrics(state).get("countries")))
+    if hit:
+        _add_unique(state, "feuds", [hit])
+
+
+def _record_env(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
+    """Remember which environment signals were ever true (cloud / wsl / tmux / editable)."""
+    # 载荷是一个名字列表（wreader.env.flags 的返回值）；只认白名单里的名字，
+    # 免得别处传进来的字符串把 env_flags 这个计数撑大
+    given = payload.get("flags")
+    if isinstance(given, (list, tuple)):
+        _add_unique(
+            state, "envs", [name for name in given if name in env.SIGNAL_NAMES]
+        )
+
+
+def _record_egg(state: Dict[str, Any], payload: Mapping[str, Any]) -> None:
+    """Remember one easter egg hit (``werd werd`` / ``werd word``)."""
+    # 只认白名单里的彩蛋名，防止随便什么字符串都算一条
+    name = str(payload.get("egg") or "").strip().lower()
+    if name in EGG_NAMES:
+        _add_unique(state, "eggs", [name])
+
+
 def record_event(
     state: Dict[str, Any],
     event_type: str,
@@ -560,7 +848,22 @@ def record_event(
         _record_session_end(state, payload)
     elif event_type == "progress_update":
         _record_progress(state, payload)
-    # geo_change / book_finish / word_add / check 只需要计数
+    elif event_type in ("key", "resize"):
+        # 阅读器里的实时上报：增量 + 峰值两种形状
+        _record_counters(state, payload)
+    elif event_type == "help":
+        _bump(state, "help_opens")
+    elif event_type == "recover":
+        _record_recover(state, payload)
+    elif event_type == "geo_change":
+        _record_geo(state, payload)
+    elif event_type == "env":
+        _record_env(state, payload)
+    elif event_type == "name_egg":
+        _record_egg(state, payload)
+    elif event_type == "achievements_view":
+        _bump(state, "achievement_views")
+    # book_add / book_finish / word_add / note_add / check 只需要计数
     return state
 
 
@@ -573,7 +876,8 @@ def compute_metrics(
 
     The index derived numbers come from :func:`stats.compute_metrics`; the ones
     that only the event log knows about (days opened, words read, weekend time)
-    are added on top, so a condition stays a plain expression either way.
+    are added on top, and the note total is counted from the notes directory, so a
+    condition stays a plain expression either way.
     """
     # 书库侧指标：复用 stats 的实现，避免两套口径
     metrics = stats.compute_metrics(dict(document), vocab_size=vocab_size)
@@ -591,7 +895,133 @@ def compute_metrics(
     metrics["early_open"] = 1 if _as_int(log.get("early_open")) else 0
     # 周末累计阅读秒数（周末战士）
     metrics["weekend_time"] = sum(_int_map(log.get("weekend_seconds")).values())
+    # 累计写了多少条笔记（笔记达人）：现数 markdown，手写在编辑器里的也算
+    metrics["notes_count"] = _note_total()
+    # -- Phase 2：阅读器实时攒下的那些 --------------------------------------
+    # 最长的空格连击 / 最长的一次连续翻页
+    metrics["space_combo"] = _as_int(log.get("space_combo"))
+    metrics["page_streak"] = _as_int(log.get("page_streak"))
+    # 全程只用方向键读完的章节数
+    metrics["arrow_chapters"] = _as_int(log.get("arrow_chapters"))
+    # 按过多少次翻译键（t / T）
+    metrics["translate_hits"] = _as_int(log.get("translate_hits"))
+    # 窄窗口里累计读的秒数、读完的章节数
+    metrics["narrow_seconds"] = _as_int(log.get("narrow_seconds"))
+    metrics["narrow_chapters"] = _as_int(log.get("narrow_chapters"))
+    # 帮助页打开次数
+    metrics["help_opens"] = _as_int(log.get("help_opens"))
+    # 意外中断：接着读了几次、放弃恢复几次
+    metrics["crash_recovers"] = _as_int(log.get("crash_recovers"))
+    metrics["recover_declined"] = _as_int(log.get("recover_declined"))
+    # 翻开成就页的次数（成就猎人）
+    metrics["achievement_views"] = _as_int(log.get("achievement_views"))
+    # -- Phase 3：地理 / 环境 / 节日 / 彩蛋 ---------------------------------
+    # 节日读书的天数（节日读者）
+    metrics["holiday_opens"] = len(_string_list(log.get("holidays")))
+    # 去过的国家数、大洲数、世仇组合是否凑齐
+    metrics["geo_countries"] = len(_string_list(log.get("countries")))
+    metrics["geo_continents"] = len(_string_list(log.get("continents")))
+    metrics["geo_feud"] = 1 if _string_list(log.get("feuds")) else 0
+    # 触发过的彩蛋个数
+    metrics["easter_eggs"] = len(_string_list(log.get("eggs")))
+    # 环境信号：每个名字一个 0/1 指标（云端书虫/穿越子系统/套娃终端/开发者模式）
+    flags = set(_string_list(log.get("envs")))
+    for name in env.SIGNAL_NAMES:
+        metrics["env_{}".format(name)] = 1 if name in flags else 0
+    metrics["env_flags"] = len(flags)
     return metrics
+
+
+def crossed_thresholds(
+    values: Mapping[str, int],
+    thresholds: Mapping[str, Sequence[int]],
+    fired: Iterable[Sequence[Any]] = (),
+) -> List[Tuple[str, int]]:
+    """Return the ``(metric, threshold)`` pairs *values* has just reached.
+
+    This is the arithmetic behind the reader's "should I bother the engine now?"
+    question.  *values* is what the reader currently believes each metric to be
+    (baseline at open + whatever happened since), *thresholds* comes from
+    :func:`metric_thresholds`, and *fired* lists what this session has already
+    triggered so the same line is not crossed twice.  Pure, so it is testable
+    without a terminal.
+    """
+    # 已经报过的（指标, 门槛）不再重复触发
+    seen = {(str(item[0]), int(item[1])) for item in fired}
+    hits: List[Tuple[str, int]] = []
+    # 排序让结果稳定（测试断言好写，消息行也稳定）
+    for metric in sorted(thresholds):
+        value = _as_int(values.get(metric))
+        for number in thresholds[metric]:
+            key = (str(metric), int(number))
+            # 到达或越过门槛，且本次会话还没报过：命中
+            if value >= int(number) and key not in seen:
+                hits.append(key)
+    return hits
+
+
+def session_metrics(
+    path: Optional[Path] = None,
+    document: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, int]:
+    """Return the metrics as they stand right now (the reader's baseline).
+
+    The reader needs to know where every counter already is when it opens a book, so
+    that "this key press just crossed the line" can be answered without asking the
+    engine on every keystroke -- a check costs a file lock and a full state rewrite.
+    Failures degrade to ``{}``: the reader then fires no mid-session checks and the
+    achievements are still settled when the session ends.
+    """
+    try:
+        # 状态 + 书库文档（调用方可以不传，那就现读索引）
+        log = load_state(path)
+        library_document = (
+            dict(document) if document is not None else library.load_library()
+        )
+        return compute_metrics(library_document, log)
+    except (AchievementsError, library.LibraryError, stats.StatsError):
+        # 成就系统读不出来：当作"没有任何基线"，只是这一个会话没有实时通知
+        return {}
+
+
+def metric_thresholds(
+    definitions: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, Tuple[int, ...]]:
+    """Return ``{metric: (required, ...)}`` for every condition in the definitions.
+
+    Conditions that do not parse are skipped, exactly like everywhere else in the
+    engine, and the numbers come back sorted and deduplicated so a user who adds two
+    achievements on the same metric does not make the reader check twice.
+    """
+    # 定义来源：调用方可以注入（测试），默认用打包的那份
+    entries = list(definitions) if definitions is not None else load_definitions()
+    thresholds: Dict[str, List[int]] = {}
+    for achievement in entries:
+        try:
+            metric, _operator, required = stats.parse_condition(
+                str(achievement.get("condition") or "")
+            )
+        except (KeyError, TypeError, stats.StatsError):
+            # 条件写坏的那一条跳过（`werd achievements` 会另外给出提示）
+            continue
+        thresholds.setdefault(metric, []).append(int(required))
+    return {
+        metric: tuple(sorted(set(numbers))) for metric, numbers in thresholds.items()
+    }
+
+
+def _note_total() -> int:
+    """Return the total number of notes on disk, or 0 when they cannot be read.
+
+    The count is *derived* from the notes directory every time rather than kept as
+    a counter in the state file: a note deleted (or written) by hand must move the
+    笔记达人 progress in the same direction, exactly like every other metric here.
+    """
+    try:
+        return notes.total_note_count()
+    except Exception:  # pragma: no cover - notes 自己已经兜过底
+        # 笔记目录整个读不了：按 0 算，别让统计页与成就页一起炸掉
+        return 0
 
 
 def check_achievements(

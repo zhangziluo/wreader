@@ -486,3 +486,258 @@ def test_list_achievements_uses_a_fallback_category(isolated_home) -> None:
         ],
     )
     assert rows[0]["category"] == stats.DEFAULT_CATEGORY
+
+
+# ------------------------------------------------- Phase 2/3: the live events
+def test_empty_state_has_every_new_metric() -> None:
+    # 新指标也要在空状态里就位，否则调用方到处要写 setdefault
+    metrics = achievements.empty_state()["metrics"]
+    for name in achievements.COUNTER_METRICS + achievements.MAX_METRICS:
+        assert metrics[name] == 0
+    for name in ("holidays", "countries", "continents", "feuds", "envs", "eggs"):
+        assert metrics[name] == []
+    # 周末时长的桶仍然是独立的形状
+    assert metrics["weekend_seconds"] == {}
+
+
+def test_record_event_folds_key_deltas_and_keeps_the_largest_peak() -> None:
+    state = achievements.empty_state()
+    # 阅读器送来的增量与峰值：增量累加，峰值取大的
+    achievements.record_event(
+        state,
+        "key",
+        {
+            "deltas": {"translate_hits": 3, "narrow_seconds": 61},
+            "maxima": {"space_combo": 40, "page_streak": 5},
+        },
+    )
+    assert state["metrics"]["translate_hits"] == 3
+    assert state["metrics"]["narrow_seconds"] == 61
+    assert state["metrics"]["space_combo"] == 40
+    # 再送一次：增量变 5，峰值给个更小的也不该回退
+    achievements.record_event(
+        state, "key", {"deltas": {"translate_hits": 2}, "maxima": {"space_combo": 10}}
+    )
+    assert state["metrics"]["translate_hits"] == 5
+    assert state["metrics"]["space_combo"] == 40
+
+
+def test_record_event_ignores_junk_in_the_key_payload() -> None:
+    state = achievements.empty_state()
+    # 不在白名单里的指标名不该往状态文件里塞新键；负数增量也不该把进度拉回去
+    achievements.record_event(
+        state,
+        "resize",
+        {"deltas": {"bogus": 9, "help_opens": -5}, "maxima": {"nope": 3}},
+    )
+    assert "bogus" not in state["metrics"]
+    assert "nope" not in state["metrics"]
+    assert state["metrics"]["help_opens"] == 0
+
+
+def test_session_end_also_settles_the_session_counters() -> None:
+    state = achievements.empty_state()
+    # 退出时会把本次攒下的增量一起交进来（没撞到门槛的那些也不能丢）
+    achievements.record_event(
+        state,
+        "session_end",
+        {
+            "seconds": 60,
+            "started": "2026-09-23T10:00:00",
+            "ended": "2026-09-23T10:01:00",
+            "deltas": {"arrow_chapters": 2, "narrow_chapters": 1},
+            "maxima": {"page_streak": 300},
+        },
+    )
+    assert state["metrics"]["arrow_chapters"] == 2
+    assert state["metrics"]["narrow_chapters"] == 1
+    assert state["metrics"]["page_streak"] == 300
+
+
+def test_help_recover_view_egg_and_env_events() -> None:
+    state = achievements.empty_state()
+    # 帮助页按次计数
+    achievements.record_event(state, "help")
+    achievements.record_event(state, "help")
+    assert state["metrics"]["help_opens"] == 2
+    # 恢复：接着读算一次，放弃恢复算"我反悔"
+    achievements.record_event(state, "recover", {"recovered": True})
+    achievements.record_event(state, "recover", {})
+    assert state["metrics"]["crash_recovers"] == 1
+    assert state["metrics"]["recover_declined"] == 1
+    # 成就页：成就猎人看的就是这个
+    achievements.record_event(state, "achievements_view")
+    assert state["metrics"]["achievement_views"] == 1
+    # 彩蛋：只认白名单里的名字，重复也只算一次
+    achievements.record_event(state, "name_egg", {"egg": "WERD"})
+    achievements.record_event(state, "name_egg", {"egg": "werd"})
+    achievements.record_event(state, "name_egg", {"egg": "nope"})
+    assert state["metrics"]["eggs"] == ["werd"]
+    # 环境信号：同样只认白名单
+    achievements.record_event(state, "env", {"flags": ["tmux", "bogus", "editable"]})
+    assert state["metrics"]["envs"] == ["editable", "tmux"]
+
+
+def test_geo_change_records_countries_continents_and_the_feud() -> None:
+    state = achievements.empty_state()
+    achievements.record_event(
+        state, "geo_change", {"country_code": "gb", "continent": "欧洲"}
+    )
+    # 只有一个国家：不算凑齐任何一对世仇
+    assert state["metrics"]["countries"] == ["GB"]
+    assert state["metrics"]["feuds"] == []
+    # 第二个国家（法国）一到，英法两边就都有了
+    achievements.record_event(
+        state, "geo_change", {"country_code": "FR", "continent": "欧洲"}
+    )
+    assert state["metrics"]["countries"] == ["FR", "GB"]
+    assert state["metrics"]["continents"] == ["欧洲"]
+    assert state["metrics"]["feuds"] == ["GB×FR"]
+    # 没有国家代码（接口挂了）：什么都不记
+    achievements.record_event(state, "geo_change", {})
+    assert state["metrics"]["countries"] == ["FR", "GB"]
+
+
+def test_a_missing_continent_falls_back_to_the_country_code() -> None:
+    state = achievements.empty_state()
+    # 载荷没带大洲（比如用户手写的载荷）：从国家代码自己推
+    achievements.record_event(state, "geo_change", {"country_code": "BR"})
+    assert state["metrics"]["continents"] == ["南美洲"]
+
+
+def test_holiday_of_knows_fixed_dates_lunar_festivals_and_ordinary_days() -> None:
+    # 公历节日只看月日（哪一年都算）
+    assert achievements.holiday_of(datetime(2026, 10, 1, 9, 0)) == "国庆节"
+    assert achievements.holiday_of(datetime(2030, 1, 1, 9, 0)) == "元旦"
+    # 农历节日查表：2026 春节是 2 月 17 日
+    assert achievements.holiday_of(datetime(2026, 2, 17, 9, 0)) == "春节"
+    assert achievements.holiday_of("2026-09-25T23:00:00") == "中秋节"
+    # 普通日子与坏输入都是空串
+    assert achievements.holiday_of(datetime(2026, 9, 23, 9, 0)) == ""
+    assert achievements.holiday_of("nope") == ""
+    assert achievements.holiday_of(None) == ""
+
+
+def test_daily_open_remembers_a_holiday() -> None:
+    state = achievements.empty_state()
+    # 元旦打开：记进节日列表（"节日读者"看的就是它）
+    achievements.record_event(state, "daily_open", {}, now=datetime(2026, 1, 1, 12, 0))
+    assert state["metrics"]["holidays"] == ["2026-01-01"]
+    # 普通日子打开：列表不变
+    achievements.record_event(state, "daily_open", {}, now=datetime(2026, 1, 15, 12, 0))
+    assert state["metrics"]["holidays"] == ["2026-01-01"]
+
+
+def test_compute_metrics_exposes_every_new_metric() -> None:
+    state = achievements.empty_state()
+    # 造一份"什么都有一点"的状态
+    achievements.record_event(state, "help")
+    achievements.record_event(state, "recover", {"recovered": True})
+    achievements.record_event(state, "name_egg", {"egg": "werd"})
+    achievements.record_event(state, "env", {"flags": ["cloud"]})
+    achievements.record_event(state, "geo_change", {"country_code": "GB"})
+    achievements.record_event(
+        state, "key", {"maxima": {"space_combo": 7}, "deltas": {"narrow_seconds": 12}}
+    )
+    metrics = achievements.compute_metrics(make_document(), state)
+    assert metrics["help_opens"] == 1
+    assert metrics["crash_recovers"] == 1
+    assert metrics["easter_eggs"] == 1
+    assert metrics["space_combo"] == 7
+    assert metrics["narrow_seconds"] == 12
+    # 地理：国家数、大洲数、世仇标志
+    assert metrics["geo_countries"] == 1
+    assert metrics["geo_continents"] == 1
+    assert metrics["geo_feud"] == 0
+    # 环境：每个信号一个 0/1 指标，外加命中总数
+    assert metrics["env_cloud"] == 1
+    assert metrics["env_wsl"] == 0
+    assert metrics["env_flags"] == 1
+
+
+def test_normalise_state_keeps_and_clamps_the_new_metrics() -> None:
+    # 手改过的状态文件：坏值要被吸收，好值要留住
+    state = achievements._normalise_state(
+        {
+            "metrics": {
+                "space_combo": "12",
+                "translate_hits": -5,
+                "early_open": 7,
+                "countries": ["gb", "GB", 3, None],
+                "eggs": "not-a-list",
+                "weekend_seconds": {"2026-09-26": "600"},
+            }
+        }
+    )
+    assert state["metrics"]["space_combo"] == 12
+    assert state["metrics"]["translate_hits"] == 0
+    # 布尔型指标夹成 0/1
+    assert state["metrics"]["early_open"] == 1
+    # 列表去重排序，非字符串项丢掉
+    assert state["metrics"]["countries"] == ["3", "GB", "gb"]
+    assert state["metrics"]["eggs"] == []
+    assert state["metrics"]["weekend_seconds"] == {"2026-09-26": 600}
+
+
+def test_crossed_thresholds_reports_only_new_crossings() -> None:
+    thresholds = {"translate_hits": (1, 100), "space_combo": (50,)}
+    # 刚好踩到 1：只报这一条
+    assert achievements.crossed_thresholds({"translate_hits": 1}, thresholds) == [
+        ("translate_hits", 1)
+    ]
+    # 一步跨过 1 与 100：两条都报（顺序稳定）
+    assert achievements.crossed_thresholds({"translate_hits": 150}, thresholds) == [
+        ("translate_hits", 1),
+        ("translate_hits", 100),
+    ]
+    # 报过的就不再报
+    fired = [("translate_hits", 1), ("translate_hits", 100)]
+    assert achievements.crossed_thresholds({"translate_hits": 150}, thresholds, fired) == []
+    # 没到线的指标不出现
+    assert achievements.crossed_thresholds({"translate_hits": 0}, thresholds) == []
+
+
+def test_metric_thresholds_reads_every_condition() -> None:
+    # 同一个指标出现两次：门槛去重并排序；写坏/缺字段的那两条跳过
+    thresholds = achievements.metric_thresholds(
+        [
+            {"id": "a", "condition": "translate_hits >= 100"},
+            {"id": "b", "condition": "translate_hits >= 10"},
+            {"id": "c", "condition": "page_streak > 5"},
+            {"id": "broken", "condition": "not a condition"},
+            {"id": "empty"},
+        ]
+    )
+    assert thresholds == {"translate_hits": (10, 100), "page_streak": (5,)}
+
+
+def test_metric_thresholds_covers_the_packaged_definitions() -> None:
+    # 随包发布的定义全都能解析，而且每个门槛都是正数
+    thresholds = achievements.metric_thresholds()
+    assert "translate_hits" in thresholds
+    assert "help_opens" in thresholds
+    assert "geo_continents" in thresholds
+    for numbers in thresholds.values():
+        assert numbers, numbers
+        assert all(number > 0 for number in numbers)
+
+
+def test_session_metrics_matches_compute_metrics(isolated_home) -> None:
+    # 阅读器的基线走的就是 compute_metrics，两者不许有两个口径
+    achievements.check_achievements(
+        "daily_open", {}, document=make_document(), now=datetime(2026, 1, 15, 12, 0)
+    )
+    baseline = achievements.session_metrics(document=make_document())
+    assert baseline == achievements.compute_metrics(
+        make_document(), achievements.load_state()
+    )
+    assert baseline["days_opened"] == 1
+
+
+def test_session_metrics_degrades_to_an_empty_mapping(isolated_home, monkeypatch) -> None:
+    # 状态文件读不出来：返回空表（阅读器于是不做实时判定，而不是崩）
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise achievements.AchievementsError("broken state")
+
+    monkeypatch.setattr(achievements, "load_state", boom)
+    assert achievements.session_metrics(document=make_document()) == {}

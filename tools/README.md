@@ -23,6 +23,7 @@ python tools/check_docs.py
 | `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（8 项对账） | 0 / 1 |
 | `verify_notes.py` | 真 pty 里走一遍「标记 + 笔记面板」：引用区、Ctrl+S、折叠提示都对账（5 项） | 0 / 1 |
 | `verify_translate.py` | 真 pty 里验证 `t` 的未配置提示，外加 `werd config translate` 落盘（4 项） | 0 / 1 |
+| `verify_achievements.py` | 真 pty 里验证帮助页、屏内 5 秒成就通知、意外中断恢复、名字彩蛋（19 项） | 0 / 1 |
 
 ## 逐个说明
 
@@ -160,3 +161,25 @@ python tools/verify_translate.py     # 期望：RESULT: 全部通过
    既不能偷偷发请求，也不能把后端报错甩给用户（分别用"选了 local 但没装 argostranslate"
    和"选了 baidu 但没填密钥"两种情况各验一次）；
 2. **`werd config translate` 向导**真的把引擎名与密钥写进 `settings.toml`（喂标准输入，非交互跑）。
+
+### `verify_achievements.py`
+
+```bash
+python tools/verify_achievements.py     # 期望：RESULT: 全部通过
+```
+
+成就 Phase 2/3 的链路里，有两件事**只有真进程能证明**：
+
+1. **屏内 5 秒通知真的画在屏幕上**：它由 `_draw` 每帧画在右上角，靠 `Pager.current_notice()`
+   的时间窗 —— `FakeStdscr` 只能说明"写进去过"，说明不了真 curses 里那一帧真的画出来了、
+   也没把正文顶掉；
+2. **意外中断恢复真的拦在开书时问一句**：要在真终端里弹 `_confirm`、等一个按键、再回到现场；
+   而且现场文件必须**正常退出时才删掉**，否则下次开书会又问一遍 —— 这只有真进程能验。
+
+脚本开一个真 pty，跑三个场景：`?` 打开帮助（顺便记一次"帮助迷"）→ 关掉 → 等通知画出来 → `q` 退出；
+造一份"上次没正常退出"的现场 → `y` 接着读 → `q`；再干净地开一次，确认**不再问**。
+对账 19 项：终端输出里的帮助页 / 通知 / 恢复提示，加上落盘的 `achievements.json`
+（`help_opens`、`crash_recovers`、解锁 id、`eggs`）与 `library.json`（恢复后的行号）。
+
+> 沙箱里第一件事就是把 `stats.geo_lookup` 设成 `false`：这个工具**不该依赖网络**，
+> 顺便也就验证了那个开关真的第一步就把联网挡掉了。

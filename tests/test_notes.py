@@ -14,12 +14,14 @@ import subprocess
 import sys
 # 注入固定时间，让"序号 + 时间戳"可预测
 from datetime import datetime
+# 类型注解：给假的成就检查函数用
+from typing import Any, Dict, List, Optional
 
 # pytest.raises / fixture
 import pytest
 
-# 被测模块
-from wreader import notes
+# 被测模块；成就引擎用来验证"笔记达人"真的解锁了
+from wreader import achievements, notes
 
 
 # 固定时间，让"序号 + 时间戳"可预测

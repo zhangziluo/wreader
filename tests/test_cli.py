@@ -23,7 +23,7 @@ from typing import List
 import pytest
 
 # 被测模块 + 断言时要用到的配置/书库/翻译/生词本/笔记
-from wreader import cli, config, library, notes, translator, vocab
+from wreader import achievements, cli, config, library, notes, translator, vocab
 
 # 复用 conftest 里的样例正文
 from conftest import BOOK_LINES
@@ -174,12 +174,14 @@ def test_stats_hides_the_heatmap_when_configured(capsys) -> None:
 
 
 def test_achievements_lists_progress(capsys, monkeypatch) -> None:
-    # 固定启动时刻：测试若恰好在 05:00-07:00 跑，会顺手解锁"清晨第一眼"
-    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 1, 12, 0, 0))
+    # 固定启动时刻：测试若恰好在 05:00-07:00 跑会顺手解锁"清晨第一眼"，
+    # 而 1 月 1 日、春节这类日子会解锁"节日读者" —— 所以这里挑一个平平无奇的
+    # 中午（2026-01-15 周四，不是任何节日）
+    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 15, 12, 0, 0))
     # 全新环境下应当一个都没解锁
     assert cli.main(["achievements"]) == 0
     out = capsys.readouterr().out
-    assert "已解锁 0/28" in out
+    assert "已解锁 0/48" in out
     # 并列出未解锁项的名字
     assert "开卷有益" in out
 
@@ -188,8 +190,8 @@ def test_achievements_marks_one_as_done(capsys, imported, monkeypatch) -> None:
     # 延迟导入 reader，避免非 curses 平台上的导入错误
     from wreader import achievements, reader
 
-    # 同样固定启动时刻，避免"清晨第一眼"掺进来
-    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 1, 12, 0, 0))
+    # 同样固定启动时刻（同样避开清晨窗口与节日，见上一个测试的说明）
+    monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 1, 15, 12, 0, 0))
     # 造一个 Pager 并直接保存一次 60 秒的会话
     pager = reader.Pager(list(BOOK_LINES), book_id=imported["zh"], page_height=4)
     reader.save_session(
@@ -216,7 +218,7 @@ def test_achievements_marks_one_as_done(capsys, imported, monkeypatch) -> None:
     # 读过一本书（开卷有益）+ 书库非空（书库初成），应当解锁 2 个
     assert cli.main(["achievements"]) == 0
     out = capsys.readouterr().out
-    assert "已解锁 2/28" in out
+    assert "已解锁 2/48" in out
     assert "开卷有益" in out
     assert "书库初成" in out
 
@@ -599,5 +601,44 @@ def test_translate_reports_a_failed_chapter(capsys, imported, backend, home) -> 
     captured = capsys.readouterr()
     assert "translated 0, skipped 0 (already cached), 1 failed" in captured.out
     assert "chapter 1:" in captured.err
+
+
+# ------------------------------------------------------------- name easter egg
+@pytest.mark.parametrize("argv", [["werd"], ["word"], ["--werd"]])
+def test_the_name_egg_prints_and_unlocks_the_achievement(capsys, argv) -> None:
+    # 三种写法（werd werd / werd word / werd --werd）都通往同一个玩笑
+    assert cli.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "werd" in out
+    # 解锁了就报一行（名字彩蛋是唯一能靠一条命令解锁的成就）
+    assert "名字彩蛋" in out
+    # 状态文件里记下了这一次彩蛋
+    assert achievements.load_state()["metrics"]["eggs"] == [argv[-1].lstrip("-")]
+
+
+def test_the_egg_commands_are_listed_in_the_help(capsys) -> None:
+    # 彩蛋也得在 --help 里露个脸，不然没人会发现
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--help"])
+    assert excinfo.value.code == 0
+    assert "werd" in capsys.readouterr().out
+
+
+# ------------------------------------------------------- the achievements page
+def test_achievements_counts_the_views(capsys) -> None:
+    # 每翻一次成就页就记一次（成就猎人要的是"超过 10 次"）
+    for _ in range(3):
+        assert cli.main(["achievements"]) == 0
+    capsys.readouterr()
+    assert achievements.load_state()["metrics"]["achievement_views"] == 3
+
+
+def test_eleven_views_unlock_the_achievement_hunter(capsys) -> None:
+    # 第 11 次翻开时越过了 "> 10" 这条线
+    for _ in range(11):
+        assert cli.main(["achievements"]) == 0
+    out = capsys.readouterr().out
+    assert "成就猎人" in out
+    assert achievements.load_state()["metrics"]["achievement_views"] == 11
 
 

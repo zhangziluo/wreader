@@ -100,13 +100,21 @@ def build_parser() -> argparse.ArgumentParser:
         version="%(prog)s {}".format(__version__),
         help="show the werd version and exit",
     )
+    # --werd：名字彩蛋（与子命令 werd / word 同一个玩笑）
+    parser.add_argument(
+        "--werd",
+        action="store_true",
+        help="the name easter egg (same as `werd werd`)",
+    )
 
     # 子命令容器：dest="command" 让解析结果里带一个 command 字段，用来查 handler
+    # required=False 是为了让 `werd --werd` 也能跑：没给子命令时由 main 自己按
+    # argparse 的老样子报错（用法提示与退出码 2 完全一致）
     subparsers = parser.add_subparsers(
         title="commands",
         dest="command",
         metavar="<command>",
-        required=True,
+        required=False,
     )
 
     # werd import <path>：导入书籍的子命令
@@ -267,6 +275,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="export this book's notes to ~/books (needs a book id)",
     )
+
+    # werd werd / werd word：名字彩蛋（两个写法都留着，反正就是同一个玩笑）
+    subparsers.add_parser("werd", help="the name easter egg")
+    subparsers.add_parser("word", help="the name easter egg (the other spelling)")
 
     # 把组装好的解析器交还给调用方
     return parser
@@ -1198,12 +1210,20 @@ def _page_notes(book_id: str, stored: Sequence[Dict[str, Any]]) -> int:
     for position, note in enumerate(stored, start=1):
         # 每一条前面画一条分隔线（规格里的 --- 分隔）
         console.print("---")
+        # 标题行带上章节（笔记里记了的话），一眼看出这段话出自哪里
+        chapter = str(note.get("chapter") or "").strip()
         console.print(
-            "[bold]#{} {}[/bold]".format(note.get("index"), note.get("time") or "")
+            "[bold]#{} {}{}[/bold]".format(
+                note.get("index"),
+                note.get("time") or "",
+                " · {}".format(chapter) if chapter else "",
+            )
         )
-        # 引用按灰字显示，正文正常显示
+        # 引用与译文都按灰字显示（都是"别人的话"），自己的想法正常显示
         if note.get("quote"):
             console.print("[dim]{}{}[/dim]".format(_NOTE_QUOTE_PREFIX, note["quote"]))
+        if note.get("translation"):
+            console.print("[dim]译文：{}[/dim]".format(note["translation"]))
         if note.get("content"):
             console.print(str(note["content"]))
         # 最后一条不用等按键
@@ -1352,8 +1372,9 @@ def cmd_achievements(args: argparse.Namespace) -> int:
     idempotent, and a secret achievement keeps its name to itself until it fires.
     """
     try:
-        # 顺手补记一次（幂等）：把书库/生词本那边的进度也结算成解锁
-        _record_achievements("check")
+        # 顺手补记一次（幂等）：把书库/生词本那边的进度也结算成解锁；同时数一次
+        # "翻开了成就页"，"成就猎人"就是靠它（超过 10 次）
+        _record_achievements("achievements_view")
         # 读出全部成就：名字、描述、分类、进度、是否隐藏、解锁时间
         rows = achievements.list_achievements()
     except (
@@ -1404,6 +1425,37 @@ def cmd_achievements(args: argparse.Namespace) -> int:
     return 0
 
 
+def _word_egg(name: str) -> int:
+    """Print the name easter egg and unlock 名字彩蛋.
+
+    ``werd werd``, ``werd word`` and ``werd --werd`` all land here; *name* is only used
+    for the event payload (both spellings count as the same achievement).  The joke is
+    the point, so the achievement report is best effort: a broken state file must not
+    stop the two lines from printing.
+    """
+    # 两行玩笑：一行是名字，一行是提示
+    console.print(
+        "[bold]werd[/bold] = [bold]w[/bold]read 少了个 a，"
+        "[bold]w[/bold]ord 多了个 e —— 书是真读的。"
+    )
+    console.print("[dim]彩蛋：把 werd 反过来念一遍，或者敲 werd word。[/dim]")
+    # 报一次彩蛋事件（名字彩蛋就挂在这个指标上）
+    _report_unlocked(_record_achievements("name_egg", {"egg": name}))
+    return 0
+
+
+def cmd_werd(args: argparse.Namespace) -> int:
+    """Handle ``werd werd`` -- see :func:`_word_egg`."""
+    # 子命令名就是彩蛋名（werd 反着念还是 werd）
+    return _word_egg("werd")
+
+
+def cmd_word(args: argparse.Namespace) -> int:
+    """Handle ``werd word`` -- the same easter egg under the other spelling."""
+    # 另一个拼法：同样的玩笑，换个彩蛋名入库
+    return _word_egg("word")
+
+
 # 命令名 -> 处理函数 的映射表；main 靠它把解析结果分发出去
 _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "import": cmd_import,
@@ -1418,6 +1470,8 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "config": cmd_config,
     "toc": cmd_toc,
     "notes": cmd_notes,
+    "werd": cmd_werd,
+    "word": cmd_word,
 }
 
 
@@ -1429,6 +1483,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     # 启动事件：每天第一次打开 werd 都算数（"百日筑基""清晨第一眼"靠它）
     _report_unlocked(_record_achievements("daily_open", {}, now=_now()))
+    # `werd --werd`：名字彩蛋（选项形式，不需要子命令）
+    if bool(getattr(args, "werd", False)):
+        return _word_egg("werd")
+    # 一个子命令都没给：按 argparse 的老样子报错（用法提示 + 退出码 2 都不变）
+    if args.command is None:
+        parser.error("the following arguments are required: <command>")
     # 按子命令名取出对应的处理函数
     handler = _HANDLERS[args.command]
     try:

@@ -234,6 +234,7 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         ("daily_goal_minutes", 60, "每日阅读目标（分钟），0 = 关闭"),
         ("show_heatmap", True, "werd stats 里显示热力图"),
         ("achievement_sound", True, "解锁成就时响铃（\\a）"),
+        ("geo_lookup", True, "联网查所在位置用于地理成就；关掉 = 完全离线"),
     ),
     # 生词本相关
     "vocab": (

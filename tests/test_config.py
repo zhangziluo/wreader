@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 36 项（2026-09-23 新增 [translate] 段的 11 个键）
-    assert len(paths) == 36
+    # 当前 schema 共 37 项（2026-09-23：新增 [translate] 段的 11 个键与 stats.geo_lookup）
+    assert len(paths) == 37
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:

@@ -6,6 +6,9 @@ that the user can always open the data with an editor:
 * ``<data dir>/notes/<book_id>.md`` -- the notes themselves, one ``## 笔记 #N``
   section per note.  Markdown is *the* source of truth: :func:`load_notes` parses
   it back, so a note written by hand in an editor shows up like any other.
+  A section holds an optional blockquote (``> 引用``), an optional
+  ``> 章节: 第一章`` metadata line right under it, an optional ``译文：`` block and
+  the reader's own ``我的想法：`` text -- in that order.
 * ``<data dir>/notes/index.json`` -- a **derived cache** for the list view
   (title, count, last modified, preview).  It is regenerated from the markdown
   whenever it is missing or a note is saved, so it can never drift.
@@ -14,6 +17,11 @@ Everything here is plain data in and plain data out; the only side effects are
 the note files and the index.  Writes take the shared file lock
 (:mod:`wreader.lock`) so two terminals -- or two sessions on a machine you ssh
 into -- cannot lose each other's notes.
+
+Saving a note also pokes the achievements engine (:func:`check_note_achievements`),
+but only **after** the note is safely on disk and the lock is released: an
+unlock is a bonus, never a precondition, and a broken achievement state can
+never cost you a note.
 """
 
 # 延迟求值类型注解
@@ -48,6 +56,7 @@ __all__ = [
     "PREVIEW_LIMIT",
     "QUOTE_LIMIT",
     "NotesError",
+    "check_note_achievements",
     "clear_draft",
     "draft_file",
     "export_notes",
@@ -60,6 +69,8 @@ __all__ = [
     "notes_dir",
     "save_draft",
     "save_note",
+    "save_note_with_translation",
+    "total_note_count",
     "update_index",
 ]
 
@@ -81,6 +92,16 @@ _MY_TEXT = "我的想法："
 # 文件头的元数据行
 _HEADER_ID = "书籍ID:"
 _HEADER_CREATED = "创建时间:"
+# 引用在 markdown 里写成块引用（与阅读器的引用区 ``> `` 前缀一致）
+_QUOTE_PREFIX = "> "
+# 引用里的空行写成孤立的 ``>``，整段才是同一个块引用
+_QUOTE_BLANK = ">"
+# 章节元数据行（紧跟引用下方）：``> 章节: 第一章 科学边界``
+_CHAPTER_MARK = "章节:"
+# 译文小节的引导行（夹在引用与"我的想法"之间）
+_TRANSLATION_MARK = "译文："
+# 章节行的识别：可带 ``> ``、也可手写成普通行；中英文冒号都认
+_CHAPTER_RE = re.compile(r"^>?\s*章节\s*[:：]\s*(.*)$")
 # 导出时的默认文件名模板
 EXPORT_TEMPLATE = "notes_{}.md"
 # 草稿文件的标题行（一眼能看出这不是正式笔记）
@@ -152,10 +173,91 @@ def _split_body(body: List[str]) -> "tuple[str, str]":
     return "\n".join(lines).strip(), ""
 
 
+def _unquote(line: str) -> str:
+    """Drop the markdown blockquote prefix (``"> "`` / ``">"``) from *line*."""
+    # 新格式带 "> "，老格式（Phase 3）是纯文本：两种都要能读回来
+    if line.startswith(_QUOTE_PREFIX):
+        return line[len(_QUOTE_PREFIX) :]
+    # 孤立的 ">" 是引用里的空行
+    if line.rstrip() == _QUOTE_BLANK:
+        return ""
+    return line
+
+
+def _split_translation(lines: List[str]) -> "tuple[List[str], str]":
+    """Split the ``译文：`` block out of a section's quote part."""
+    for position, line in enumerate(lines):
+        stripped = _unquote(line).strip()
+        # 找到译文引导行：它下面的全归译文
+        if stripped.startswith(_TRANSLATION_MARK):
+            # 引导行后面挤着译文时，那一小段也算（和"我的想法："同一套写法）
+            inline = stripped[len(_TRANSLATION_MARK) :].strip()
+            rest = "\n".join(_unquote(part) for part in lines[position + 1 :]).strip()
+            return lines[:position], "\n".join(part for part in (inline, rest) if part).strip()
+    return lines, ""
+
+
+def _split_chapter(lines: List[str]) -> "tuple[List[str], str]":
+    """Split the ``> 章节:`` metadata line out of a section's quote part."""
+    kept: List[str] = []
+    chapter = ""
+    for line in lines:
+        match = _CHAPTER_RE.match(line.strip())
+        # 命中章节行：记下来，但不留在引用里（否则引用会被元数据污染）
+        if match:
+            chapter = match.group(1).strip()
+            continue
+        kept.append(line)
+    return kept, chapter
+
+
+def _split_quote(block: str) -> "tuple[str, str, str]":
+    """Return ``(quote, translation, chapter)`` from one section's quote part.
+
+    ⚠️ 引用正文里若**自己**有一行以 ``章节:`` 开头（或 ``译文：``），它会被当成元数据 ——
+    这是可读性与机器可解析性之间的取舍，写在文档里而不是隐式发生。
+    """
+    lines, translation = _split_translation(str(block or "").split("\n"))
+    lines, chapter = _split_chapter(lines)
+    # 剩下的都是引用：逐行剥掉块引用前缀
+    quote = "\n".join(_unquote(line) for line in lines).strip()
+    return quote, translation, chapter
+
+
+def _note_record(
+    index: int,
+    moment: str,
+    quote: str,
+    content: str,
+    chapter: Optional[str] = None,
+    translation: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build one note's structured form.
+
+    The shape is shared by :func:`parse_notes` and :func:`save_note` on purpose:
+    what a save returns is exactly what a later load hands back.
+    """
+    note: Dict[str, Any] = {
+        "index": index,
+        "time": moment,
+        "quote": quote,
+        "content": content,
+    }
+    # 有章节 / 译文才带上这两个键：老笔记的字典形状保持不变
+    name = str(chapter or "").strip()
+    if name:
+        note["chapter"] = name
+    text = str(translation or "").strip()
+    if text:
+        note["translation"] = text
+    return note
+
+
 def _make_note(index: int, moment: str, body: List[str]) -> Dict[str, Any]:
     """Build one note dict from its parsed pieces."""
-    quote, content = _split_body(body)
-    return {"index": index, "time": moment, "quote": quote, "content": content}
+    quote_block, content = _split_body(body)
+    quote, translation, chapter = _split_quote(quote_block)
+    return _note_record(index, moment, quote, content, chapter, translation)
 
 
 def parse_notes(text: str) -> List[Dict[str, Any]]:
@@ -207,6 +309,25 @@ def note_count(book_id: Any) -> int:
     return len(load_notes(book_id))
 
 
+def total_note_count() -> int:
+    """Return how many notes exist across every book.
+
+    This is the number the 笔记达人 achievement is written against, so it counts
+    what the **markdown files** hold instead of a running counter -- a note typed
+    by hand in an editor counts too.  A book whose file cannot be read is skipped
+    rather than zeroing the total.
+    """
+    total = 0
+    for book_id in _note_books():
+        try:
+            # 逐本数（复用 load_notes，口径与 `werd notes` 完全一致）
+            total += len(load_notes(book_id))
+        except NotesError:
+            # 某一本书的文件坏了：跳过它，别把别人写的条数一起清零
+            continue
+    return total
+
+
 def _clip_quote(text: Any) -> str:
     """Return *text* trimmed and clipped to :data:`QUOTE_LIMIT` characters."""
     quote = str(text or "").strip()
@@ -230,15 +351,47 @@ def _header(book_id: Any, book_title: Any, moment: datetime) -> str:
     )
 
 
-def _section(index: int, moment: datetime, quote: str, content: str) -> str:
-    """Return the markdown block for one note."""
+def _quote_block(quote: str, chapter: Optional[str] = None) -> str:
+    """Render the quote -- and the chapter metadata line under it -- as a blockquote."""
+    # 引用按行加 "> " 前缀；引用里的空行写成孤立的 ">"
+    lines: List[str] = []
+    for line in str(quote or "").strip().split("\n"):
+        lines.append(_QUOTE_PREFIX + line if line.strip() else _QUOTE_BLANK)
+    # 整个引用都是空的时候不写这一块（只有章节 / 译文也要是干净的 markdown）
+    if not str(quote or "").strip():
+        lines = []
+    # 章节是元数据，紧跟引用下方（规格：> 引用 -> > 章节: xxx）
+    name = str(chapter or "").strip()
+    if name:
+        lines.append("{}{} {}".format(_QUOTE_PREFIX, _CHAPTER_MARK, name))
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n\n"
+
+
+def _section(
+    index: int,
+    moment: datetime,
+    quote: str,
+    content: str,
+    chapter: Optional[str] = None,
+    translation: Optional[str] = None,
+) -> str:
+    """Return the markdown block for one note.
+
+    Order matters: 引用（含 ``> 章节:`` 元数据）→ 可选的 ``译文：`` → ``我的想法：``.
+    """
     # 时间用"年月日 时分"，比 ISO 更适合人读；-- 只是排版
     stamp = moment.strftime("%Y-%m-%d %H:%M")
-    # 没有引用时就不写那一段（只留"我的想法"）
-    quote_block = "{}\n\n".format(quote) if quote else ""
-    return "## 笔记 #{:d} — {}\n\n{}{}\n{}\n\n".format(
-        index, stamp, quote_block, _MY_TEXT, content
-    )
+    # 引用块（没有引用也没章节时是空串）
+    parts = [_quote_block(quote, chapter)]
+    # 译文块：只有真的有译文才写那一行引导语
+    body = str(translation or "").strip()
+    if body:
+        parts.append("{}\n{}\n\n".format(_TRANSLATION_MARK, body))
+    # 正文块（可以为空：只摘抄、只翻译都是合法笔记）
+    parts.append("{}\n{}\n\n".format(_MY_TEXT, content))
+    return "## 笔记 #{:d} — {}\n\n{}".format(index, stamp, "".join(parts))
 
 
 def _write_text(path: Path, text: str) -> Path:
@@ -309,8 +462,10 @@ def _title_from_file(book_id: Any) -> str:
 
 def _preview_of(note: Dict[str, Any]) -> str:
     """Return the one-line preview shown by ``werd notes``."""
-    # 优先用"我的想法"，没有就退回引用
-    body = str(note.get("content") or note.get("quote") or "")
+    # 优先用"我的想法"，没有就退回引用，再没有就用译文
+    body = str(
+        note.get("content") or note.get("quote") or note.get("translation") or ""
+    )
     # 压成一行，免得列表里出现换行
     flat = " ".join(body.split())
     return flat[:PREVIEW_LIMIT]
@@ -353,24 +508,38 @@ def save_note(
     quote_text: Any,
     user_text: Any,
     now: Optional[datetime] = None,
+    chapter_name: Optional[Any] = None,
+    check_achievements: bool = True,
+    translation_text: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """Append one note to ``<book_id>.md`` and refresh the index.
 
-    Returns the stored note (``{index, time, quote, content}``), or ``None`` when
-    there is nothing to store -- an empty quote **and** an empty body is a no-op,
-    not an error.  The file is opened in append mode, so an existing file is never
-    overwritten; the header is only written when the file is created.
+    Returns the stored note (``{index, time, quote, content}``, plus ``chapter`` /
+    ``translation`` when there is one), or ``None`` when there is nothing to store
+    -- an empty quote **and** an empty body is a no-op, not an error.  The file is
+    opened in append mode, so an existing file is never overwritten; the header is
+    only written when the file is created.
+
+    *chapter_name* comes from the table of contents of the book being read (the
+    reader passes ``Pager.chapter_title``) and is stored as a ``> 章节: …`` line
+    under the quote.  *translation_text* is the optional ``译文：`` block.
 
     The append and the index rewrite happen under **one** lock: the notes
     directory is serialised as a whole, which sidesteps any lock ordering problem
-    between the note file and the index.
+    between the note file and the index.  The achievement check runs **after** the
+    lock is released, so a slow or broken achievements file can never cost you a
+    note; callers that want to show the unlock themselves pass
+    ``check_achievements=False`` and call :func:`check_note_achievements`.
     """
     # 引用先按长度截断
     quote = _clip_quote(quote_text)
     # 正文去掉首尾空白（中间的换行保留）
     content = str(user_text or "").strip()
-    # 两边都空：按规格"跳过不写"
-    if not quote and not content:
+    # 章节名与译文：空串按"没有"处理
+    chapter = str(chapter_name or "").strip()
+    translation = str(translation_text or "").strip()
+    # 三样都空：按规格"跳过不写"
+    if not quote and not content and not translation:
         return None
     # 时间戳：测试可注入固定时刻
     moment = now or datetime.now()
@@ -382,7 +551,7 @@ def save_note(
             existing = parse_notes(raw)
             # 序号 = 现有最大序号 + 1（不靠容易漂移的计数）
             index = max((int(note.get("index") or 0) for note in existing), default=0) + 1
-            block = _section(index, moment, quote, content)
+            block = _section(index, moment, quote, content, chapter, translation)
             if not raw:
                 # 第一次写这本书：先落文件头
                 block = _header(book_id, book_title, moment) + block
@@ -394,12 +563,14 @@ def save_note(
             with open(path, "a", encoding="utf-8") as stream:
                 stream.write(block)
             # 这一条的结构化形式（与 load_notes 的返回形状一致）
-            note = {
-                "index": index,
-                "time": moment.strftime("%Y-%m-%d %H:%M"),
-                "quote": quote,
-                "content": content,
-            }
+            note = _note_record(
+                index,
+                moment.strftime("%Y-%m-%d %H:%M"),
+                quote,
+                content,
+                chapter,
+                translation,
+            )
             # 顺手刷新索引（已经在锁里，所以走不加锁的内部函数）
             entries = _read_index()
             entries[_slug(book_id)] = _entry_for(
@@ -411,7 +582,64 @@ def save_note(
             _write_index(entries)
     except (OSError, UnicodeDecodeError) as exc:
         raise NotesError("cannot write {}: {}".format(path, exc)) from exc
+    # 笔记已经在磁盘上、锁也放了，才去推成就判定（慢或失败都不影响这次保存）
+    if check_achievements:
+        check_note_achievements(now=moment)
     return note
+
+
+def save_note_with_translation(
+    book_id: Any,
+    book_title: Any,
+    quote_text: Any,
+    translation_text: Any,
+    user_text: str = "",
+    now: Optional[datetime] = None,
+    chapter_name: Optional[Any] = None,
+    check_achievements: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Save a note built from a translation: 引用 + 译文 + 用户想法.
+
+    This is the seam the reader's "translate the marked selection" flow writes
+    through: the quote and the machine translation are already decided by the
+    time the panel opens, and the editor stays blank for the reader's own
+    thoughts (``user_text``).
+
+    ⚠️ 规格里这个函数写的是 ``-> None``；这里返回存下来的那条笔记（与
+    :func:`save_note` 一致），调用方照样可以忽略返回值。空引用 + 空译文 +
+    空想法仍然按"跳过不写"处理（返回 ``None``），所以空笔记永远不生成文件。
+    """
+    return save_note(
+        book_id,
+        book_title,
+        quote_text,
+        user_text,
+        now=now,
+        chapter_name=chapter_name,
+        check_achievements=check_achievements,
+        translation_text=translation_text,
+    )
+
+
+def check_note_achievements(now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """Record a ``note_add`` event and unlock whatever the new total earns.
+
+    Returns the achievements unlocked **now** (usually an empty list).  Everything
+    is best effort on purpose: a broken library index, an unwritable data
+    directory or an achievements file somebody hand-edited into garbage all end up
+    as an empty list.  By the time this runs the note is already on disk, and no
+    badge is worth an exception in the middle of saving one.
+    """
+    try:
+        # 延迟导入：achievements 在模块级就 import notes（要用 total_note_count），
+        # 这里再在模块级互相 import 会成环，所以放在函数里
+        from . import achievements
+
+        # 计数交给成就引擎现算（它读的是 markdown，不是内存里的计数器）
+        return achievements.check_achievements("note_add", None, now=now)
+    except Exception:
+        # 成就只是锦上添花：任何故障都不该冒泡给保存笔记的调用方
+        return []
 
 
 # ---------------------------------------------------------------------- drafts

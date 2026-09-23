@@ -21,8 +21,8 @@ from wreader import config, library, stats
 def test_load_achievements_reads_the_packaged_file() -> None:
     # 读打包的那份成就定义
     definitions = stats.load_achievements()
-    # 当前随包发布 28 条（Phase 1：原有 10 条 + 新加的 18 条）
-    assert len(definitions) == 28
+    # 当前随包发布 48 条（Phase 1 的 28 条 + 笔记联动的"笔记达人" + Phase 2/3 的 19 条）
+    assert len(definitions) == 48
     for achievement in definitions:
         # 三要素都要非空
         assert achievement["id"]
@@ -474,7 +474,7 @@ def test_build_report_is_complete_and_json_serialisable(achievements_document) -
     assert report["night_seconds"] == 7200
     assert report["longest_session_seconds"] == 14400
     assert report["streak_min_seconds"] == stats.STREAK_SECONDS
-    assert report["achievements"]["total"] == 28
+    assert report["achievements"]["total"] == 48
     # 每本书的累计时长（按降序）
     assert report["books"] == [
         {"id": "aaa", "title": "Read a lot", "seconds": 7200},
@@ -527,7 +527,7 @@ def test_build_report_of_an_empty_library(isolated_home) -> None:
     )
     assert report["total_seconds"] == 0
     assert report["books"] == []
-    assert report["achievements"] == {"unlocked": [], "unlocked_count": 0, "total": 28}
+    assert report["achievements"] == {"unlocked": [], "unlocked_count": 0, "total": 48}
     # 带生成时间
     assert report["generated_at"]
 

@@ -126,6 +126,13 @@
     "condition": "translations >= 1"
   },
   {
+    "id": "note_master",
+    "name": "🖊️ 笔记达人",
+    "desc": "累计写下 50 条笔记",
+    "category": "数据积累",
+    "condition": "notes_count >= 50"
+  },
+  {
     "id": "first_hour",
     "name": "⏱️ 初窥门径",
     "desc": "累计阅读满 1 小时",
@@ -194,5 +201,148 @@
     "desc": "周六或周日累计阅读 3 小时",
     "category": "阅读习惯",
     "condition": "weekend_time >= 10800"
+  },
+  {
+    "id": "space_combo",
+    "name": "👏 手速达人",
+    "desc": "一口气连按 100 次空格翻页，中间不碰别的键",
+    "category": "操作彩蛋",
+    "condition": "space_combo >= 100"
+  },
+  {
+    "id": "page_streak",
+    "name": "🌀 翻页永动机",
+    "desc": "连续翻页 500 次不中断（j、空格、回车、方向键都算）",
+    "category": "操作彩蛋",
+    "condition": "page_streak >= 500"
+  },
+  {
+    "id": "arrow_chapters",
+    "name": "🕹️ 方向键怀旧",
+    "desc": "只用方向键翻页，读完一整章",
+    "category": "操作彩蛋",
+    "condition": "arrow_chapters >= 1"
+  },
+  {
+    "id": "translate_maniac",
+    "name": "🔤 翻译狂魔",
+    "desc": "累计按下 100 次翻译键（t 翻当前屏 / T 翻整章）",
+    "category": "操作彩蛋",
+    "condition": "translate_hits >= 100"
+  },
+  {
+    "id": "help_fan",
+    "name": "❓ 帮助迷",
+    "desc": "在阅读器里打开帮助页（?）",
+    "category": "操作彩蛋",
+    "condition": "help_opens >= 1"
+  },
+  {
+    "id": "tiny_terminal",
+    "name": "🪡 极限尺寸",
+    "desc": "把终端缩到 40 列以内，在这样的窗口里读满 5 分钟",
+    "category": "难度挑战",
+    "condition": "narrow_seconds >= 300"
+  },
+  {
+    "id": "narrow_chapter",
+    "name": "📐 窄屏挑战",
+    "desc": "在 60 列以内的窄窗口里读完一章",
+    "category": "难度挑战",
+    "condition": "narrow_chapters >= 1"
+  },
+  {
+    "id": "recovery_master",
+    "name": "🧯 恢复大师",
+    "desc": "被意外中断 3 次，每次都接着上次的位置读下去",
+    "category": "难度挑战",
+    "condition": "crash_recovers >= 3"
+  },
+  {
+    "id": "changed_mind",
+    "name": "🙃 我反悔",
+    "desc": "意外中断之后选择不恢复，重新读起",
+    "category": "难度挑战",
+    "condition": "recover_declined >= 1"
+  },
+  {
+    "id": "geo_continents",
+    "name": "🌏 环游亚欧非美大洋",
+    "desc": "在 5 个大洲上都读过书",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "geo_continents >= 5"
+  },
+  {
+    "id": "geo_citizen",
+    "name": "🛂 世界公民",
+    "desc": "在 3 个以上的国家或地区读过书",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "geo_countries >= 3"
+  },
+  {
+    "id": "geo_feud",
+    "name": "🏰 百年世仇",
+    "desc": "在英法两国都读过书（那笔账算到 1453 年）",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "geo_feud >= 1"
+  },
+  {
+    "id": "holiday_reader",
+    "name": "🎆 节日读者",
+    "desc": "在节日里打开 werd 读书（元旦、春节、圣诞……）",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "holiday_opens >= 1"
+  },
+  {
+    "id": "name_egg",
+    "name": "🥚 名字彩蛋",
+    "desc": "敲一次 `werd werd` 或 `werd word`",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "easter_eggs >= 1"
+  },
+  {
+    "id": "achievement_hunter",
+    "name": "🏹 成就猎人",
+    "desc": "翻开成就页超过 10 次",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "achievement_views > 10"
+  },
+  {
+    "id": "env_cloud",
+    "name": "☁️ 云端书虫",
+    "desc": "在云主机（AWS / GCP / 阿里云……）上读书",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "env_cloud >= 1"
+  },
+  {
+    "id": "env_wsl",
+    "name": "🪟 穿越子系统",
+    "desc": "在 Windows 的 WSL 里读书",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "env_wsl >= 1"
+  },
+  {
+    "id": "env_tmux",
+    "name": "🧅 套娃终端",
+    "desc": "在 tmux 或 screen 里读书",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "env_tmux >= 1"
+  },
+  {
+    "id": "env_editable",
+    "name": "🧑‍💻 开发者模式",
+    "desc": "用 `pip install -e` 装的可编辑版本读书（源码就在手边）",
+    "category": "隐藏",
+    "secret": true,
+    "condition": "env_editable >= 1"
   }
 ]

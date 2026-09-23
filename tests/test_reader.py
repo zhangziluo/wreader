@@ -2248,3 +2248,501 @@ def test_note_panel_reports_a_save_failure(panel_window, pager, monkeypatch) -> 
     # 引用还在（没被清掉），用户不会白写
     assert pager.note_buffer == "重要引用"
     assert "失败" in pager.current_message()
+
+
+# ------------------------------------------- Phase 2: live key/size bookkeeping
+def test_note_key_counts_the_longest_space_combo(pager) -> None:
+    # 空格连击：一直按空格才累积，别的键一按就断
+    for _ in range(7):
+        pager.note_key(" ")
+    assert pager.key_maxima["space_combo"] == 7
+    pager.note_key("j")
+    assert pager.space_run == 0
+    # 断掉之后重新数，峰值保留更大的那次
+    for _ in range(3):
+        pager.note_key(" ")
+    assert pager.key_maxima["space_combo"] == 7
+
+
+def test_note_key_counts_consecutive_page_turns(pager) -> None:
+    # 连续翻页：翻页键都算（含方向键），换个别的手势（比如搜索）就断
+    for key in ("j", " ", "\n", curses.KEY_DOWN, curses.KEY_NPAGE):
+        pager.note_key(key)
+    assert pager.key_maxima["page_streak"] == 5
+    pager.note_key("/")
+    assert pager.page_run == 0
+    # 往回翻也算翻页
+    pager.note_key("k")
+    assert pager.page_run == 1
+
+
+def test_note_key_tracks_a_pure_arrow_chapter(pager) -> None:
+    # 只用方向键：arrow_keys 计数，arrow_only 保持为真
+    for _ in range(6):
+        pager.note_key(curses.KEY_DOWN)
+    assert pager.arrow_keys == 6
+    assert pager.arrow_only is True
+    # 按了 j 就说明这一章不是"纯方向键"读的
+    pager.note_key("j")
+    assert pager.arrow_only is False
+    # 但随手加个书签（b）、翻一下翻译（t）不该算破戒
+    pager.note_key("b")
+    pager.note_key("t")
+    assert pager.arrow_only is False
+
+
+def test_note_chapter_change_needs_a_few_arrow_presses(pager) -> None:
+    # 一个方向键都没按就换章（比如 [ 跳章）：不算"用方向键读完"
+    pager.arrow_only = True
+    pager.note_chapter_change()
+    assert pager.key_counters["arrow_chapters"] == 0
+    # 只按了两下也不算（在章界上戳一下就能解锁太便宜了）
+    pager.note_key(curses.KEY_DOWN)
+    pager.note_key(curses.KEY_DOWN)
+    pager.note_chapter_change()
+    assert pager.key_counters["arrow_chapters"] == 0
+    # 攒够 5 下就算一章
+    for _ in range(reader._ARROW_CHAPTER_MIN_KEYS):
+        pager.note_key(curses.KEY_DOWN)
+    pager.note_chapter_change()
+    assert pager.key_counters["arrow_chapters"] == 1
+    # 结算之后本章重新记账
+    assert (pager.arrow_keys, pager.arrow_only) == (0, True)
+
+
+def test_note_chapter_change_counts_a_narrow_chapter(pager) -> None:
+    # 窄窗口（≤60 列）里读完一章：记一笔
+    pager.terminal_width = reader.achievements.NARROW_CHAPTER_COLUMNS
+    pager.note_chapter_change()
+    assert pager.key_counters["narrow_chapters"] == 1
+    # 宽窗口里读完一章：不算
+    pager.terminal_width = reader.achievements.NARROW_CHAPTER_COLUMNS + 1
+    pager.note_chapter_change()
+    assert pager.key_counters["narrow_chapters"] == 1
+    # 还不知道宽度（没有终端）：也不算
+    pager.terminal_width = 0
+    pager.note_chapter_change()
+    assert pager.key_counters["narrow_chapters"] == 1
+
+
+def test_moving_into_the_next_chapter_settles_it_through_sync(pager) -> None:
+    # 换章结算挂在 _sync_chapter 上：翻到第二章时第一章就该被结算
+    pager.terminal_width = 100
+    for _ in range(reader._ARROW_CHAPTER_MIN_KEYS):
+        pager.note_key(curses.KEY_DOWN)
+    pager.move_to(5)  # 第 5 行是「第二章」的开头
+    assert pager.key_counters["arrow_chapters"] == 1
+
+
+def test_note_width_only_runs_the_clock_while_narrow(pager) -> None:
+    # 宽窗口：不走秒表
+    pager.note_width(100, now=1000.0)
+    pager.note_width(120, now=1300.0)
+    assert pager.key_counters["narrow_seconds"] == 0
+    # 第 2000 秒缩到 40 列，第 2200 秒拉宽：这 200 秒全算窄屏阅读
+    pager.note_width(reader.achievements.NARROW_COLUMNS, now=2000.0)
+    pager.note_width(200, now=2200.0)
+    assert pager.key_counters["narrow_seconds"] == 200.0
+    # 拉宽之后又过了 100 秒：不计（秒表已经停了）
+    pager.note_width(200, now=2300.0)
+    assert pager.key_counters["narrow_seconds"] == 200.0
+    # 会话结束前还窄着：close_width_window 把最后那 45 秒补上
+    pager.note_width(30, now=3000.0)
+    pager.close_width_window(now=3045.0)
+    assert pager.key_counters["narrow_seconds"] == 245.0
+    assert pager.narrow_started is None
+
+
+def test_note_width_remembers_the_terminal_width(pager) -> None:
+    # terminal_width 是真实列数（viewport_width 是正文区宽度，两回事）
+    pager.note_width(73)
+    assert pager.terminal_width == 73
+    # 荒谬的宽度也要夹到至少 1 列
+    pager.note_width(0)
+    assert pager.terminal_width == 1
+
+
+def test_pending_deltas_are_only_cleared_once_reported(pager) -> None:
+    # 攒下的增量：报告前一直在（不会因为"没撞门槛"就丢）
+    pager.key_counters["translate_hits"] += 4
+    pager.key_counters["narrow_seconds"] += 2.7
+    assert pager.pending_deltas() == {"translate_hits": 4, "narrow_seconds": 2}
+    assert pager.pending_deltas()["translate_hits"] == 4
+    # 真的报出去之后才推进水位（窄屏秒数按整数截断）
+    pager.commit_report(pager.pending_deltas())
+    assert pager.pending_deltas() == {}
+    # 再攒一点：只报新增的部分
+    pager.key_counters["translate_hits"] += 1
+    assert pager.pending_deltas() == {"translate_hits": 1}
+
+
+def test_metric_values_add_the_baseline_and_the_session() -> None:
+    # 用一个干净的 Pager：基线 99 + 本次 1 = 100，正好压在门槛上
+    pager = reader.Pager(list(BOOK_LINES), page_height=4)
+    pager.baseline = {"translate_hits": 99, "space_combo": 30}
+    pager.key_counters["translate_hits"] += 1
+    pager.key_maxima["space_combo"] = 20
+    values = pager.metric_values()
+    assert values["translate_hits"] == 100
+    # 峰值取基线与会话里更大的那个
+    assert values["space_combo"] == 30
+    pager.key_maxima["space_combo"] = 44
+    assert pager.metric_values()["space_combo"] == 44
+
+
+def test_announce_shows_a_notice_for_a_while(pager) -> None:
+    # 没通知时是空串
+    assert pager.current_notice() == ""
+    pager.announce("手速达人")
+    assert pager.current_notice() == "手速达人"
+    # 时间一到就自己消失（不挡按键、也不需要用户关）
+    pager.notice_until = 0.0
+    assert pager.current_notice() == ""
+
+
+# --------------------------------------------------- Phase 2: the help page
+def test_help_lines_cover_every_shortcut_the_pager_answers(pager) -> None:
+    lines = reader.help_lines()
+    text = "\n".join(lines)
+    # 帮助页得真的提到这些键，否则"帮助迷"打开看到的是空话
+    for token in ("q", "j", "Tab", "?", "Ctrl+S", "/关键词", "t", "o"):
+        assert token in text, token
+    # 返回的是一份拷贝：调用方改坏了不影响模块常量
+    lines.append("junk")
+    assert "junk" not in reader.help_lines()
+
+
+def test_help_layout_refuses_a_screen_that_is_too_small() -> None:
+    lines = reader.help_lines()
+    # 正常终端：盒子居中、留出标题与脚注两行
+    layout = reader._help_layout(24, 80, lines)
+    assert layout is not None
+    rows, cols, top, left, visible = layout
+    assert rows <= 22 and cols < 80 and visible == rows - 2
+    assert top >= 0 and left >= 0
+    # 太矮 / 太窄都返回 None（调用方会说"屏幕太小"而不是画一团乱）
+    assert reader._help_layout(4, 80, lines) is None
+    assert reader._help_layout(24, 10, lines) is None
+    assert reader._help_layout(24, 80, []) is None
+
+
+def test_help_overlay_paints_the_page_and_closes_on_q(window, pager) -> None:
+    # 预置一个 q：打开帮助页后按它关闭
+    window.keys = ["q"]
+    reader._help_overlay(window, pager)
+    drawn = "".join(text for _, _, text, _ in window.writes)
+    # 标题、第一屏的分类小标题与快捷键都在
+    assert "快捷键一览" in drawn
+    assert "【翻页】" in drawn
+    assert "下一页" in drawn
+    # 10 行高的假窗口放不下整页：脚注要如实报出"还有多少行"
+    assert "还有" in drawn
+    # 轮询间隔由 finally 恢复（FakeStdscr 不记录 timeout，这里只保证没抛异常）
+
+
+def test_help_overlay_reports_the_help_event(window, pager) -> None:
+    window.keys = ["q", "q"]
+    # 打开两次帮助页：帮助迷就是按次数解锁的
+    reader._help_overlay(window, pager)
+    reader._help_overlay(window, pager)
+    state = reader.achievements.load_state()
+    assert state["metrics"]["help_opens"] == 2
+
+
+def test_help_overlay_scrolls_with_j(window, pager) -> None:
+    # 用 j 往下滚一行：滚动后第一屏的第一行应当不再是标题
+    window.keys = ["j", "q"]
+    reader._help_overlay(window, pager)
+    # 第一次画的是 offset=0，第二次画的是 offset=1（少了标题那一行）
+    drawn = [text for _, _, text, _ in window.writes]
+    assert any("快捷键一览" in text for text in drawn)
+    assert any("【翻页】" in text and "快捷键一览" not in text for text in drawn)
+
+
+def test_help_key_opens_the_page_from_handle_key(window, pager, monkeypatch) -> None:
+    calls: List[Tuple[Any, ...]] = []
+    # 把浮层本身换掉：这里只验证 "?" 真的接到了它
+    monkeypatch.setattr(reader, "_help_overlay", lambda *args: calls.append(args))
+    assert reader.handle_key(window, pager, "?") is True
+    assert len(calls) == 1
+
+
+def test_help_key_is_not_counted_as_a_page_turn(window, pager, monkeypatch) -> None:
+    monkeypatch.setattr(reader, "_help_overlay", lambda *args: None)
+    # 问号既不是翻页键、也不该打断"只用方向键"的一章
+    reader.handle_key(window, pager, "?")
+    assert pager.page_run == 0
+    assert pager.arrow_only is True
+
+
+# --------------------------------------------- Phase 2: the in-screen notice
+def test_notice_layout_is_none_on_a_screen_too_small_for_it() -> None:
+    # 正常终端：顶部贴边、右侧留最后一列、固定三行
+    layout = reader._notice_layout("手速达人", 24, 80)
+    assert layout is not None
+    rows, cols, top, left = layout
+    assert (rows, top) == (3, 0)
+    assert left + cols <= 79
+    # 太矮 / 太窄都放不下：调用方退到消息行
+    assert reader._notice_layout("手速达人", 4, 80) is None
+    assert reader._notice_layout("手速达人", 24, 20) is None
+
+
+def test_draw_paints_the_notice_in_the_corner(window, pager) -> None:
+    pager.announce("手速达人")
+    reader._draw(window, pager, datetime(2026, 9, 23, 10, 0))
+    drawn = "".join(text for _, _, text, _ in window.writes)
+    assert "成就解锁" in drawn
+    assert "手速达人" in drawn
+
+
+def test_message_row_takes_over_when_the_notice_does_not_fit(pager) -> None:
+    # 小窗口里通知画不出来：让它在消息行顶上（而不是悄悄消失）
+    row = reader._message_row(pager, 30, "手速达人")
+    assert "🏆 手速达人" in row
+    # 没有通知时照常显示快捷键提示
+    assert "q退出" in reader._message_row(pager, 60)
+
+
+def test_announce_unlocks_lists_at_most_three_names(pager) -> None:
+    newly = [
+        {"id": "a", "name": "甲"},
+        {"id": "b", "name": "乙"},
+        {"id": "c", "name": "丙"},
+        {"id": "d", "name": "丁"},
+    ]
+    reader._announce_unlocks(pager, newly)
+    notice = pager.current_notice()
+    # 只列前三个，后面报个数（别把整个正文盖住）
+    assert "甲、乙、丙" in notice
+    assert "等 4 个" in notice
+    assert "丁" not in notice
+
+
+# ------------------------------------------- Phase 2: when the tick may write
+def test_achievement_tick_does_nothing_without_a_crossing(pager, monkeypatch) -> None:
+    calls: List[str] = []
+
+    def record(event_type: str, data: Any = None, **kwargs: Any) -> List[Any]:
+        # 记下每一次真正发给引擎的事件
+        calls.append(event_type)
+        return []
+
+    monkeypatch.setattr(reader.achievements, "check_achievements", record)
+    # 门槛表为空（单元测试里没跑 open_reader）：一次按键都不该写盘
+    pager.thresholds = {}
+    pager.baseline = {}
+    assert reader._achievement_tick(pager, "key") == []
+    assert calls == []
+    # 有门槛但没到：还是不写
+    pager.thresholds = {"translate_hits": (100,)}
+    pager.baseline = {"translate_hits": 0}
+    pager.key_counters["translate_hits"] = 3
+    reader._achievement_tick(pager, "key")
+    assert calls == []
+
+
+def test_achievement_tick_reports_once_per_threshold(pager, monkeypatch) -> None:
+    calls: List[Dict[str, Any]] = []
+
+    def record(event_type: str, data: Any = None, **kwargs: Any) -> List[Any]:
+        # 记下事件与载荷
+        calls.append({"event": event_type, "data": data or {}})
+        return [{"id": "help_fan", "name": "帮助迷"}]
+
+    monkeypatch.setattr(reader.achievements, "check_achievements", record)
+    pager.thresholds = {"translate_hits": (2,)}
+    pager.baseline = {"translate_hits": 0}
+    pager.key_counters["translate_hits"] = 2
+    # 越过门槛：这一次真的发出去，并把增量带上
+    newly = reader._achievement_tick(pager, "key")
+    assert [item["id"] for item in newly] == ["help_fan"]
+    assert calls[0]["event"] == "key"
+    assert calls[0]["data"]["deltas"] == {"translate_hits": 2}
+    # 解锁了就把名字亮在屏内（5 秒通知）
+    assert pager.current_notice() == "帮助迷"
+    # 同一条线不再重复触发（也就不会重复写状态文件）
+    reader._achievement_tick(pager, "key")
+    assert len(calls) == 1
+    assert pager.pending_deltas() == {}
+
+
+def test_achievement_tick_keeps_the_deltas_when_the_engine_is_unreachable(
+    pager, monkeypatch
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        # 引擎坏了：_fire_event 会吞掉异常并返回 None
+        raise reader.achievements.AchievementsError("broken")
+
+    monkeypatch.setattr(reader.achievements, "check_achievements", boom)
+    pager.thresholds = {"help_opens": (1,)}
+    pager.baseline = {"help_opens": 0}
+    pager.key_counters["help_opens"] = 1
+    assert reader._achievement_tick(pager, "key") == []
+    # 水位没推进、门槛也没被标成"已触发"：下一次接着报，一条数据都不丢
+    assert pager.pending_deltas() == {"help_opens": 1}
+    assert pager.fired == []
+
+
+def test_prepare_achievements_marks_what_the_baseline_already_met(
+    isolated_home, pager, monkeypatch
+) -> None:
+    # 基线里 translate_hits 已经是 100：那条线在开书时就该被标成"已触发"
+    monkeypatch.setattr(
+        reader.achievements, "metric_thresholds", lambda definitions=None: {"translate_hits": (100, 500)}
+    )
+    monkeypatch.setattr(
+        reader.achievements, "session_metrics", lambda path=None, document=None: {"translate_hits": 100}
+    )
+    reader._prepare_achievements(pager, {})
+    assert pager.baseline == {"translate_hits": 100}
+    assert ("translate_hits", 100) in pager.fired
+    # 500 还没到：留给这次会话去触发
+    assert ("translate_hits", 500) not in pager.fired
+
+
+def test_prepare_achievements_survives_a_broken_definitions_file(
+    isolated_home, pager, monkeypatch
+) -> None:
+    def boom(definitions: Any = None) -> Any:
+        raise reader.stats.StatsError("bad definitions")
+
+    monkeypatch.setattr(reader.achievements, "metric_thresholds", boom)
+    reader._prepare_achievements(pager, {})
+    # 定义坏了：没有门槛表（不做实时判定），但不崩
+    assert pager.thresholds == {}
+
+
+# ------------------------------------------- Phase 2: the crash recovery flow
+def test_marker_round_trip_and_clear(pager) -> None:
+    # 没读过书：没有现场
+    assert reader.read_marker() == {}
+    # 写现场：书、行号、段内偏移、预览、时间、pid 都在
+    pager.position = 3
+    pager.line_offset = 1
+    assert reader.write_marker(pager, moment=datetime(2026, 9, 23, 10, 0)) is True
+    marker = reader.read_marker()
+    assert marker["book_id"] == pager.book_id
+    assert (marker["position"], marker["offset"]) == (3, 1)
+    assert marker["preview"] == BOOK_LINES[3]
+    assert marker["started"] == "2026-09-23T10:00:00"
+    assert marker["pid"]
+    # 正常退出：清掉现场
+    reader.clear_marker()
+    assert reader.read_marker() == {}
+    # 再清一次也不会炸（文件本来就不在了）
+    reader.clear_marker()
+
+
+def test_read_marker_tolerates_a_torn_file(isolated_home) -> None:
+    # 写了一半就被 kill：当作没有现场（宁可不问，也不崩）
+    path = reader.marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"book_id": "abc"', encoding="utf-8")
+    assert reader.read_marker() == {}
+    # 结构不对（列表）同样容错
+    path.write_text("[]", encoding="utf-8")
+    assert reader.read_marker() == {}
+
+
+def test_save_position_refreshes_the_marker(imported) -> None:
+    # 自动保存时顺手刷新现场：崩溃后恢复的是最近一次保存的位置
+    pager = reader.Pager(list(BOOK_LINES), book_id=imported["zh"], page_height=4)
+    pager.position = 2
+    assert reader.save_position(pager) is True
+    assert reader.read_marker()["position"] == 2
+
+
+def test_offer_recovery_restores_the_position_and_reports_it(
+    window, pager, monkeypatch
+) -> None:
+    # 用户回答"接着上次读"
+    monkeypatch.setattr(reader, "_confirm", lambda *args, **kwargs: True)
+    reader._offer_recovery(
+        window,
+        pager,
+        {"position": 6, "offset": 2, "started": "2026-09-23T10:00:00", "preview": "上次那行"},
+    )
+    # 回到现场（行号 + 段内偏移）
+    assert (pager.position, pager.line_offset) == (6, 2)
+    state = reader.achievements.load_state()
+    assert state["metrics"]["crash_recovers"] == 1
+
+
+def test_offer_recovery_records_changing_your_mind(window, pager, monkeypatch) -> None:
+    # 用户选择从头开始：位置不动，"我反悔"记一笔
+    monkeypatch.setattr(reader, "_confirm", lambda *args, **kwargs: False)
+    reader._offer_recovery(window, pager, {"position": 6, "started": ""})
+    assert pager.position == 0
+    state = reader.achievements.load_state()
+    assert state["metrics"]["recover_declined"] == 1
+    assert state["metrics"]["crash_recovers"] == 0
+
+
+def test_offer_recovery_clamps_a_wild_position(window, pager, monkeypatch) -> None:
+    # 现场文件被手改成越界 / 负数：夹进合法范围，不崩
+    monkeypatch.setattr(reader, "_confirm", lambda *args, **kwargs: True)
+    reader._offer_recovery(window, pager, {"position": 9999, "offset": -3})
+    assert pager.position == pager.total - 1
+    assert pager.line_offset == 0
+
+
+# --------------------------------------------- Phase 3: env / geo probes
+def test_probe_geo_is_skipped_when_the_setting_is_off(pager, monkeypatch) -> None:
+    calls: List[str] = []
+
+    def fake_load(**kwargs: Any) -> Any:
+        # 真去查了才记一笔（关掉设置时这一步都不该发生）
+        calls.append("load")
+        return {"country_code": "JP"}
+
+    monkeypatch.setattr(reader.geo, "load_location", fake_load)
+    settings = reader.config.load_config()
+    reader.config.set("stats.geo_lookup", False)
+    settings = reader.config.load_config()
+    assert reader._probe_geo(pager, settings) == []
+    assert calls == []
+
+
+def test_probe_geo_reports_the_location_when_it_fits(pager, monkeypatch) -> None:
+    monkeypatch.setattr(
+        reader.geo,
+        "load_location",
+        lambda **kwargs: {"country_code": "JP", "continent": "亚洲"},
+    )
+    # 缓存当作新鲜：不打印那句"正在确认位置"
+    monkeypatch.setattr(reader, "_geo_cache_is_fresh", lambda now=None: True)
+    newly = reader._probe_geo(pager, reader.config.load_config())
+    # 亚洲这一个国家还不足以解锁任何地理成就（要么凑大洲、要么凑国家）
+    assert newly == []
+    state = reader.achievements.load_state()
+    assert state["metrics"]["countries"] == ["JP"]
+    assert state["metrics"]["continents"] == ["亚洲"]
+
+
+def test_probe_geo_says_nothing_when_offline(pager, monkeypatch) -> None:
+    monkeypatch.setattr(reader.geo, "load_location", lambda **kwargs: {})
+    monkeypatch.setattr(reader, "_geo_cache_is_fresh", lambda now=None: True)
+    assert reader._probe_geo(pager, reader.config.load_config()) == []
+
+
+def test_probe_achievements_reports_env_flags(pager) -> None:
+    # 环境命中就解锁（这里只造一个云主机标记）
+    reader._probe_achievements(pager, "env", {"flags": ["cloud"]})
+    state = reader.achievements.load_state()
+    assert state["metrics"]["envs"] == ["cloud"]
+    # 命中云主机 → 云端书虫 解锁，并且已经排进屏内通知
+    assert "云端书虫" in pager.current_notice()
+
+
+def test_geo_cache_is_fresh_only_within_the_hour(isolated_home) -> None:
+    # 没有缓存：当作不新鲜（会去查）
+    assert reader._geo_cache_is_fresh() is False
+    # 刚写过：新鲜
+    reader.geo.save_cached({"country_code": "JP"}, now=datetime(2026, 9, 23, 12, 0))
+    assert reader._geo_cache_is_fresh(now=datetime(2026, 9, 23, 12, 30)) is True
+    # 超过一小时：又该查了
+    assert reader._geo_cache_is_fresh(now=datetime(2026, 9, 23, 14, 0)) is False
+    # 坏缓存：当作不新鲜
+    reader.geo.cache_path().write_text("broken", encoding="utf-8")
+    assert reader._geo_cache_is_fresh() is False
