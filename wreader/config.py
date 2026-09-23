@@ -215,6 +215,20 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         ("deepseek_model", "deepseek-chat", "DeepSeek 模型名"),
         ("deepseek_url", "https://api.deepseek.com/v1/chat/completions", "接口地址"),
     ),
+    # 可插拔翻译引擎的选择与密钥（详见 wreader/translate/）
+    "translate": (
+        ("engine", "", "google | baidu | youdao | tencent | deepseek | local，空 = 沿用 translator.backend"),
+        ("baidu_appid", "", "百度翻译 APPID"),
+        ("baidu_secret", "", "百度翻译密钥（MD5 签名用）"),
+        ("youdao_appid", "", "有道智云应用 ID"),
+        ("youdao_secret", "", "有道智云应用密钥"),
+        ("tencent_secret_id", "", "腾讯云 SecretId"),
+        ("tencent_secret_key", "", "腾讯云 SecretKey"),
+        ("tencent_region", "ap-beijing", "腾讯云地域（参与签名）"),
+        ("deepseek_api_key", "", "DeepSeek API key，或读环境变量 DEEPSEEK_API_KEY"),
+        ("deepseek_model", "deepseek-chat", "DeepSeek 模型名"),
+        ("deepseek_url", "https://api.deepseek.com/v1/chat/completions", "DeepSeek 接口地址"),
+    ),
     # 统计与成就相关
     "stats": (
         ("daily_goal_minutes", 60, "每日阅读目标（分钟），0 = 关闭"),

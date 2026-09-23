@@ -8,10 +8,11 @@
 | --- | --- |
 | `chardet` | 导入 txt 时探测编码（GB2312 / UTF-16 / …） |
 | `rich` | CLI 表格、进度条、彩色输出；退出后的阅读摘要 |
-| `deep-translator` | `google` 翻译后端 |
-| `requests` | `deepseek` 后端（HTTP + SSE 流式解析） |
+| `deep-translator` | **默认翻译引擎** `google` 的地基（故意**不**放进 extra：默认引擎的依赖做成可选 = 装完就坏） |
+| `requests` | 四家 HTTP 引擎（baidu / youdao / tencent / deepseek） |
 | `curses` | **标准库自带**（macOS/Linux），因此**故意不写进 dependencies** |
 | `windows-curses` | 仅 Windows：`pip install -e ".[windows]"` |
+| `argostranslate` | 仅**本地引擎** `local`：`pip install -e ".[local]"`（模型动辄几百 MB，所以默认不装） |
 | `pytest>=8` | 仅开发：`pip install -e ".[dev]"` |
 
 ## 开发环境
@@ -70,16 +71,20 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
-## settings.toml 的 6 个 section（共 25 个键）
+## settings.toml 的 7 个 section（共 36 个键）
 
 | section | 键 |
 | --- | --- |
 | `reader` | `page_scroll_step`=1.0、`page_overlap`=3、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true |
-| `translator` | `backend`=`google`、`batch_size`=3000、`cache_dir`、`deepseek_api_key`、`auto_translate_chapter`=false、`source_language`=`auto`、`target_language`=`zh-CN`、`deepseek_model`=`deepseek-chat`、`deepseek_url` |
+| `translator` | `backend`=**`google`（旧字段：`engine` 为空时的回退）**、`batch_size`=3000、`cache_dir`、`deepseek_api_key`、`auto_translate_chapter`=false、`source_language`=`auto`、`target_language`=`zh-CN`、`deepseek_model`=`deepseek-chat`、`deepseek_url` |
+| `translate` | `engine`（**空 = 回退 `translator.backend`**）、`baidu_appid`、`baidu_secret`、`youdao_appid`、`youdao_secret`、`tencent_secret_id`、`tencent_secret_key`、`tencent_region`=`ap-beijing`、`deepseek_api_key`、`deepseek_model`、`deepseek_url` |
 | `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true |
 | `vocab` | `highlight_in_reader`=true、`auto_add_on_mark`=true |
 | `library` | `novels_dir`（留空 = `~/novels`） |
 | `toc` | `patterns`（**追加**的章节标题正则，多个用 `\|` 分隔；内置规则始终生效） |
+
+> `[translate]` 的密钥以**明文**存在 `settings.toml` 里（纯文本是项目的硬约束）。
+> DeepSeek 的 key 还有个更安全的选择：留空并 `export DEEPSEEK_API_KEY=...`。
 
 ## 仓库顶层结构（非包内容）
 
@@ -123,6 +128,7 @@ werd vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page N]
 werd stats [--json]
 werd achievements
 werd config [<section.key> [value]] [--path] [--reset]
+werd config translate           # 交互式向导：选翻译引擎 + 填密钥 + 当场自查
 werd toc <book_id> [--rebuild]  # 查看目录（章节表）；--rebuild 强制重解析并覆写缓存
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
@@ -150,6 +156,7 @@ python tools/verify_draw.py                   # 绘制不越界（期望 OK: 420
 python tools/verify_colors.py                 # 需 pty（见 tools/README.md 的 script 用法）
 python tools/verify_mouse.py                  # 真 pty 端到端验证滚轮/触摸拖动（期望 RESULT: 全部通过）
 python tools/verify_notes.py                  # 真 pty 端到端验证标记 + 笔记面板（期望 RESULT: 全部通过）
+python tools/verify_translate.py              # 真 pty 验证 t 的未配置提示 + 配置向导落盘（期望 RESULT: 全部通过）
 
 # 不污染真实数据做实验
 export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox/novels
@@ -179,16 +186,20 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `tests/test_cli.py` | 35 |
 | `tests/test_config.py` | 51 |
 | `tests/test_library.py` | 119 |
-| `tests/test_reader.py` | **191** |
+| `tests/test_reader.py` | **192** |
 | `tests/test_stats.py` | 76 |
 | `tests/test_toc.py` | 18 |
-| `tests/test_translator.py` | 74 |
+| `tests/test_translate.py` | **49** |
+| `tests/test_translator.py` | **77** |
 | `tests/test_vocab.py` | 31 |
-| **合计** | **595** |
+| **合计** | **654** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 新增笔记功能 Phase 1+2，
-> `reader.py` **3112** 行、测试总数 **595**、`test_reader.py` **191**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-23 可插拔翻译引擎，
+> `reader.py` **3308** 行、测试总数 **654**、新增 `test_translate.py` **49**）。
+> 以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
+> ⚠️ **子包里的文件不在它的校验范围内**（`wreader/translate/*` 的名字会跟包根撞车），
+> 所以那些行数只记在上面「模块职责与规模」里，README 中不写。
 
 ## 样例数据
 

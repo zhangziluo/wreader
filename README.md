@@ -44,7 +44,7 @@
 | 🔍 搜索 | 模糊搜索书库：标题、作者、标签都认，还能首字母跳跃匹配（`hptr` 找得到 *Harry Potter*） |
 | 📖 阅读器 | curses 分页阅读：跳行、跳章、搜索高亮、书签、状态栏、自动保存进度；按终端宽度自动折行（汉字按 2 列算），配色跟随终端主题与透明背景 |
 | 🌍 三种视图 | `中文` / `英文` / `双语对照`，按 `l` 循环切换；本来就是中文的书看中文视图不需要翻译，离线也能读 |
-| 🈶 翻译 | 章节级翻译 + 磁盘缓存，译一次永久复用；支持 Google（免密钥）和 DeepSeek（OpenAI 兼容接口） |
+| 🈶 翻译 | **可插拔引擎**：Google（免密钥，默认）/ 百度 / 有道智云 / 腾讯云 / DeepSeek / 本地 Argos；`werd config translate` 向导式配置。章节级翻译 + 磁盘缓存，译一次永久复用 |
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
 | 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。⚠️ 目前只存在内存里，落盘见「已知问题」 |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
@@ -409,6 +409,7 @@ werd config                            # 打印全部设置（值 / 默认值 / 
 werd config --path                     # 只打印设置文件路径
 werd config reader.page_height         # 读一项
 werd config reader.page_height 30      # 写一项（立即存盘）
+werd config translate                  # 交互式配置翻译引擎与密钥（向导）
 werd config --reset                    # 全部恢复默认
 ```
 
@@ -472,7 +473,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `b` | 在当前行加 / 删书签，状态栏显示书签数量 |
 | `l` | 循环切换视图：`中文` → `英文` → `双语对照` → `中文`…… |
 | `c` | 直接切到中文视图（英文书常用：边读边看中文） |
-| `t` | 只翻译**当前屏幕**上的段落，**不写缓存**（适合随手瞄一眼） |
+| `t` | 翻译**当前屏幕**上的段落，译文在底部弹窗显示 **3 秒**（任意键提前关掉），**不写缓存**（适合随手瞄一眼）；引擎没配好时会先提示你跑 `werd config translate` |
 | `T` | 翻译并缓存**整章**，带进度条；下次再进这一章直接读缓存，不花钱 |
 | `v` | 查一个单词并收进生词本（输入框会预填当前行最长的英文单词） |
 | `m` | 进入**标记模式**：光标变成反色方块，用 `h` / `j` / `k` / `l`（或方向键）扩展选区；`y` 复制选中的文字，`Esc` 取消。标记模式下**不翻页**，只能在同一屏内选字 |
@@ -544,7 +545,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `backend` | `"google"` | `google`（免密钥）或 `deepseek`（需要 API key） |
+| `backend` | `"google"` | **旧字段**：当 `[translate] engine` 为空时用它选引擎（`google` / `deepseek`） |
 | `batch_size` | `3000` | 每次请求的字符数上限 |
 | `cache_dir` | `"~/.wreader/cache"` | 译文缓存目录；默认跟随数据目录（所以 `$WREADER_HOME` 也管用） |
 | `deepseek_api_key` | `""` | 留空则读环境变量 `DEEPSEEK_API_KEY` |
@@ -554,16 +555,55 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `deepseek_model` | `"deepseek-chat"` | DeepSeek 模型名 |
 | `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | 接口地址（兼容 OpenAI 协议的服务也能填这里） |
 
-两个后端的差别：
+引擎的选择与密钥**不在这一节**，见下面的 `[translate]`。
 
-- **google**：走 `deep-translator` 的 `GoogleTranslator`，免费、免注册，但每次请求之间有 1 秒节流，整本翻译比较慢；网络不通就报 `翻译不可用`。
-- **deepseek**：POST 到 OpenAI 兼容的 `/v1/chat/completions`，`temperature` 0.3、开启流式输出，按章整段翻译质量更连贯；必须先给 key：
-  ```bash
-  werd config translator.backend deepseek
-  werd config translator.deepseek_api_key sk-你的密钥
-  # 或者更安全的做法（不写进文件）：
-  export DEEPSEEK_API_KEY=sk-你的密钥
-  ```
+### `[translate]`
+
+翻译引擎是**可插拔**的：`wreader/translate/` 里每个厂商一个模块，`[translate] engine` 挑用哪个。
+**最快的方式是跑向导**，它会列出所有引擎、逐个问密钥、写完立刻自查一遍：
+
+```bash
+werd config translate
+```
+
+手动配置就是改这一节：
+
+| 键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `engine` | `""` | `google` / `baidu` / `youdao` / `tencent` / `deepseek` / `local`；**空 = 回退到 `[translator] backend`** |
+| `baidu_appid` / `baidu_secret` | `""` | 百度翻译的 APPID 与密钥（MD5 签名） |
+| `youdao_appid` / `youdao_secret` | `""` | 有道智云的应用 ID 与应用密钥（SHA-256 签名） |
+| `tencent_secret_id` / `tencent_secret_key` | `""` | 腾讯云的 SecretId 与 SecretKey（TC3-HMAC-SHA256 签名） |
+| `tencent_region` | `"ap-beijing"` | 腾讯云地域，**参与签名**，写错会被服务端拒 |
+| `deepseek_api_key` | `""` | 留空则读环境变量 `DEEPSEEK_API_KEY` |
+| `deepseek_model` | `"deepseek-chat"` | DeepSeek 模型名 |
+| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | 接口地址（兼容 OpenAI 协议的服务也能填这里） |
+
+六个引擎的差别：
+
+| 引擎 | 要不要密钥 | 说明 |
+| --- | --- | --- |
+| `google` | 不用 | **默认**。走 `deep-translator`，免注册开箱可用；每批之间有 1 秒节流，整本翻译偏慢 |
+| `baidu` | 要（APPID + 密钥） | 通用翻译 API V2，国内快、有免费额度 |
+| `youdao` | 要（应用 ID + 密钥） | 有道智云 v3，中英互译质量不错 |
+| `tencent` | 要（SecretId + SecretKey） | 腾讯云 TMT，签名最复杂（TC3），适合已经在用腾讯云的人 |
+| `deepseek` | 要（API key） | 大模型翻译，按章整段翻质量最连贯；`temperature` 0.3、流式输出 |
+| `local` | 不用，但**要装包** | 本地 Argos Translate，**完全离线**；先 `pip install 'wreader[local]'` 并装好语言包，否则不可用 |
+
+几个例子：
+
+```bash
+werd config translate.engine deepseek
+werd config translate.deepseek_api_key sk-你的密钥
+# 或者更安全的做法（不写进文件）：
+export DEEPSEEK_API_KEY=sk-你的密钥
+
+werd config translate.engine baidu
+werd config translate.baidu_appid 你的APPID
+werd config translate.baidu_secret 你的密钥
+```
+
+⚠️ 引擎没配好时，阅读器里按 `t` 不会去发请求，而是直接提示你跑 `werd config translate`。
 
 ### `[stats]`
 
@@ -745,26 +785,36 @@ wreader/
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
 │   ├── __init__.py          __version__ 和模块地图（18 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1087 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（993 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1237 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1007 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸（3112 行）
-│   ├── translator.py        Google / DeepSeek 后端 + 章节缓存（1305 行）
+│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记（3308 行）
+│   ├── translator.py        章节缓存 / 分批 / 段落映射 + 引擎适配层（1199 行）
 │   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（849 行）
 │   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
+│   ├── translate/           可插拔翻译引擎（每个厂商一个模块；行数见 memory-bank）
+│   │   ├── __init__.py      引擎注册表 + 工厂：按名字造引擎
+│   │   ├── base.py          Translator 抽象基类：translate() 契约与凭证检查
+│   │   ├── google.py        Google（deep-translator，免费免密钥，默认引擎）
+│   │   ├── baidu.py         百度通用翻译 API V2（MD5 签名）
+│   │   ├── youdao.py        有道智云 v3（SHA-256 签名）
+│   │   ├── tencent.py       腾讯云 TMT（TC3-HMAC-SHA256 签名）
+│   │   ├── deepseek.py      DeepSeek chat completions（流式 SSE）
+│   │   └── local.py         本地 Argos Translate（离线，可选依赖）
 │   └── data/
 │       └── achievements.json  10 个成就的定义（62 行）
-└── tests/                   595 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   654 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
     ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
-    ├── test_reader.py       191 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
+    ├── test_reader.py       192 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板
     ├── test_stats.py        76 项 —— 指标、连续天数、热力图、成就解锁、报告
-    ├── test_translator.py   74 项 —— 语言识别、分批、章节缓存、两个后端、SSE
+    ├── test_translator.py   77 项 —— 语言识别、分批、章节缓存、引擎适配、错误映射
+    ├── test_translate.py    49 项 —— 引擎注册表、各厂商签名/请求构造、错误与参数校验
     ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
     ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
-    └── test_cli.py          35 项 —— 参数解析、各子命令输出、退出码、continue
+    └── test_cli.py          41 项 —— 参数解析、各子命令输出、退出码、翻译引擎配置向导
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，

@@ -22,6 +22,7 @@ python tools/check_docs.py
 | `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
 | `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（8 项对账） | 0 / 1 |
 | `verify_notes.py` | 真 pty 里走一遍「标记 + 笔记面板」：引用区、Ctrl+S、折叠提示都对账（5 项） | 0 / 1 |
+| `verify_translate.py` | 真 pty 里验证 `t` 的未配置提示，外加 `werd config translate` 落盘（4 项） | 0 / 1 |
 
 ## 逐个说明
 
@@ -45,6 +46,11 @@ python tools/check_doc_numbers.py
 跟**真实文件行数**、**pytest 实际收集数**逐项对拍。改了代码就顺手跑一次，防止文档悄悄过期。
 
 > 注意：它内部会调用 pytest 来数测试项，所以**不要**把它放进 `tests/` 当测试跑（会递归）。
+
+> ⚠️ **子包里的文件不在它的校验范围内**。行数那条规则只认 `wreader/<文件名>`，
+> 而 `wreader/translate/` 这类子包的文件名会跟包根撞车（两边都有 `__init__.py`），
+> 光看文件名分不清是哪一个。所以 README 的子包条目**不写"（N 行）"**，
+> 这些数字记在 `memory-bank/techContext.md` 里。
 
 ### `check_comments.py`
 
@@ -139,3 +145,18 @@ python tools/verify_notes.py     # 期望：RESULT: 全部通过
 >
 > 另一个坑：脚本必须显式给子进程一个 `TERM`（非交互运行时 `TERM` 可能没设，
 > curses 起不来，子进程会提前退出，写 pty 直接 `EIO`）。
+
+### `verify_translate.py`
+
+```bash
+python tools/verify_translate.py     # 期望：RESULT: 全部通过
+```
+
+`t` 的译文弹窗要真的建子窗口、真的按"主窗口先刷、子窗口后刷"的顺序画；
+但**翻译本身要联网**，而项目纪律是测试绝不联网。所以这里只验证**不联网也完全确定**的两条路径，
+它们恰好是规格里最容易写错的两条：
+
+1. **引擎没配好时按 `t`** 必须给出「运行 werd config translate」这种可操作提示 ——
+   既不能偷偷发请求，也不能把后端报错甩给用户（分别用"选了 local 但没装 argostranslate"
+   和"选了 baidu 但没填密钥"两种情况各验一次）；
+2. **`werd config translate` 向导**真的把引擎名与密钥写进 `settings.toml`（喂标准输入，非交互跑）。

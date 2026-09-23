@@ -4,29 +4,33 @@
 actually wants cached: translate once, then re-read the English or the bilingual
 text forever without paying the API again.
 
-Configuration lives in ``~/.wreader/settings.toml``, in the ``[translator]`` table::
+Configuration is split over two tables of ``~/.wreader/settings.toml``::
 
     [translator]
-    backend = "google"          # google | deepseek
     batch_size = 3000           # characters per request
     cache_dir = "~/.wreader/cache"   # the default follows the data directory
-    deepseek_api_key = ""       # empty -> $DEEPSEEK_API_KEY
     auto_translate_chapter = false
     source_language = "auto"
     target_language = "zh-CN"
+    backend = "google"          # legacy engine selector
 
-:func:`load_settings` reads that table through :mod:`wreader.config`, so the defaults,
-the type checks and the migration from the old ``config.json`` all apply; passing
-an explicit *path* reads a standalone file instead (which is what the tests do).
+    [translate]
+    engine = ""                 # google | baidu | youdao | tencent | deepseek | local
+    deepseek_api_key = ""       # ...one block of keys per provider
 
-Two back-ends are available:
+``[translate] engine`` picks the provider; when it is blank the legacy
+``[translator] backend`` is used instead, so an older settings file keeps working.
+:func:`load_settings` reads both tables through :mod:`wreader.config`, so the
+defaults, the type checks and the migration from the old ``config.json`` all apply;
+passing an explicit *path* reads a standalone file instead (which is what the tests
+do).
 
-``google``    :class:`GoogleBackend` wraps ``deep_translator.GoogleTranslator``;
-              requests are cut at ``batch_size`` characters and throttled with a
-              one second pause between batches to stay clear of rate limits.
-``deepseek``  :class:`DeepSeekBackend` posts to the OpenAI compatible
-              ``/v1/chat/completions`` endpoint with a Chinese-to-English system
-              prompt, ``temperature`` 0.3 and streaming enabled.
+The providers themselves live in :mod:`wreader.translate` (``google``, ``baidu``,
+``youdao``, ``tencent``, ``deepseek``, ``local``).  This module wraps the selected
+one in a :class:`Backend`, which is what adds the things a provider should not have
+to care about: ``batch_size`` character batching, the throttle hook a provider may
+override, and the mapping of provider errors onto :class:`TranslationError` /
+:class:`TranslationUnavailable`.
 
 Cache layout (per book, per chapter) is::
 
@@ -47,16 +51,12 @@ batching, throttling and the cache without a network.
 # 延迟求值类型注解
 from __future__ import annotations
 
-# 解析 DeepSeek 的 SSE 数据帧
-import json
 # 读写环境变量（DEEPSEEK_API_KEY）和原子替换文件
 import os
 # 按空行切段落、清理段落内的换行
 import re
-# Google 后端批次之间的限速等待
-import time
 # TranslatorSettings 用 dataclass 定义
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 # 缓存路径
 from pathlib import Path
 # 类型注解：Iterator 用于流式返回，Union 表示二选一
@@ -68,8 +68,8 @@ try:  # Python 3.11+
 except ImportError:  # pragma: no cover - the package requires >= 3.11
     tomllib = None  # type: ignore[assignment]
 
-# 同包引用：配置（默认值/路径解析）与书库（取书记录和正文）
-from . import config, library
+# 同包引用：配置（默认值/路径解析）、书库（取书记录和正文）、可插拔翻译引擎
+from . import config, library, translate
 
 # 简写：一个 (文本, 源语言, 目标语言) -> 译文 的普通函数，测试可注入
 #: A plain ``(text, source, target) -> str`` function, accepted by set_backend().
@@ -78,8 +78,7 @@ TranslatorCallable = Callable[[str, str, str], str]
 # 模块公开的名字：后端类、异常、设置、缓存与翻译函数
 __all__ = [
     "Backend",
-    "DeepSeekBackend",
-    "GoogleBackend",
+    "EngineBackend",
     "SettingsError",
     "TranslationError",
     "TranslationUnavailable",
@@ -92,6 +91,7 @@ __all__ = [
     "chapter_lines",
     "clear_cache",
     "detect_language",
+    "engine_ready",
     "get_cached_translation",
     "load_chapter_map",
     "load_settings",
@@ -105,27 +105,17 @@ __all__ = [
     "translate_viewport",
 ]
 
-# 配置文件名与我们要读的那一段表名 [translator]
+# 配置文件名；引擎选择与密钥在 [translate] 段，其余阅读行为仍在 [translator] 段
 SETTINGS_FILENAME = "settings.toml"
 SETTINGS_SECTION = "translator"
+ENGINE_SECTION = "translate"
 
-# 各字段的默认值：没配就用这些
-DEFAULT_BACKEND = "google"
-DEFAULT_BATCH_SIZE = 3000
+# 各字段的默认值：直接引用 SCHEMA 里的声明，避免同一份默认值写两遍
+DEFAULT_BACKEND = str(config.DEFAULTS["translator"]["backend"])
+DEFAULT_BATCH_SIZE = int(config.DEFAULTS["translator"]["batch_size"])
 CACHE_DIRNAME = "cache"
-DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
-DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-# temperature 调到 0.3：翻译要稳，不要发挥
-DEEPSEEK_TEMPERATURE = 0.3
-# 给 DeepSeek 的系统提示词，决定翻译风格
-DEEPSEEK_SYSTEM_PROMPT = (
-    "你是一个专业的中译英翻译，擅长将中文网络小说翻译成流畅自然的英文，"
-    "保留叙事节奏和人物情感。"
-)
-# 单次请求超时（秒）
-DEEPSEEK_TIMEOUT = 120
-# Google 批次之间的间隔（秒），用来躲限流
-BATCH_SLEEP_SECONDS = 1.0
+DEFAULT_DEEPSEEK_MODEL = str(config.DEFAULTS["translator"]["deepseek_model"])
+DEEPSEEK_URL = str(config.DEFAULTS["translator"]["deepseek_url"])
 
 # 缓存文件后缀：纯英文版 / 中英对照版
 EN_SUFFIX = "_en"
@@ -196,18 +186,18 @@ def detect_language(text: str) -> str:
     return "zh" if cjk / float(letters) >= _CJK_RATIO else "en"
 
 
-# [translator] 配置表的对象化表示
+# [translator] 配置表 + [translate] 引擎段的对象化表示
 @dataclass
 class TranslatorSettings:
-    """The ``[translator]`` table of ``settings.toml``."""
+    """The ``[translator]`` table plus the ``[translate]`` engine selection."""
 
-    # 用哪个后端：google 或 deepseek
+    # 用哪个后端（旧字段，仍作为 engine 为空时的回退）
     backend: str = DEFAULT_BACKEND
     # 每次请求最多多少字符
     batch_size: int = DEFAULT_BATCH_SIZE
     # 缓存目录（空串表示跟随数据目录）
     cache_dir: str = ""
-    # DeepSeek 的 API key
+    # DeepSeek 的 API key（旧字段，[translate] 里没写就回退到它）
     deepseek_api_key: str = ""
     deepseek_model: str = DEFAULT_DEEPSEEK_MODEL
     deepseek_url: str = DEEPSEEK_URL
@@ -217,6 +207,34 @@ class TranslatorSettings:
     source_language: str = "auto"
     # 目标语言
     target_language: str = "zh-CN"
+    # [translate] engine：可插拔引擎名；空串表示沿用旧的 backend
+    engine: str = ""
+    # [translate] 整段的原始键值（各引擎的密钥都在这里）
+    credentials: Dict[str, str] = field(default_factory=dict)
+
+    def resolved_engine(self) -> str:
+        """Return the engine to use: ``[translate].engine``, else the legacy backend."""
+        # 新字段优先；只有旧配置（backend）也能照常跑
+        return (self.engine or self.backend or translate.DEFAULT_ENGINE).strip().lower()
+
+    def credential_values(self) -> Dict[str, str]:
+        """Return the credential mapping handed to the engine factory.
+
+        Blank ``[translate]`` entries fall back to the legacy ``[translator]``
+        DeepSeek keys, so a settings file written before the split keeps working
+        without any migration.  ``$DEEPSEEK_API_KEY`` is handled by the engine.
+        """
+        # 先拷一份 [translate] 里的键值
+        values = {str(key): str(value) for key, value in self.credentials.items()}
+        # 旧的 deepseek_* 住在 [translator] 下：新段没写就回退过去
+        for key, legacy in (
+            ("deepseek_api_key", self.deepseek_api_key),
+            ("deepseek_model", self.deepseek_model),
+            ("deepseek_url", self.deepseek_url),
+        ):
+            if not values.get(key) and legacy:
+                values[key] = legacy
+        return values
 
     def cache_root(self) -> Path:
         """Return the resolved cache root directory.
@@ -292,47 +310,72 @@ def _read_document(target: Path) -> Dict[str, Any]:
         raise SettingsError("cannot read {}: {}".format(target, exc)) from exc
 
 
-def _settings_from_section(section: Any, label: str) -> TranslatorSettings:
-    """Validate one ``[translator]`` table into a :class:`TranslatorSettings`."""
-    # 那一段必须是表
-    if not isinstance(section, dict):
+def _check_engine_name(name: str, where: str) -> None:
+    """Raise :class:`SettingsError` when *name* is not a known engine."""
+    # 引擎清单由 wreader.translate 维护，这里不另写一份
+    if name not in translate.ENGINES:
+        raise SettingsError(
+            "{} must be one of {}, got {!r}".format(
+                where, ", ".join(translate.engine_names()), name
+            )
+        )
+
+
+def _settings_from_sections(
+    translator_section: Any, engine_section: Any, label: str
+) -> TranslatorSettings:
+    """Validate the ``[translator]`` and ``[translate]`` tables into settings."""
+    # 两段都必须是表（段缺失时调用方会传 {} 进来）
+    if not isinstance(translator_section, dict):
         raise SettingsError("{}: [{}] must be a table".format(label, SETTINGS_SECTION))
+    if not isinstance(engine_section, dict):
+        raise SettingsError("{}: [{}] must be a table".format(label, ENGINE_SECTION))
 
     # 先从默认值开始
     settings = TranslatorSettings()
-    # backend 只接受 google / deepseek
-    backend = str(section.get("backend") or DEFAULT_BACKEND).strip().lower()
-    if backend not in ("google", "deepseek"):
-        raise SettingsError(
-            "[translator] backend must be 'google' or 'deepseek', got {!r}".format(backend)
-        )
+    # 旧字段 backend：仍要认得，也是 engine 为空时的回退
+    backend = str(translator_section.get("backend") or DEFAULT_BACKEND).strip().lower()
+    _check_engine_name(backend, "translator.backend")
     settings.backend = backend
+    # 新字段 engine：空串表示"沿用 backend"，非空必须是已知引擎
+    engine = str(engine_section.get("engine") or "").strip().lower()
+    if engine:
+        _check_engine_name(engine, "translate.engine")
+    settings.engine = engine
     # batch_size 至少为 1
-    if section.get("batch_size") is not None:
-        settings.batch_size = max(1, _coerce_int(section.get("batch_size"), "batch_size"))
+    if translator_section.get("batch_size") is not None:
+        settings.batch_size = max(
+            1, _coerce_int(translator_section.get("batch_size"), "batch_size")
+        )
     # 这几项只有写了才覆盖（空串保持默认）
     for key in ("cache_dir", "deepseek_api_key", "deepseek_model", "deepseek_url"):
-        if section.get(key):
-            setattr(settings, key, str(section[key]))
+        if translator_section.get(key):
+            setattr(settings, key, str(translator_section[key]))
     # 语言项同理
     for key in ("source_language", "target_language"):
-        if section.get(key):
-            setattr(settings, key, str(section[key]))
+        if translator_section.get(key):
+            setattr(settings, key, str(translator_section[key]))
     # 布尔项要严格校验
     settings.auto_translate_chapter = _coerce_bool(
-        section.get("auto_translate_chapter"), "auto_translate_chapter", False
+        translator_section.get("auto_translate_chapter"), "auto_translate_chapter", False
     )
+    # [translate] 整段原样收下：引擎工厂会按引擎挑自己关心的键
+    settings.credentials = {
+        str(key): str(value)
+        for key, value in engine_section.items()
+        if value is not None
+    }
     return settings
 
 
 def load_settings(path: Optional[Path] = None) -> TranslatorSettings:
-    """Read the ``[translator]`` table of ``settings.toml``.
+    """Read the ``[translator]`` and ``[translate]`` tables of ``settings.toml``.
 
-    Without *path* the table is read through :mod:`wreader.config`, so the defaults,
-    the type checks and the migration from the old ``config.json`` all apply.
-    Passing an explicit *path* reads a standalone file instead.  Unknown keys
-    inside the table are ignored so that a hand edited file carrying extra notes
-    still loads.
+    Without *path* the tables are read through :mod:`wreader.config`, so the
+    defaults, the type checks and the migration from the old ``config.json`` all
+    apply.  Passing an explicit *path* reads a standalone file instead.  Unknown
+    keys inside the tables are ignored so that a hand edited file carrying extra
+    notes still loads.
     """
     # 情况一：显式给了路径（测试用）
     if path is not None:
@@ -340,10 +383,12 @@ def load_settings(path: Optional[Path] = None) -> TranslatorSettings:
         # 文件不存在就用全默认值
         if not target.exists():
             return TranslatorSettings()
-        # 读 TOML 再校验那一段
+        # 读 TOML 再校验那两段
         document = _read_document(target)
-        return _settings_from_section(
-            document.get(SETTINGS_SECTION) or {}, str(target)
+        return _settings_from_sections(
+            document.get(SETTINGS_SECTION) or {},
+            document.get(ENGINE_SECTION) or {},
+            str(target),
         )
 
     # 情况二：走 config，享受默认值/类型检查/旧配置迁移
@@ -352,9 +397,11 @@ def load_settings(path: Optional[Path] = None) -> TranslatorSettings:
     except config.ConfigError as exc:
         # 统一转成 SettingsError，方便调用方只 catch 一种异常
         raise SettingsError(str(exc)) from exc
-    # 注意用 raw_section：后端要自己校验 backend 的取值
-    return _settings_from_section(
-        settings.raw_section(SETTINGS_SECTION), str(settings.path)
+    # 注意用 raw_section：引擎那层要自己校验名字，不能先被默认值盖掉
+    return _settings_from_sections(
+        settings.raw_section(SETTINGS_SECTION),
+        settings.raw_section(ENGINE_SECTION),
+        str(settings.path),
     )
 
 
@@ -488,208 +535,39 @@ class _CallableBackend(Backend):
         return self._func(text, source, target) or ""
 
 
-# 免费的 Google 翻译后端，批次之间要限速
-class GoogleBackend(Backend):
-    """``deep_translator.GoogleTranslator`` with a throttle between batches."""
+# 把可插拔引擎适配成内部的后端接口
+class EngineBackend(Backend):
+    """Adapts a :class:`wreader.translate.Translator` to the internal API.
 
-    name = "google"
+    Everything the reader and the CLI expect of a back-end lives here -- and the
+    most important part is the **error mapping**: engines raise
+    :class:`wreader.translate.TranslateError`, while the rest of this module only
+    knows :class:`TranslationError` and :class:`TranslationUnavailable`.  That
+    distinction is what makes a whole-book run give up on a connectivity problem
+    instead of grinding through 300 doomed chapters.
+    """
 
-    def __init__(
-        self,
-        # 每次请求的字符上限
-        batch_size: int = DEFAULT_BATCH_SIZE,
-        # 请求之间的等待秒数
-        sleep_seconds: float = BATCH_SLEEP_SECONDS,
-    ) -> None:
-        # 至少 1 个字符，避免无意义的空请求
-        self.batch_size = max(1, int(batch_size))
-        # 等待时间不能为负
-        self.sleep_seconds = max(0.0, float(sleep_seconds))
-        # 统计发过多少次请求（测试会断言这个）
-        self.requests = 0
+    def __init__(self, engine: translate.Translator) -> None:
+        # 记住被包装的引擎
+        self.engine = engine
+        # 名字沿用引擎名：报错与日志里显示的就是它
+        self.name = engine.name
 
     def translate(self, text: str, source: str = "auto", target: str = "en") -> str:
-        """Translate one chunk through Google."""
-        # 空文本不发请求，直接返回空
-        if not str(text or "").strip():
-            return ""
+        """Delegate to the engine, translating its exceptions on the way out."""
         try:
-            # 延迟导入：不装 deep-translator 也能用别的后端
-            from deep_translator import GoogleTranslator
-        except ImportError as exc:  # pragma: no cover - the dependency is declared
-            raise TranslationUnavailable("deep-translator is not installed") from exc
-        # 计数 +1
-        self.requests += 1
-        try:
-            # 真正调用；返回 None 时兜成空串
-            return (
-                GoogleTranslator(source=source or "auto", target=target).translate(text)
-                or ""
-            )
-        except Exception as exc:  # rate limits, DNS failures, rejected codes
-            # 限流、DNS 失败、语言码被拒等统一归为"后端不可用"
-            raise TranslationUnavailable(
-                "Google translation failed: {}".format(
-                    str(exc) or exc.__class__.__name__
-                )
-            ) from exc
+            return self.engine.translate(text, source, target) or ""
+        except translate.TranslateUnavailable as exc:
+            # 连不上：整本书都别再试了
+            raise TranslationUnavailable(str(exc)) from exc
+        except translate.TranslateError as exc:
+            # 单次失败（签名错、没装语言包…）：只影响这一次
+            raise TranslationError(str(exc)) from exc
 
     def pause(self) -> None:
-        """Wait out the one second throttle between batches."""
-        # 配置了等待时间就真的睡一会儿
-        if self.sleep_seconds:
-            time.sleep(self.sleep_seconds)
-
-
-# DeepSeek 后端：走 OpenAI 兼容的 chat/completions 接口，默认流式
-class DeepSeekBackend(Backend):
-    """DeepSeek chat completions, streamed by default."""
-
-    name = "deepseek"
-
-    def __init__(
-        self,
-        # API key；留空则读环境变量
-        api_key: str = "",
-        model: str = DEFAULT_DEEPSEEK_MODEL,
-        url: str = DEEPSEEK_URL,
-        temperature: float = DEEPSEEK_TEMPERATURE,
-        timeout: int = DEEPSEEK_TIMEOUT,
-    ) -> None:
-        # 配置优先，其次环境变量
-        self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
-        self.model = model
-        self.url = url
-        self.temperature = float(temperature)
-        self.timeout = int(timeout)
-        # 请求计数
-        self.requests = 0
-
-    def payload(self, text: str, target: str, stream: bool = True) -> Dict[str, Any]:
-        """Return the JSON body sent to the API (exposed for the tests)."""
-        # 标准的 chat completions 请求体：system 定风格，user 放待翻译文本
-        return {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": _system_prompt(target)},
-                {"role": "user", "content": text},
-            ],
-            "temperature": self.temperature,
-            "stream": bool(stream),
-        }
-
-    def headers(self) -> Dict[str, str]:
-        """Return the HTTP headers, including the bearer token."""
-        # 用 Bearer token 鉴权
-        return {
-            "Authorization": "Bearer {}".format(self.api_key),
-            "Content-Type": "application/json",
-        }
-
-    def translate_stream(
-        self, text: str, source: str = "auto", target: str = "en"
-    ) -> Iterator[str]:
-        """Yield the translation as the server streams it."""
-        # 空文本不请求
-        if not str(text or "").strip():
-            return
-        # 没 key 就直接给出可操作的提示
-        if not self.api_key:
-            raise TranslationUnavailable(
-                "DeepSeek needs an API key: set [translator] deepseek_api_key in "
-                "settings.toml or export DEEPSEEK_API_KEY"
-            )
-        try:
-            # 延迟导入 requests
-            import requests
-        except ImportError as exc:  # pragma: no cover - the dependency is declared
-            raise TranslationUnavailable("requests is not installed") from exc
-        # 计数 +1
-        self.requests += 1
-        try:
-            # stream=True 让 requests 不把响应体一次读完
-            response = requests.post(
-                self.url,
-                json=self.payload(text, target, stream=True),
-                headers=self.headers(),
-                stream=True,
-                timeout=self.timeout,
-            )
-            # 4xx/5xx 直接抛异常
-            response.raise_for_status()
-        except Exception as exc:
-            # 建连阶段失败：归为后端不可用（会中断整本书的翻译）
-            raise TranslationUnavailable(
-                "DeepSeek request failed: {}".format(
-                    str(exc) or exc.__class__.__name__
-                )
-            ) from exc
-        try:
-            # 逐行读 SSE（不预先解码，交给 _parse_sse 处理字节）
-            for line in response.iter_lines(decode_unicode=False):
-                piece = _parse_sse(line)
-                if piece is None:  # the server sent [DONE]
-                    # None 表示流正常结束，停止读取
-                    break
-                # 空串表示这一帧没带文本（比如心跳）
-                if piece:
-                    yield piece
-        except TranslationError:
-            # 已经是我们的异常（比如 key 无效），原样上抛
-            raise
-        except Exception as exc:  # a connection that dies mid answer
-            # 读到一半连接断了
-            raise TranslationUnavailable(
-                "DeepSeek stream failed: {}".format(str(exc) or exc.__class__.__name__)
-            ) from exc
-
-    def translate(self, text: str, source: str = "auto", target: str = "en") -> str:
-        """Return the whole translation, joining the streamed pieces."""
-        # 流式接口是核心，非流式就是把所有片段拼起来
-        return "".join(self.translate_stream(text, source, target))
-
-
-def _parse_sse(line: Any) -> Optional[str]:
-    """Return the text carried by one SSE *line*.
-
-    ``None`` means the stream is finished (``data: [DONE]``); an empty string
-    means the frame carried no text at all.
-    """
-    # 空行（SSE 的心跳/分隔）：没带文本
-    if not line:
-        return ""
-    # requests 给的是 bytes，先转字符串
-    if isinstance(line, bytes):
-        raw = line.decode("utf-8", errors="replace")
-    else:
-        raw = str(line)
-    raw = raw.strip()
-    # 不是 "data:" 开头的行（比如 event: 行）直接忽略
-    if not raw or not raw.startswith("data:"):
-        return ""
-    # 去掉前缀 "data:"（5 个字符）
-    body = raw[5:].strip()
-    # [DONE] 表示流结束：返回 None 让调用方 break
-    if body == "[DONE]":
-        return None
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        # 半截 JSON（不该发生）：当成空帧
-        return ""
-    # 收集这一帧里的文本片段
-    pieces = []
-    for choice in data.get("choices") or []:
-        # 流式格式：delta.content
-        delta = choice.get("delta") or {}
-        content = delta.get("content")
-        if content:
-            pieces.append(str(content))
-        # 非流式格式：choice.text（仅在没有 delta 时才取）
-        text = choice.get("text")
-        if text and not delta:
-            pieces.append(str(text))
-    return "".join(pieces)
+        """Forward the throttle hook to the engine."""
+        # 只有需要限速的引擎（比如免费的 Google）才真的等
+        self.engine.pause()
 
 
 # 进程内当前生效的后端；None 表示还没建
@@ -697,18 +575,50 @@ _backend: Optional[Backend] = None
 
 
 def make_backend(settings: Optional[TranslatorSettings] = None) -> Backend:
-    """Build the back-end named by *settings*."""
+    """Build the back-end for the engine named by *settings*.
+
+    The engine itself comes from :mod:`wreader.translate`; this wraps it in an
+    :class:`EngineBackend` so the rest of the module keeps seeing the familiar
+    :class:`Backend` interface (batching, throttle hook, error mapping).
+    """
     # 没传设置就现读
     settings = settings or load_settings()
-    # deepseek 需要 key/model/url
-    if settings.backend == "deepseek":
-        return DeepSeekBackend(
-            api_key=settings.resolved_api_key(),
-            model=settings.deepseek_model,
-            url=settings.deepseek_url,
-        )
-    # 否则默认用 Google
-    return GoogleBackend(batch_size=settings.batch_size)
+    # [translate].engine 优先；空则回退到旧的 translator.backend
+    engine_name = settings.resolved_engine()
+    try:
+        # 引擎工厂自己会只挑它声明过的键
+        engine = translate.make_engine(engine_name, settings.credential_values())
+    except translate.TranslateError as exc:
+        # 引擎名写错了：属于配置问题，报错里带上可选值
+        raise SettingsError(str(exc)) from exc
+    return EngineBackend(engine)
+
+
+def engine_ready(settings: Optional[TranslatorSettings] = None) -> Tuple[bool, str]:
+    """Return ``(ready, reason)`` for the engine the settings select.
+
+    The reader and the CLI use this to say "run ``werd config translate``" *before*
+    a request goes out, instead of surfacing whatever the provider happens to
+    complain about.  *reason* is an empty string when *ready* is ``True``.
+    """
+    # 现读设置：调用方通常只有"要不要提示"这一个需求
+    settings = settings or load_settings()
+    engine_name = settings.resolved_engine()
+    credentials = settings.credential_values()
+    try:
+        # 先能造出来（名字合法）
+        engine = translate.make_engine(engine_name, credentials)
+    except translate.TranslateError as exc:
+        return False, str(exc)
+    # 再看凭证/可选依赖够不够
+    if engine.available():
+        return True, ""
+    # 缺凭证是最常见的一种，单独说清楚缺哪几个
+    missing = translate.missing_credentials(engine_name, credentials)
+    if missing:
+        return False, "{} 缺少 {}".format(engine_name, "、".join(missing))
+    # 否则多半是可选包/语言包没装
+    return False, "{} 尚未就绪（可选依赖或语言包没装）".format(engine_name)
 
 
 def set_backend(
@@ -1287,19 +1197,3 @@ def translate_book(
         "skipped": skipped,
         "failed": failed,
     }
-
-
-def _system_prompt(target: str) -> str:
-    """Return the system prompt for *target*.
-
-    The Chinese-to-English prompt is the one the project was specified with; any
-    other target gets an equivalent so that single word lookups still work.
-    """
-    # 目标语言是英文：用项目定制的那段提示词
-    if target in ("en", "en-US", "en-GB"):
-        return DEEPSEEK_SYSTEM_PROMPT
-    # 其它目标语言：套一个通用模板
-    return (
-        "你是一个专业的翻译，请把用户给出的文本翻译成 {}，"
-        "保留叙事节奏和人物情感，只输出译文。".format(target)
-    )

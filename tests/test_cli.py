@@ -16,6 +16,8 @@ import json
 from datetime import datetime
 # 路径断言
 from pathlib import Path
+# 类型注解（向导答案队列）
+from typing import List
 
 # pytest.raises
 import pytest
@@ -278,6 +280,83 @@ def test_config_reads_one_setting(capsys) -> None:
     # 只给 key：读取该设置
     assert cli.main(["config", "reader.page_height"]) == 0
     assert capsys.readouterr().out.strip() == "reader.page_height = 24"
+
+
+def test_config_translate_wizard_saves_the_engine_and_keys(monkeypatch, capsys) -> None:
+    """`werd config translate` 走一遍向导：选引擎 -> 填密钥 -> 落盘。"""
+    # 序号 2 = 百度（菜单按 translate.engine_names() 的顺序）
+    _answer_with(monkeypatch, ["2", "my-appid", "my-secret"])
+    assert cli.main(["config", "translate"]) == 0
+    out = capsys.readouterr().out
+    # 菜单里列出所有引擎，且当前引擎被标记
+    assert "选择翻译引擎" in out
+    assert "百度翻译" in out
+    # 两个密钥都写进了 [translate]
+    settings = config.reload()
+    assert settings.get("translate.engine") == "baidu"
+    assert settings.get("translate.baidu_appid") == "my-appid"
+    assert settings.get("translate.baidu_secret") == "my-secret"
+    # 结算时自查一遍并给出"已就绪"
+    assert "引擎已就绪" in out
+
+
+def test_config_translate_wizard_can_be_cancelled(monkeypatch, capsys) -> None:
+    # 输入不认识的名字 = 取消：退出码 1，设置一点没动
+    _answer_with(monkeypatch, ["nonsense"])
+    assert cli.main(["config", "translate"]) == 1
+    assert "已取消" in capsys.readouterr().out
+    assert config.reload().get("translate.engine") == ""
+
+
+def test_config_translate_wizard_accepts_an_engine_name(monkeypatch) -> None:
+    # 不记序号也可以：直接打引擎名。
+    # deepseek 会问三个键（key / model / url），后两个留空即保留默认
+    _answer_with(monkeypatch, ["deepseek", "sk-123", "", ""])
+    assert cli.main(["config", "translate"]) == 0
+    settings = config.reload()
+    assert settings.get("translate.engine") == "deepseek"
+    assert settings.get("translate.deepseek_api_key") == "sk-123"
+
+
+def test_config_translate_wizard_keeps_existing_secrets(monkeypatch) -> None:
+    # 先配好百度
+    _answer_with(monkeypatch, ["baidu", "a1", "s1"])
+    assert cli.main(["config", "translate"]) == 0
+    # 再跑一次，密钥两问都直接回车：必须保留原值（提示语承诺了"留空保留"）
+    _answer_with(monkeypatch, ["", "", ""])
+    assert cli.main(["config", "translate"]) == 0
+    settings = config.reload()
+    assert settings.get("translate.baidu_appid") == "a1"
+    assert settings.get("translate.baidu_secret") == "s1"
+
+
+def test_config_translate_refuses_a_value_argument(capsys) -> None:
+    # 向导是交互式的，后面不该再跟一个 value
+    assert cli.main(["config", "translate", "baidu"]) == 1
+    assert "交互式" in capsys.readouterr().err
+
+
+def test_config_translate_dotted_path_still_works(capsys) -> None:
+    # 非交互的写法不受影响：werd config translate.engine deepseek
+    assert cli.main(["config", "translate.engine", "deepseek"]) == 0
+    assert "translate.engine = deepseek" in capsys.readouterr().out
+    assert config.reload().get("translate.engine") == "deepseek"
+
+
+# 向导的所有提问都走 cli._prompt_line，这里用一串预置答案替换它
+def _answer_with(monkeypatch: pytest.MonkeyPatch, answers: List[str]) -> None:
+    """Feed canned answers to the ``werd config translate`` wizard."""
+    queue = list(answers)
+
+    def fake_prompt(prompt: str, default: str = "") -> str:
+        # 队列空了说明向导多问了一次：直接失败，别用默认值把问题藏起来
+        if not queue:
+            raise AssertionError("the wizard asked more questions than expected")
+        answer = queue.pop(0).strip()
+        # 复刻真实 _prompt_line 的语义：空输入 = 用默认值
+        return answer or default
+
+    monkeypatch.setattr(cli, "_prompt_line", fake_prompt)
 
 
 def test_config_writes_one_setting(capsys, isolated_home) -> None:

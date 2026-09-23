@@ -57,7 +57,10 @@ def main() -> int:
     ):
         for name, number in re.findall(pattern, text):
             target = ROOT / "wreader" / name
-            # 只在包内目录里找得到的就是 wreader/ 的模块
+            # 只在包内目录里找得到的就是 wreader/ 的模块。
+            # ⚠️ 子包（如 wreader/translate/）里的文件**故意不在这条校验范围内**：
+            # 名字会撞车（两边都有 __init__.py），单看文件名分不清是哪一个，
+            # 所以 README 的子包条目不写"（N 行）"，数字只写在 memory-bank 里。
             if target.is_file():
                 check("wreader/" + name, int(number), line_count(target), failures)
 

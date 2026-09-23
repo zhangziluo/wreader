@@ -18,7 +18,7 @@
 | 入口 | console script `werd` → `wreader.cli:main` |
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
-| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **44 个跟踪文件**，与远端同步 |
+| 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **54 个跟踪文件**，与远端同步 |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
 ## 核心功能需求
@@ -28,8 +28,11 @@
 2. **书库**：`list`、`search <关键词>`（模糊匹配）、`search '#tag'`。
 3. **阅读**：`read <book_id>` 全屏 curses 分页器；位置、书签、本次时长落库，随时续读。
    除键盘外还支持**鼠标滚轮 / 触摸拖动逐行滚动**（手机终端 Termux 上就是靠它翻页）。
-4. **翻译**：`google`（deep-translator）与 `deepseek`（HTTP/SSE）两个后端。`t` 翻当前屏幕**不缓存**，
-   `T` 翻整章并写入 `cache/<book_id>/`。
+4. **翻译（可插拔）**：`wreader/translate/` 里一个厂商一个模块 —— `google`（默认，免密钥）、`baidu`、
+   `youdao`、`tencent`、`deepseek`、`local`（Argos，可选依赖）；`[translate] engine` 选引擎，
+   `werd config translate` 交互式向导配置密钥。`t` 翻当前屏并在底部弹窗显示 3 秒（**不缓存**），
+   `T` 翻整章并写入 `cache/<book_id>/`，`werd translate <id>` 翻整本。
+   ⚠️ 引擎没配好时按 `t` **只提示**"运行 `werd config translate`"，不偷偷发请求。
 5. **生词本**：阅读中按 `v` 查词入库；命令行增删查、`--review` 复习、`--export anki`。
 6. **统计与成就**：阅读时长、热力图、连续天数；`wreader/data/achievements.json` 里 10 个成就，
    条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
@@ -58,7 +61,7 @@
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-23）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2777** 条语句上方没有紧邻注释行
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3164** 条语句上方没有紧邻注释行
   （`test_reader.py`、`reader.py` 最多）。早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"。
 

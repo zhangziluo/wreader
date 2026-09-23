@@ -4,10 +4,10 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`595 passed`、`pyright 0 errors / 0 warnings`、
-`tools/` 的 **8** 个校验脚本全绿（新增 `verify_notes.py`），且**已 git 化并推送到 GitHub**
+代码库处于**干净、全绿**状态：`654 passed`、`pyright 0 errors / 0 warnings`、
+`tools/` 的 **9** 个校验脚本全绿（新增 `verify_translate.py`），且**已 git 化并推送到 GitHub**
 （`main` 跟踪 `origin/main`）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2777** 条语句上方没有紧邻注释行
+⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3164** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
@@ -15,7 +15,8 @@ README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻�
 新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
 **CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
 **目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**、
-**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑；笔记暂存内存，落盘是下一步）**。
+**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑；笔记暂存内存，落盘是下一步）**、
+**可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -758,6 +759,108 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 - 编辑区基于 `curses.textpad.Textbox`，**中文输入依赖系统 IME**，实际以英文 / 拼音为主。
 - 引用区不做滚动（放不下只画前几行）。
 
+### ㉒ 可插拔翻译引擎：`wreader/translate/` + 配置向导 + `t` 译文弹窗（2026-09-23）
+
+**需求**：把翻译做成可插拔（`base` + 百度/有道/腾讯/DeepSeek/本地），加 `[translate]` 配置段、
+`werd config translate` 交互式向导、`t` 键译文弹窗、未配置时给可操作提示、把重依赖下沉到 extras。
+
+**关键决策（用户拍板）**：**重构**，不是另起一套 —— 新包只当"引擎层"，`translator.py` 保留
+章节缓存 / 分批 / 段落映射 / 双语视图 / `werd translate`，只把真正发请求的 `translate()` 委托出去。
+理由是项目已有完整的缓存与视图机器，重写等于把这些再赌一次；并行两套则会让"到底谁在翻译"说不清。
+
+**新包 `wreader/translate/`（8 个文件，共 1317 行）**：
+
+| 文件 | 行 | 职责 |
+| --- | --- | --- |
+| `base.py` | 151 | `Translator` ABC（`translate(text, from_lang, to_lang) -> str`）+ `TranslateError` / `TranslateUnavailable` + 凭证/可选包检查 + `language_code()` |
+| `google.py` | 92 | `deep-translator`；**免费免密钥，仍是默认引擎**；`pause()` 做批次限速 |
+| `baidu.py` | 155 | 通用翻译 API V2，**MD5 签名**（`md5(appid + q + salt + secret)`） |
+| `youdao.py` | 179 | 有道智云 v3，**SHA-256 签名** + `truncate()`（>20 字符取前 10+长度+后 10） |
+| `tencent.py` | 240 | 腾讯云 TMT `TextTranslate`，**TC3-HMAC-SHA256**（规范请求串 → 待签串 → 逐级派生密钥） |
+| `deepseek.py` | 221 | 从 `translator.DeepSeekBackend` 搬来；chat completions + SSE 流式 + 系统提示词 |
+| `local.py` | 129 | Argos Translate，**惰性导入**，语言包没装时给安装命令 |
+| `__init__.py` | 150 | `ENGINES` 注册表 + `make_engine()` / `engine_from_settings()` / `available_engines()` / 引擎中文名 |
+
+**加一个厂商 = 写一个模块 + 在 `ENGINES` 登一行**，别处都不用改；连配置向导都自动适配
+（它按 `EngineClass.credential_keys` 提问，提示语直接复用 `config.COMMENTS`）。
+
+**`translator.py` 的变化**（1305 → 1199 行）：
+- `Backend` 接口**保留**（`_translate_batches` 还要用它的 `pause()` 与错误语义），新增
+  `EngineBackend(Backend)` 适配器：把引擎的 `TranslateError` 映射成模块自己的
+  `TranslationError` / `TranslationUnavailable`（**后者决定整本书是"中止"还是"继续下一章"**）。
+- 删掉 `GoogleBackend` / `DeepSeekBackend` / `_parse_sse` / `_system_prompt`（都搬进新包）；
+  `make_backend()` 改为 `EngineBackend(translate.make_engine(...))`。
+- `TranslatorSettings` 新增 `engine` + `credentials`，并有 `resolved_engine()`（`engine` 空则回退旧的
+  `translator.backend`）与 `credential_values()`（`[translate]` 缺的 key 回退到旧的 `[translator] deepseek_*`）。
+  **旧配置文件零迁移**照常能用。
+- 新增 `engine_ready() -> (bool, str)`：给 `t` 与 CLI 做"配好了吗"的前置检查。
+- 顺手去掉重复的默认值：`DEFAULT_BACKEND` / `DEFAULT_BATCH_SIZE` / `DEFAULT_DEEPSEEK_MODEL` / `DEEPSEEK_URL`
+  现在**从 `config.DEFAULTS` 取值**，不再和 `SCHEMA` 各写一份。
+
+**配置**：新增 `[translate]` 段（11 键）→ SCHEMA **25 → 36 键 / 6 → 7 段**
+（守卫测试 `test_schema_has_a_default_for_every_path` 的计数器同步改成 36）。
+`[translator]` **一个键都没删**（`backend` 变成"engine 为空时的回退"），所以老 settings.toml 照常工作。
+
+**`t` 键（`reader.py`，3112 → 3308 行）**：先 `_translation_ready()`，没配好就
+`未配置翻译引擎：运行 werd config translate（原因）`；配好了则
+`Pager.translate_screen(first, last, target=...)`（**新增 `target` 参数**，所以中文书在中文视图里也能翻）
+→ 译文在底部弹窗显示 `TRANSLATION_POPUP_SECONDS = 3.0` 秒（任意键提前关；走 `_sub_window`，
+与笔记面板同一套"主窗口先刷、子窗口后刷"）。译文仍并进 `pager.translations`，之后按 `l` 切双语立刻可见。
+
+**CLI**：`werd config translate` 走交互式向导（`cli.py` 1087 → 1237 行）：列出引擎（标出当前）、
+按引擎声明的键逐条问、**密钥类字段不回显且"留空保留"**、写完立刻 `engine_ready()` 自查。
+`werd config translate.engine xxx` 这种非交互写法**完全不受影响**。
+
+**依赖**：`requests` 与 `deep-translator` **仍是必装**（前者撑起四家 HTTP 引擎，后者是默认引擎的地基 ——
+把默认引擎的依赖做成可选，等于"装完就坏"），只把 `argostranslate` 放进 `local` extra。
+**与计划的一句话出入**：计划里写的是"`deep-translator` 移到 google extra"，实现时判定不妥，见上。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pytest` | **654 passed**（595 + `test_translate` 49 + `test_cli` 6 + `test_translator`/`test_reader` 调整） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` / `check_doc_numbers.py` | **RESULT: OK** / **ALL OK** |
+| `tools/verify_wrap.py` / `verify_draw.py` | 40077 / 420 |
+| `tools/verify_mouse.py` / `verify_notes.py` | 全部通过（回归） |
+| **`tools/verify_translate.py`（新增）** | **全部通过（4 项）**：真 pty 里选 `local`（没装包）与 `baidu`（没填密钥）各按一次 `t`，都对账到"提示去跑 `werd config translate`"；再喂标准输入跑向导，确认 `engine`/密钥真的落盘 |
+| `py_compile` | **36 个** `.py` 全过（wreader 17 + tests 10 + tools 9） |
+
+**外部向量验证**（没联网也能对账）：
+- **百度**：官方文档示例 `appid=2015063000000001, q=apple, salt=1435660288, secret=12345678`
+  → `f89f9594663708c1605f3d736d01d2d4`，**逐字节对上**（这条进了单测）。
+- **腾讯云**：官方 v3 文档把"请求体 → sha256"的结果印在页面上
+  （`35e9c5b0e3ae67532d3c9f17ead6c90222632e5b1ff7f6e89887f1398934f064`），单测断言哈希一致；
+  **但它给的 SecretId/SecretKey 已被打码**（页面里是 `AKID****`），所以最终签名**没有可复现的外部向量** ——
+  只能靠"结构断言 + 自洽性"（规范请求串格式、UTC 日期作用域、逐级派生、签名随 body 变化）。
+  ⚠️ 别把这条当成"腾讯云已经完全验过"。
+
+**踩到的坑**：
+1. ⚠️ **`editor` 工具在超长替换时"报告成功但实际另建了一个文件"**：一次约 5900 字符的替换返回
+   `File created successfully at: .../wreader/cli.py`（路径写在包内），实际却在**仓库根**留下一个
+   143 行的 `cli.py`，而目标文件只改了别的部分。表现极具迷惑性：`grep 新函数名` 找不到、
+   pyright 却依然报 0（根目录不在 include 里）。
+   **对策：大改动拆成 <6000 字符的小块、每次改完 `grep` 确认落地、`git status` 检查有没有冒出怪文件。**
+   （本次收尾前就把这个野生 `cli.py` 删掉了，别让它进版本库。）
+2. **`region` 参数的默认值会"影子"掉凭证表**：`TencentTranslator(region=DEFAULT_REGION)` 里
+   `region or self.credential("tencent_region", ...)` 永远走左边 → 配置里的地域永远读不到。
+   把默认值改成 `""` 才对。这类"默认值把回退逻辑短路"的坑，**只有真跑一遍配置才暴露**。
+3. **向导里"留空保留"不能只是提示语**：第一版对已设置的密钥把 default 设成空串，
+   结果空输入真的把密钥写成了空（提示语在说谎）。现在 `values[key] = answer or existing`。
+4. 测试替身要**复刻被替换函数的语义**：`_answer_with` 一开始直接返回队列里的空串，
+   于是"直接回车保留当前引擎"这条路径根本没被跑到（向导当成"不认识的名字"取消）。
+   替身里补上 `return answer or default` 后才真正覆盖。
+5. **`check_doc_numbers.py` 只认 `wreader/<文件名>`**：子包里的 `translate/__init__.py` 会和包根的
+   `__init__.py` 撞名，被错算到包根那份上。所以 README 的子包条目**不写"（N 行）"**，
+   行数改记在本文件与 `techContext.md` 里（工具里也写了注释说明）。
+
+**已知局限**（也写进了两份 README 与《使用指南》）：
+- 六家引擎里只有**百度**有可复现的外部签名向量；腾讯云的最终签名只能靠结构 + 自洽性验证。
+- `local`（Argos）**必须自己装语言包**，装了包但没语言包时 `available()` 仍为 False（提前拦，不让第一次翻译才炸）。
+- 单个引擎**没有超时重试 / 退避**：一次失败就按 `TranslateError`（单章失败）或
+  `TranslateUnavailable`（整本中止）处理，没有自动重试。
+
 ## 待办 / 下一步
 
 按优先级（本会话已完成的"git 化""README 数字同步""校验脚本进 tools"三项已移除）：
@@ -783,6 +886,13 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
    `curses.ascii.isprint`，宽字符直接跳过）。要支持得自己接管插入 + 自己 gather
    （`Textbox.gather()` 走 `curses.ascii.ascii(inch())`，宽字符会被截成 8 位）。
    先记着，等用户真的抱怨再说。
+8. 可选：翻译引擎**没有重试 / 退避**。现在一次失败就按 `TranslateError`（单章）/`TranslateUnavailable`（整本中止）走，
+   网络抖动（尤其 Google 免费端点）会直接浪费一次整章。要加就加在 `EngineBackend.translate()` 里，
+   并且**必须可配置**（项目约定：阅读行为不写魔数），默认保持"不重试"以免掩盖真错误。
+9. 可选：`local`（Argos）现在只提示"去装语言包"，没告诉用户**怎么装**。若用户真的选它，
+   可以在 `werd config translate` 里多问一句，然后调用 `argostranslate.package` 装包。
+10. 可选：再加两家引擎（微软 Azure Translator、DeepL）—— 新包的设计就是"写一个模块 + 登一行"，
+    但**两家都需要可复现的外部签名向量**才敢合（见 ㉒ 里的验证结论）。
 
 ## 已知会话级注意事项
 
@@ -806,3 +916,10 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
   所以画叠窗时必须**先 `refresh()` 主窗口、再 `refresh()` 子窗口**，否则子窗口内容被擦掉。
 - **`Ctrl+S` 依赖 `_disable_flow_control()`**：面板的保存键走 `\x13`，终端 `IXON` 没关的话
   会被行规程吞掉。改笔记面板的按键时，别把它当成"永远能收到"的普通键。
+- ⚠️ **`editor` 工具超长替换会"假成功"**：实测一次 ~5900 字符的替换返回"File created successfully"，
+  却在**仓库根**留下一个野生 `cli.py`（目标文件只改了一半）。**收尾时务必 `git status` 扫一眼有没有
+  莫名其妙的新文件**，大改动要拆小块并 `grep` 确认落地。
+- **子包的文件行数不进 `check_doc_numbers.py`**：名字会跟包根撞车（都有 `__init__.py`）。
+  所以 README 的子包条目只写职责、不写行数；行数记在 `techContext.md`。
+- **测试替身必须复刻真函数的语义**：`cli._prompt_line` 的"空输入 = 用默认值"被替身漏掉后，
+  "回车保留当前引擎"这条路径静默失去覆盖。

@@ -28,11 +28,18 @@ classifiers = [
 dependencies = [
     "chardet",
     "rich",
+    # The default translation engine (`google`) is built on this, so removing it
+    # would break translation out of the box -- it stays a required dependency.
+    # `requests` carries the four HTTP engines (baidu / youdao / tencent / deepseek).
     "deep-translator",
     "requests",
 ]
 
 [project.optional-dependencies]
+# Optional translation engines. `local` (Argos Translate) is the only heavy one --
+# its language models are hundreds of megabytes -- so it is opt-in:
+#   pip install -e ".[local]"
+local = ["argostranslate"]
 windows = ["windows-curses"]
 dev = ["pytest>=8"]
 

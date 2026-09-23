@@ -1242,13 +1242,25 @@ def test_view_keys(window, pager, backend) -> None:
     assert "当前视图就是原文" in pager.current_message()
 
 
-def test_translate_screen_key(window, pager, backend) -> None:
-    # t 只翻当前屏幕，且明确提示"不缓存"
-    pager.mode = "en"
-    reader.handle_key(window, pager, "t")
-    assert "已翻译 4 段（临时，不缓存）" == pager.current_message()
+def test_translate_screen_key(panel_window, pager, backend) -> None:
+    # t：翻当前屏幕并把译文弹在下方（临时，不缓存）——
+    # 注意即使在中文视图里也翻（目标是"另一种语言"，中文书 -> 英文）
+    reader.handle_key(panel_window, pager, "t")
+    # 译文已并进视图，之后切到双语/英文视图立刻可见
+    assert pager.translations[0] == "EN:第一章 科学边界"
     # 记一次翻译使用
     assert pager.translations_used == 1
+    # 弹窗（第一个子窗口）里画出了这段译文
+    popup = panel_window.windows[0]
+    drawn = [text for _row, _column, text, _attr in popup.writes]
+    assert any("EN:第一章 科学边界" in text for text in drawn)
+
+
+def test_translate_screen_key_without_an_engine_says_so(monkeypatch, panel_window, pager) -> None:
+    # 引擎没配好：提示去跑 werd config translate，而不是发请求
+    monkeypatch.setattr(reader, "_translation_ready", lambda: (False, "baidu 缺少 APPID"))
+    reader.handle_key(panel_window, pager, "t")
+    assert "werd config translate" in pager.current_message()
 
 
 def test_translate_chapter_key_caches_the_chapter(

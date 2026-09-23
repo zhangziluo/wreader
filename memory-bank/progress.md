@@ -7,14 +7,14 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **595 passed**，全离线、不碰真实数据，约 4~25 秒 |
+| 测试 | **654 passed**，全离线、不碰真实数据，约 4~25 秒 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2777** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **3164** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**44 个跟踪文件**（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**54 个跟踪文件**（提交数每次提交都会变，故不写死） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 **26 个** .py 通过（wreader 9 + tests 9 + tools 8） |
-| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过、笔记 5 项全过 |
+| 编译 | `py_compile` 全部 **36 个** .py 通过（wreader 17 + tests 10 + tools 9） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项、笔记 5 项、翻译 4 项 |
 
 ## 已完成（可用的功能）
 
@@ -75,12 +75,26 @@
 - ⚠️ **笔记只存内存**（`Pager.notes`），退出即失；落盘是下一步（见待办高优先级 #1）。
 - ⚠️ 编辑区中文输入依赖 IME（`do_command` 只认 `curses.ascii.isprint`），实际以英文 / 拼音为主。
 
-### 翻译
-- 两个后端：`google`（deep-translator）、`deepseek`（HTTP + SSE 流式）。
-- 三个入口：单句/单词（`translate_text`）、视口（`translate_viewport`）、整章（`translate_chapter`）。
-- 按章缓存到 `cache/<book_id>/ch{N}_en.txt` + `ch{N}_bilingual.txt`，二次访问零成本、可断点续翻。
-- `normalize_language()`：`zh` → `zh-CN` 等归一化，避免 deep-translator 在发请求前就报错。
+### 翻译（2026-09-23 重构为可插拔引擎）
+- **引擎层在 `wreader/translate/`**：每个厂商一个模块，共 8 个文件 1317 行 ——
+  `base.py`（`Translator` ABC + 凭证/可选包检查）、`google.py`（默认，免密钥）、`baidu.py`（MD5）、
+  `youdao.py`（SHA-256）、`tencent.py`（TC3-HMAC-SHA256）、`deepseek.py`（chat completions + SSE）、
+  `local.py`（Argos，可选依赖）、`__init__.py`（注册表 + 工厂）。
+  **加一个厂商 = 一个模块 + `ENGINES` 登一行**，连配置向导都会自动适配。
+- **`translator.py` 变成"引擎之上的机器"**：保留 `Backend` 接口与
+  `EngineBackend` 适配器（错误映射：引擎异常 → `TranslationError` / `TranslationUnavailable`），
+  加上章节缓存 / 分批 / 段落映射 / 双语视图 / `werd translate`，以及新的 `engine_ready()` 前置检查。
+- 三个入口不变：单句/单词（`translate_text`）、视口（`translate_viewport`）、整章（`translate_chapter`）；
+  按章缓存 `cache/<book_id>/ch{N}_en.txt` + `ch{N}_bilingual.txt`，二次访问零成本、可断点续翻。
+- `normalize_language()`：`zh` → `zh-CN` 归一化；每个引擎再用自己的 `language_codes`
+  映射成厂商写法（百度 `zh`、有道 `zh-CHS`、Argos `zh`）。
 - 段落（而非行）为翻译单位，双语视图能一段对一段。
+- **配置**：新增 `[translate]` 段（`engine` + 各厂商密钥，11 键）；`werd config translate` 交互式向导
+  （列引擎 → 逐条问密钥 → 落盘 → 当场自查）；旧的 `[translator] backend` 仍作为回退，**零迁移**。
+- **阅读器 `t`**：翻译当前屏段落，译文在底部弹窗显示 3 秒（任意键提前关）；引擎没配好时
+  只提示"运行 `werd config translate`"，不发请求。
+- **依赖**：`argostranslate` 放进 `local` extra（模型动辄几百 MB）；`requests` / `deep-translator`
+  仍是必装（默认引擎就靠后者）。
 
 ### 生词本
 - `add_word` 对同词是**刷新**而非重复插入；`book`/`chapter`/`context`/`date_added` 完整记录。
@@ -176,6 +190,9 @@
 | `progress` 数值不强制转型 | 字符串值也能读但不会自动改回数字 | 消费方已用 `int()` 兜底 |
 | 笔记只存内存 | 退出阅读器后 `Ctrl+S` 存的笔记全部消失 | Phase 1+2 只做 UI，落盘见待办高优先级 #0；已写进两份 README 的「已知问题」 |
 | 笔记编辑区中文输入受限 | 依赖系统 IME，实际以英文 / 拼音为主 | `curses.textpad.do_command` 只认 `curses.ascii.isprint`，宽字符被跳过 |
+| 翻译引擎没有重试 / 退避 | 一次网络抖动就浪费一整章（Google 免费端点尤其明显） | 失败仍按 `TranslateError`（单章）/ `TranslateUnavailable`（整本中止）处理；要加需做成可配置，见 activeContext 待办 #8 |
+| 只有百度有可复现的外部签名向量 | 腾讯云最终签名只能靠结构断言 + 自洽性验证，改动后无外部对拍 | 官方文档把 SecretId/SecretKey 打码了；有道/腾讯都没找到可复现的公开向量 |
+| 本地引擎需自备语言包 | 选了 `local` 但没装语言包时不可用 | `available()` 会提前拦下并提示装包命令，不让它到第一次翻译才炸 |
 | 终端自身限制透明 | 若终端在备用屏幕禁用透明度，应用无法绕过 | 属终端设置，非应用缺陷 |
 
 ## 决策演变（记录为什么变成现在这样）
@@ -212,4 +229,10 @@
 | **2026-09-23** | 笔记面板做成**模态小循环**（同目录浮层），并**逐键调 `Textbox.do_command()` 而非 `Textbox.edit()`** | `edit()` 是阻塞循环，`Tab`/`Ctrl+S`/`Esc` 没法自己拦；逐键喂 `do_command` 既复用了 Textbox 现成的 Emacs 键绑定（退格/左右光标/回车换行），又把主循环控制权留在自己手里，且**不另开线程**（符合"面板渲染在主循环里"的要求）。`_note_validate` 把回车映射成 `NL` 而**不映射 `Ctrl-G`**，回车因此永远不会意外提交 |
 | **2026-09-23** | `_run` 里新增 `_disable_flow_control()`（尽力关 `IXON`/`IXOFF`） | `curses.wrapper` 只调 `cbreak()`，`IXON` 仍开着 → 行规程把 `Ctrl-S`（XOFF）吃掉，保存键永远到不了程序。只在 POSIX 生效，Windows / 非 tty 静默降级；`endwin()` 负责还原，不需要手工回滚。**这是"真 pty 才验得出来"的那类问题**（单测不会经过行规程） |
 | **2026-09-23** | 新增 `tools/verify_notes.py`（真 pty 端到端），并把子窗口创建抽成 `reader._sub_window()` | 第一版直接写 `stdscr.newwin(...)`，`FakeStdscr` 恰好也有 `newwin` 所以**单测全绿**，但真 curses 的 window 对象**只有 `derwin`** —— 真 pty 里立刻 `AttributeError`。抽出 `_sub_window()` 后生产用 `curses.newwin`、测试替换成假窗口。**教训：假窗口越像真的，越会掩盖真 API 的差异；UI 改动必须过真 pty** |
+
+| **2026-09-23** | 翻译改成**可插拔引擎层** `wreader/translate/`（base + google/baidu/youdao/tencent/deepseek/local），`translator.py` 保留缓存/分批/段落/视图/CLI 只做委托 | 用户拍板"重构"而非另起一套或整体重写：项目已有完整的章节缓存与双语视图机器，重写等于把这些再赌一次；并行两套则会让"到底谁在翻译"说不清。**`translate/` 刻意不 import `config`/`translator`**（凭证由调用方传进来），既避免循环导入，也让工厂能脱离终端/网络单测 |
+| **2026-09-23** | 新增 `[translate]` 段（engine + 各厂商密钥），`[translator] backend` 降级为"engine 为空时的回退" | 规格要求"新增 `[translate]` 配置段"。**一个键都没删**换来**零迁移**：老 settings.toml 里的 `backend` / `deepseek_*` 照常生效（`credential_values()` 会把没写的键回退到旧字段）。代价是两处能选引擎，所以文档明确写"`engine` 优先" |
+| **2026-09-23** | `requests` 与 `deep-translator` **保持必装**，只把 `argostranslate` 放进 `local` extra | 计划里原本写"deep-translator 移到 google extra"，实现时判定不妥：**google 是默认引擎**，把它的依赖做成可选 = 装完就坏（`pip install wreader` 后按 `t` 直接报"没装包"）。extras 只该装"重且少数人才用"的东西，Argos 的几百 MB 模型正合适 |
+| **2026-09-23** | `t` 从"只翻当前屏并提示已翻译 N 段"改成"**译文在底部弹窗显示 3 秒**"，并新增"未配置就走向导"的前置检查 | 规格明确要求弹窗；顺带修掉旧行为的反直觉之处——旧 `t` 只把译文塞进内存，用户按完看不到任何译文（得再按 `l`）。前置检查则是把"没配好"和"请求失败"分开：前者给可操作提示，后者才是错误 |
+| **2026-09-23** | 新增 `tools/verify_translate.py`（真 pty，**不联网**） | 弹窗要真建子窗口/真按叠窗顺序刷；但翻译必须联网，而测试纪律不许联网。于是只验"不联网也确定"的两条：引擎不可用时 `t` 的提示、向导的落盘。**用 `local`（没装包）与 `baidu`（没填密钥）各打一次**，两条路都不需要网络 |
 

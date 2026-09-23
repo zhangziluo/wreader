@@ -194,6 +194,16 @@ _TAB_KEYS = ("\t", int(getattr(curses, "KEY_TAB", 9)))
 _ESCAPE_KEYS = ("\x1b", 27)
 # Ctrl+S：同样是"字符串 / 整数"两种上报；注意 IXON 流控会吞掉它，_run 里会先关流控
 _SAVE_KEYS = ("\x13", 19)
+
+# 翻译弹窗：显示多久、占屏幕多高、底部提示语
+#: Seconds the ``t`` translation popup stays on screen.
+TRANSLATION_POPUP_SECONDS = 3.0
+# 面板高度占屏幕的比例（贴底显示）
+_TRANSLATION_POPUP_RATIO = 0.4
+# 弹窗里轮询按键的间隔（毫秒）：既能立刻响应按键，又能按时自动消失
+_TRANSLATION_POPUP_TICK_MS = 100
+# 弹窗最后一行的说明文字
+_TRANSLATION_POPUP_HINT = "翻译（临时，不缓存）· 任意键关闭"
 # 抓拉丁单词（长度至少 3）用于"查词时默认选中的词"
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]{2,}")
 
@@ -993,16 +1003,21 @@ class Pager:
         return True
 
     # -- translation -----------------------------------------------------
-    def translate_screen(self, first: int, last: int, progress=None) -> int:
+    def translate_screen(
+        self, first: int, last: int, progress=None, target: Optional[str] = None
+    ) -> int:
         """Translate every paragraph touched by ``[first, last]`` into memory.
 
         Paragraphs, not lines, are the unit: the back-end then sees whole sentences
         instead of a pile of fragments, and the bilingual view can pair one Chinese
         paragraph with one English paragraph.  Returns how many paragraphs landed.
+
+        *target* overrides the language the current view would ask for, which is
+        what lets ``t`` pop up a translation without switching the view first.
         """
-        # 当前视图需要翻成什么语言；None 表示不需要翻译
-        target = mode_language(self.mode, self.language)
-        if target is None:
+        # 没显式指定就用当前视图该翻成的语言；None 表示这个视图不需要翻译
+        resolved = mode_language(self.mode, self.language) if target is None else target
+        if resolved is None:
             return 0
         # 划出与屏幕相交的段落区间
         spans = translator.paragraph_spans(self.lines, first, last)
@@ -1011,7 +1026,7 @@ class Pager:
         # 逐段翻译（只进内存，不缓存）
         english = translator.translate_paragraphs(
             translator.paragraph_texts(self.lines, spans),
-            target=target,
+            target=resolved,
             source=self.source_language,
             progress=progress,
         )
@@ -1813,6 +1828,134 @@ def _draw_progress(stdscr: Any, chapter_index: int, done: int, total: int) -> No
     stdscr.refresh()
 
 
+def _wrap_text(text: str, width: int, limit: int) -> List[str]:
+    """Wrap *text* to *width* columns, keeping at most *limit* lines.
+
+    Blank lines between paragraphs are preserved, which is what makes the popup
+    read like prose instead of one wall of text.  Wrapping itself goes through
+    :func:`_wrap_line`, so double width CJK characters are counted correctly.
+    """
+    # 攒出来的屏幕行
+    lines: List[str] = []
+    # 空行也要保留：段落之间那一行空白正是可读性的来源
+    for paragraph in str(text or "").split("\n"):
+        for line in _wrap_line(paragraph, max(1, int(width))):
+            # 到上限就停，超出部分不画（弹窗不做滚动）
+            if len(lines) >= max(1, int(limit)):
+                return lines
+            lines.append(line)
+    return lines
+
+
+def _first_line(text: str) -> str:
+    """Return the first non-blank line of *text* (used by the tiny-screen fallback)."""
+    # 逐行找第一个有内容的
+    for line in str(text or "").split("\n"):
+        if line.strip():
+            return line.strip()
+    # 全是空白：返回空串
+    return ""
+
+
+def _screen_translation_text(pager: Pager, first: int, last: int) -> str:
+    """Join the translations of the on-screen paragraphs, blank line between them.
+
+    A paragraph's translation is stored on its **first** line while the rest of
+    the paragraph maps to an empty string ("already covered by the paragraph
+    above"), so dropping the empties both dedupes and restores the paragraphs.
+    """
+    # 收集 [first, last) 里真正带译文的那几行
+    pieces = [
+        str(pager.translations.get(index) or "")
+        for index in range(max(0, first), min(int(last), pager.total))
+    ]
+    # 段落之间空一行再拼，末尾空白去掉
+    return "\n\n".join(piece for piece in pieces if piece).strip()
+
+
+def _translation_popup_layout(height: int, width: int) -> Optional[Tuple[int, int, int]]:
+    """Return ``(top, rows, room)`` for the translation popup, or ``None``.
+
+    The panel sticks to the bottom of the screen, keeps one row for its own hint
+    and leaves at least three rows of reading text visible above it, so it never
+    covers the whole page.  *room* is the usable column count -- the very last
+    column is left alone because curses cannot write to the bottom right cell.
+    """
+    # 太矮 / 太窄就放下面板（调用方会退化成一行短消息）
+    if height < 8 or width < 8:
+        return None
+    # 面板高度 = 屏幕的 40%，再夹一层：正文至少留 3 行
+    rows = max(3, int(round(height * _TRANSLATION_POPUP_RATIO)))
+    rows = min(rows, max(3, height - 3))
+    # 贴着屏幕底部
+    top = height - rows
+    # 可用列数：留出最后一列，避开 curses 右下角限制
+    room = max(1, width - 1)
+    return top, rows, room
+
+
+def _show_translation_popup(
+    stdscr: Any, pager: Pager, text: str, seconds: float = TRANSLATION_POPUP_SECONDS
+) -> None:
+    """Show *text* in a panel at the bottom of the screen for a few seconds.
+
+    Any key dismisses it early, and it disappears on its own after *seconds*, so
+    the reading loop is never stuck behind it.  A screen too small for the panel
+    degrades to the usual one-line message instead of drawing a squashed box.
+    """
+    # 终端尺寸
+    height, width = stdscr.getmaxyx()
+    layout = _translation_popup_layout(height, width)
+    # 屏幕太小：退回一行短消息
+    if layout is None:
+        pager.say(_first_line(text))
+        return
+    # 拆出位置、高度与可用列数
+    top, rows, room = layout
+    try:
+        # 走 _sub_window：真终端是 curses.newwin，测试换成假窗口
+        window = _sub_window(stdscr, rows, width, top, 0)
+    except curses.error:
+        pager.say(_first_line(text))
+        return
+    # 先把正文那一帧画出来（主窗口先刷），面板随后叠上去（子窗口后刷）
+    _draw(stdscr, pager, _now())
+    # 画译文；最后一行留给提示
+    lines = _wrap_text(text, room, rows - 1)
+    window.erase()
+    for offset, line in enumerate(lines):
+        _addstr(window, offset, 0, line, curses.A_NORMAL)
+    _addstr(
+        window, rows - 1, 0, _pad_line(_TRANSLATION_POPUP_HINT, room), curses.A_DIM
+    )
+    window.refresh()
+    # 展示期间改成短轮询：按键能立刻关掉，时间到也能自己消失
+    stdscr.timeout(_TRANSLATION_POPUP_TICK_MS)
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    try:
+        while time.monotonic() < deadline:
+            try:
+                # 等一个键（超时抛 curses.error，回到 while 再看时间）
+                stdscr.get_wch()
+            except curses.error:
+                continue
+            except KeyboardInterrupt:
+                # Ctrl-C：关掉面板，把"退出阅读"留给主循环
+                break
+            # 任意键都立刻关掉面板
+            break
+    finally:
+        # 恢复主循环的轮询间隔
+        stdscr.timeout(_TICK_MS)
+        # 交回子窗口
+        del window
+        # 面板盖住的正文要让主窗口重画
+        try:
+            stdscr.touchwin()
+        except curses.error:
+            pass
+
+
 def _translate_screen_range(pager: Pager, first: int, last: int) -> str:
     """Translate the paragraphs on screen into memory; returns a status sentence."""
     # 当前视图就是原文：没什么可翻的
@@ -2403,11 +2546,64 @@ def _cycle_mode(stdscr: Any, pager: Pager) -> None:
     )
 
 
+def _translation_ready() -> Tuple[bool, str]:
+    """Whether the configured engine can be used, and why not when it cannot.
+
+    Checked *before* a request goes out, so an unconfigured engine shows the
+    actionable "run ``werd config translate``" hint instead of a provider error.
+    """
+    try:
+        # engine_ready 会自己读设置，这里不用再传一遍
+        return translator.engine_ready()
+    except translator.TranslationError as exc:
+        # 配置本身坏了（比如 TOML 写错）：也算"没配好"，给可操作的提示
+        return False, str(exc)
+
+
 def _translate_screen(stdscr: Any, pager: Pager) -> None:
-    """``t``: translate what is on screen, deliberately never touching the cache."""
+    """``t``: translate what is on screen and pop the result up for a few seconds.
+
+    The translation is still merged into ``Pager.translations`` (so switching to
+    the bilingual view afterwards is instant), but the point of ``t`` is the
+    popup: a quick look that does not change the view you are reading in.
+    """
+    # 引擎没配好：直接告诉用户跑哪条命令，别让请求先失败
+    ready, reason = _translation_ready()
+    if not ready:
+        pager.say("未配置翻译引擎：运行 werd config translate（{}）".format(reason))
+        return
     # 只处理当前一屏
     first, last = _screen_range(stdscr, pager)
-    pager.say(_translate_screen_range(pager, first, last))
+    # 不管当前是哪个视图，都翻成"另一种语言"（中文书 -> 英文，英文书 -> 中文）
+    target = mode_language(MODE_BOTH, pager.language)
+    if target is None:
+        # 理论上 MODE_BOTH 总有目标；真取不到就什么都不做
+        pager.say("这些段落无需翻译")
+        return
+    try:
+        # 显式给 target：当前视图是原文时也要能翻（比如中文书的中文视图）
+        count = pager.translate_screen(first, last, target=target)
+    except translator.TranslationUnavailable as exc:
+        # 后端不可达
+        pager.say("翻译不可用：{}".format(exc))
+        return
+    except translator.TranslationError as exc:
+        # 其它翻译错误
+        pager.say("翻译失败：{}".format(exc))
+        return
+    # 一段都没翻出来
+    if not count:
+        pager.say("这些段落还没有译文")
+        return
+    # 记一次翻译使用
+    pager.translations_used += 1
+    # 把这一屏的译文收拢成一段文字弹出来
+    text = _screen_translation_text(pager, first, last)
+    if not text:
+        # 译文是空的（后端返回空串）：退化成一行提示，别弹一个空面板
+        pager.say("已翻译 {} 段（临时，不缓存）".format(count))
+        return
+    _show_translation_popup(stdscr, pager, text)
 
 
 def _translate_chapter(stdscr: Any, pager: Pager) -> None:
@@ -2603,7 +2799,7 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     # l：循环切换语言视图
     elif key == "l":
         _cycle_mode(stdscr, pager)
-    # t：翻译当前屏幕（不缓存）
+    # t：翻译当前屏幕并弹窗显示几秒（临时，不缓存）
     elif key == "t":
         _translate_screen(stdscr, pager)
     # T：翻译并缓存整章

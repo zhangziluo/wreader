@@ -17,8 +17,11 @@ from typing import List, Tuple
 # pytest.raises / parametrize
 import pytest
 
-# 被测模块 + 配置与书库
-from wreader import config, library, translator
+# 被测模块 + 配置、书库与可插拔引擎
+from wreader import config, library, translate, translator
+# 引擎内部细节（限速用到的 time、SSE 解析、系统提示词）
+from wreader.translate import deepseek as deepseek_engine
+from wreader.translate import google as google_engine
 
 # 复用样例正文与假后端
 from conftest import BOOK_LINES, RecordingBackend
@@ -102,12 +105,12 @@ def test_load_settings_of_a_missing_file_is_the_default(tmp_path: Path) -> None:
 
 
 def test_load_settings_rejects_an_unknown_backend(tmp_path: Path) -> None:
-    # backend 只接受 google/deepseek
+    # backend 只接受已知引擎名（清单由 wreader.translate 维护）
     target = tmp_path / "settings.toml"
     target.write_text('[translator]\nbackend = "bing"\n', encoding="utf-8")
     with pytest.raises(translator.SettingsError) as excinfo:
         translator.load_settings(target)
-    assert "must be 'google' or 'deepseek'" in str(excinfo.value)
+    assert "must be one of" in str(excinfo.value)
 
 
 def test_load_settings_clamps_a_zero_batch_size(tmp_path: Path) -> None:
@@ -523,20 +526,72 @@ def test_build_bilingual_skips_missing_pieces() -> None:
 
 
 # --------------------------------------------------------------------- backends
-def test_make_backend_picks_the_configured_one() -> None:
-    # 默认配置 -> Google 后端
+def test_make_backend_picks_the_configured_engine() -> None:
+    # 默认配置 -> Google 引擎（免费、免密钥），包在 EngineBackend 里
     google = translator.make_backend(translator.TranslatorSettings())
-    assert isinstance(google, translator.GoogleBackend)
+    assert isinstance(google, translator.EngineBackend)
     assert google.name == "google"
 
-    # backend=deepseek -> DeepSeek 后端，且 key/model/url 被带上
-    deepseek = translator.make_backend(
+    # [translate].engine 选百度：凭证被带进引擎
+    baidu = translator.make_backend(
         translator.TranslatorSettings(
-            backend="deepseek", deepseek_api_key="k", deepseek_model="m", deepseek_url="u"
+            engine="baidu", credentials={"baidu_appid": "a", "baidu_secret": "s"}
         )
     )
-    assert isinstance(deepseek, translator.DeepSeekBackend)
-    assert (deepseek.api_key, deepseek.model, deepseek.url) == ("k", "m", "u")
+    assert isinstance(baidu, translator.EngineBackend)
+    assert baidu.name == "baidu"
+    assert baidu.engine.credential("baidu_appid") == "a"
+
+    # engine 为空时回退到旧的 [translator].backend
+    legacy = translator.make_backend(
+        translator.TranslatorSettings(backend="deepseek", deepseek_api_key="k")
+    )
+    assert isinstance(legacy, translator.EngineBackend)
+    assert legacy.name == "deepseek"
+    # 旧字段的 key 也被回退过去了（用基类 API 读，不依赖具体引擎的字段名）
+    assert legacy.engine.credential("deepseek_api_key") == "k"
+
+
+def test_make_backend_rejects_an_unknown_engine() -> None:
+    # 引擎名写错：属于配置错误，报错里列出可选值
+    with pytest.raises(translator.SettingsError) as excinfo:
+        translator.make_backend(translator.TranslatorSettings(engine="bing"))
+    assert "baidu" in str(excinfo.value)
+
+
+def test_engine_ready_reports_missing_credentials() -> None:
+    # 百度缺 appid/secret：不 ready，并说清楚缺什么
+    ready, reason = translator.engine_ready(
+        translator.TranslatorSettings(engine="baidu")
+    )
+    assert ready is False
+    assert "APPID" in reason
+    # 默认的 Google 不需要任何凭证
+    assert translator.engine_ready(translator.TranslatorSettings()) == (True, "")
+
+
+def test_engine_backend_maps_engine_errors(monkeypatch) -> None:
+    # 引擎抛"不可达" -> 后端的 TranslationUnavailable（整本书会因此中止）
+    class Unreachable(translate.Translator):
+        name = "boom"
+
+        def translate(self, text: str, from_lang: str = "auto", to_lang: str = "en") -> str:
+            raise translate.TranslateUnavailable("no network")
+
+    backend = translator.EngineBackend(Unreachable())
+    assert backend.name == "boom"
+    with pytest.raises(translator.TranslationUnavailable):
+        backend.translate("hi")
+
+    # 引擎抛普通错误 -> TranslationError（只影响这一次）
+    class Broken(translate.Translator):
+        name = "broken"
+
+        def translate(self, text: str, from_lang: str = "auto", to_lang: str = "en") -> str:
+            raise translate.TranslateError("bad signature")
+
+    with pytest.raises(translator.TranslationError):
+        translator.EngineBackend(Broken()).translate("hi")
 
 
 def test_the_backend_base_class_is_abstract() -> None:
@@ -564,9 +619,11 @@ def test_set_backend_round_trip() -> None:
     translator.set_backend(fake)
     # 装上去之后拿到的就是它本身
     assert translator.get_backend() is fake
-    # 传 None 清掉，下次会按配置重建（默认 Google）
+    # 传 None 清掉，下次会按配置重建（默认 Google 引擎）
     translator.set_backend(None)
-    assert isinstance(translator.get_backend(), translator.GoogleBackend)
+    rebuilt = translator.get_backend()
+    assert isinstance(rebuilt, translator.EngineBackend)
+    assert rebuilt.name == "google"
 
 
 # 参数化：不是后端也不是可调用对象的输入
@@ -584,54 +641,63 @@ def test_the_default_backend_is_built_once() -> None:
     assert translator.get_backend() is first
 
 
-def test_google_backend_short_circuits_blank_text() -> None:
-    google = translator.GoogleBackend(batch_size=10)
-    # 空白文本直接返回空串
+def test_google_engine_short_circuits_blank_text() -> None:
+    google = translate.make_engine("google")
+    # 工厂返回的就是 Google 引擎（收窄类型，下面要读它自己的计数器）
+    assert isinstance(google, google_engine.GoogleTranslator)
+    # 空白文本直接返回空串，连请求都不发
     assert google.translate("   ") == ""
     assert google.requests == 0  # no request was even attempted
 
 
-def test_google_backend_pauses_between_batches(monkeypatch) -> None:
+def test_google_engine_pauses_between_batches(monkeypatch) -> None:
     # 把 time.sleep 换成记录器，避免真的等待
     slept: List[float] = []
-    monkeypatch.setattr(translator.time, "sleep", slept.append)
-    translator.GoogleBackend(sleep_seconds=3.0).pause()
+    monkeypatch.setattr(google_engine.time, "sleep", slept.append)
+    translate.make_engine("google", sleep_seconds=3.0).pause()
     assert slept == [3.0]
     # 等待时间设 0 时完全不睡
-    translator.GoogleBackend(sleep_seconds=0).pause()
+    translate.make_engine("google", sleep_seconds=0).pause()
     assert slept == [3.0]  # a zero throttle does not sleep at all
 
 
 def test_deepseek_payload_and_headers() -> None:
-    backend = translator.DeepSeekBackend(api_key="k", model="m", url="u")
-    payload = backend.payload("你好", "en")
+    engine = translate.make_engine(
+        "deepseek",
+        {"deepseek_api_key": "k", "deepseek_model": "m", "deepseek_url": "u"},
+    )
+    # 收窄到具体引擎：下面要用它自己的 payload() / headers()
+    assert isinstance(engine, deepseek_engine.DeepSeekTranslator)
+    payload = engine.payload("你好", "en")
     # 请求体：模型名、流式开关、temperature、消息列表
     assert payload["model"] == "m"
     assert payload["stream"] is True
-    assert payload["temperature"] == translator.DEEPSEEK_TEMPERATURE
+    assert payload["temperature"] == deepseek_engine.TEMPERATURE
     assert payload["messages"][-1] == {"role": "user", "content": "你好"}
     assert payload["messages"][0]["role"] == "system"
     # stream=False 时关闭流式
-    assert backend.payload("你好", "en", stream=False)["stream"] is False
+    assert engine.payload("你好", "en", stream=False)["stream"] is False
     # 请求头带 Bearer token
-    assert backend.headers() == {
+    assert engine.headers() == {
         "Authorization": "Bearer k",
         "Content-Type": "application/json",
     }
 
 
 def test_deepseek_needs_a_key() -> None:
-    # 没有 key 时，一开始迭代流就报"需要 API key"
-    with pytest.raises(translator.TranslationUnavailable) as excinfo:
-        list(translator.DeepSeekBackend(api_key="").translate_stream("hi"))
+    # 没有 key（环境变量也已被清掉）时，一开始迭代流就报"需要 API key"
+    engine = translate.make_engine("deepseek")
+    assert isinstance(engine, deepseek_engine.DeepSeekTranslator)
+    with pytest.raises(translate.TranslateUnavailable) as excinfo:
+        list(engine.stream("hi"))
     assert "API key" in str(excinfo.value)
 
 
 def test_the_system_prompt_follows_the_target_language() -> None:
     # 目标是英文：用定制提示词
-    assert translator._system_prompt("en") == translator.DEEPSEEK_SYSTEM_PROMPT
+    assert deepseek_engine.system_prompt("en") == deepseek_engine.DEEPSEEK_SYSTEM_PROMPT
     # 其它目标语言：通用模板里带上目标语言
-    assert "zh-CN" in translator._system_prompt("zh-CN")
+    assert "zh-CN" in deepseek_engine.system_prompt("zh-CN")
 
 
 # 参数化：各种 SSE 行的解析结果
@@ -650,7 +716,7 @@ def test_the_system_prompt_follows_the_target_language() -> None:
     ],
 )
 def test_parse_sse(line, expected) -> None:
-    assert translator._parse_sse(line) == expected
+    assert deepseek_engine.parse_sse(line) == expected
 
 
 def test_clearing_the_whole_cache(imported, backend) -> None:

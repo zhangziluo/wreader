@@ -43,7 +43,7 @@ the next launch resumes exactly where you stopped.
 | 🔍 Search | Fuzzy library search over title, author and tags, with subsequence matching too (`hptr` finds *Harry Potter*) |
 | 📖 Reader | A curses pager: line jumps, chapter jumps, highlighted search, bookmarks, a status bar and automatic progress saving; wraps to the terminal width (CJK counted as two columns) and follows the terminal theme / transparency |
 | 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
-| 🈶 Translation | Chapter-level translation with an on-disk cache — translate once, reuse forever; Google (no API key) and DeepSeek (OpenAI-compatible endpoint) |
+| 🈶 Translation | **Pluggable engines**: Google (keyless, the default) / Baidu / Youdao / Tencent Cloud / DeepSeek / local Argos; configure with the `werd config translate` wizard. Chapter-level translation with an on-disk cache — translate once, reuse forever |
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
 | 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. ⚠️ Kept in memory only for now — see "Known issues" |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
@@ -432,6 +432,7 @@ werd config                            # print every setting (value / default / 
 werd config --path                     # print just the settings file path
 werd config reader.page_height         # read one setting
 werd config reader.page_height 30      # write one setting (saved immediately)
+werd config translate                  # interactive wizard: pick a translation engine and enter its keys
 werd config --reset                    # restore every default
 ```
 
@@ -500,7 +501,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `b` | Toggle a bookmark on the current line; the status bar shows how many you have |
 | `l` | Cycle the view: `中文` → `英文` → `双语对照` → `中文` … |
 | `c` | Switch straight to the Chinese view (the usual key when reading an English book) |
-| `t` | Translate **the current screen only**, **without caching** (for a quick peek) |
+| `t` | Translate **the current screen only**; the result pops up at the bottom for **3 seconds** (any key closes it early), **without caching** (for a quick peek). If no engine is configured it tells you to run `werd config translate` first |
 | `T` | Translate and cache **the whole chapter**, with a progress bar; revisiting it later is instant and free |
 | `v` | Look a word up and file it in the vocabulary notebook (the prompt pre-fills the longest English word on the line) |
 | `m` | Enter **mark mode**: the cursor becomes a reverse-video block; extend the selection with `h` / `j` / `k` / `l` (or the arrow keys), `y` copies it and `Esc` cancels. Mark mode **does not page** — a selection is confined to the screen it started on |
@@ -581,7 +582,7 @@ back to showing just the clock.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `backend` | `"google"` | `google` (no API key) or `deepseek` (needs a key) |
+| `backend` | `"google"` | **Legacy**: the engine selector used when `[translate] engine` is blank (`google` / `deepseek`) |
 | `batch_size` | `3000` | Character limit per request |
 | `cache_dir` | `"~/.wreader/cache"` | Translation cache directory; the default follows the data directory, so `$WREADER_HOME` applies too |
 | `deepseek_api_key` | `""` | Empty falls back to the `DEEPSEEK_API_KEY` environment variable |
@@ -591,19 +592,59 @@ back to showing just the clock.
 | `deepseek_model` | `"deepseek-chat"` | DeepSeek model name |
 | `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | Endpoint (any OpenAI-compatible service works here) |
 
-How the two backends differ:
+The engine choice and its keys are **not in this section** -- see `[translate]` below.
 
-- **google**: uses `deep-translator`'s `GoogleTranslator`. Free, no signup, but throttled with a one second
-  pause between requests, so translating a whole book takes a while. Without connectivity you get
-  `翻译不可用: Google translation failed`.
-- **deepseek**: POSTs to the OpenAI-compatible `/v1/chat/completions` with `temperature` 0.3 and streaming
-  enabled, which gives more coherent paragraph-level translations. It needs a key first:
-  ```bash
-  werd config translator.backend deepseek
-  werd config translator.deepseek_api_key sk-your-key
-  # or, without writing the key into a file:
-  export DEEPSEEK_API_KEY=sk-your-key
-  ```
+### `[translate]`
+
+Translation engines are **pluggable**: one module per provider under `wreader/translate/`, and
+`[translate] engine` picks which one runs. **The quickest way is the wizard**, which lists every engine,
+asks for its keys and re-checks the result before it exits:
+
+```bash
+werd config translate
+```
+
+Configuring by hand means editing this section:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `engine` | `""` | `google` / `baidu` / `youdao` / `tencent` / `deepseek` / `local`; **blank = fall back to `[translator] backend`** |
+| `baidu_appid` / `baidu_secret` | `""` | Baidu APPID and secret (MD5 signature) |
+| `youdao_appid` / `youdao_secret` | `""` | Youdao app id and app secret (SHA-256 signature) |
+| `tencent_secret_id` / `tencent_secret_key` | `""` | Tencent Cloud SecretId and SecretKey (TC3-HMAC-SHA256 signature) |
+| `tencent_region` | `"ap-beijing"` | Tencent region; it **takes part in the signature**, and a wrong one is rejected |
+| `deepseek_api_key` | `""` | Blank falls back to `$DEEPSEEK_API_KEY` |
+| `deepseek_model` | `"deepseek-chat"` | DeepSeek model name |
+| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | Endpoint (any OpenAI-compatible service works here) |
+
+How the six engines differ:
+
+| Engine | Needs a key | Notes |
+| --- | --- | --- |
+| `google` | no | **The default.** `deep-translator` underneath, works out of the box; throttled one second per batch, so whole-book runs are slow |
+| `baidu` | yes (APPID + secret) | General translation API V2; fast in China, has a free tier |
+| `youdao` | yes (app id + secret) | Youdao Zhiyun v3; good Chinese/English quality |
+| `tencent` | yes (SecretId + SecretKey) | Tencent Cloud TMT; the most involved signature (TC3), best if you already use Tencent Cloud |
+| `deepseek` | yes (API key) | LLM translation; the most coherent paragraph-level output; `temperature` 0.3, streamed |
+| `local` | no, but **needs a package** | Local Argos Translate, **fully offline**; install `pip install 'wreader[local]'` plus a language pack, otherwise it stays unavailable |
+
+A few examples:
+
+```bash
+werd config translate.engine deepseek
+werd config translate.deepseek_api_key sk-your-key
+# or, without writing the key into a file:
+export DEEPSEEK_API_KEY=sk-your-key
+
+werd config translate.engine baidu
+werd config translate.baidu_appid YOUR-APPID
+werd config translate.baidu_secret YOUR-SECRET
+```
+
+⚠️ With no usable engine configured, pressing `t` in the reader sends no request at all -- it just
+tells you to run `werd config translate`.
+
+### `[stats]`
 
 ### `[stats]`
 
@@ -786,26 +827,36 @@ wreader/
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
 │   ├── __init__.py          __version__ and the module map (18 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1087 lines)
-│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (993 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1237 lines)
+│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (1007 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch (3112 lines)
-│   ├── translator.py        Google / DeepSeek backends + chapter cache (1305 lines)
+│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes (3308 lines)
+│   ├── translator.py        chapter cache / batching / paragraph mapping + the engine adapter (1199 lines)
 │   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
 │   ├── stats.py             metrics, heatmap, achievement checks, celebration (849 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
+│   ├── translate/           pluggable translation engines (one module per provider; line counts live in the memory-bank)
+│   │   ├── __init__.py      engine registry + factory: build an engine by name
+│   │   ├── base.py          the Translator ABC: the translate() contract, credential checks
+│   │   ├── google.py        Google via deep-translator (free, no key, the default)
+│   │   ├── baidu.py         Baidu general translation API V2 (MD5 signature)
+│   │   ├── youdao.py        Youdao Zhiyun v3 (SHA-256 signature)
+│   │   ├── tencent.py       Tencent Cloud TMT (TC3-HMAC-SHA256 signature)
+│   │   ├── deepseek.py      DeepSeek chat completions (streamed SSE)
+│   │   └── local.py         local Argos Translate (offline, optional dependency)
 │   └── data/
 │       └── achievements.json  the 10 achievement definitions (62 lines)
-└── tests/                   595 tests, all offline (see "Running the tests" below)
+└── tests/                   654 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
     ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
-    ├── test_reader.py       191 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
+    ├── test_reader.py       192 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel
     ├── test_stats.py        76 tests — metrics, streaks, heatmap, unlock logic, the report
-    ├── test_translator.py   74 tests — language detection, batching, cache, backends, SSE
+    ├── test_translator.py   77 tests — language detection, batching, cache, engine adapter, error mapping
+    ├── test_translate.py    49 tests — engine registry, each provider's signature/request building, errors
     ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
     ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
-    └── test_cli.py          35 tests — argument parsing, every sub-command's output, exit codes, continue
+    └── test_cli.py          41 tests — argument parsing, every sub-command's output, exit codes, the engine wizard
 ```
 
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,

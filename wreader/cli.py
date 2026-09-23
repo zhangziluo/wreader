@@ -19,7 +19,7 @@ import json
 # 直接写 sys.stdout/sys.exit，绕过 rich 的渲染避免污染重定向输出
 import sys
 # 类型注解：Callable 表示"可调用的函数"，其余是容器和可选类型
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # rich 的 Console：带颜色、高亮的终端输出
 from rich.console import Console
@@ -401,12 +401,154 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prompt_line(prompt: str, default: str = "") -> str:
+    """Ask for one line on stdin; an empty answer keeps *default*.
+
+    Kept as a module level function so the tests can replace the input source
+    (exactly like ``reader._prompt`` does for the reader).
+    """
+    # 提示里带上默认值，直接回车就用它
+    suffix = " [{}]".format(default) if default else ""
+    try:
+        answer = input("{}{}: ".format(prompt, suffix))
+    except EOFError:
+        # 没有输入了（管道 / CI）：当作"保持默认"
+        return default
+    # 去掉首尾空白；空输入就是"用默认"
+    return answer.strip() or default
+
+
+def _is_secret_credential(key: str) -> bool:
+    """Whether *key* holds something that must not be echoed back."""
+    # 密钥类字段一律不回显（APPID / 地域 / 模型名这些不算）
+    return "secret" in key or key.endswith("key")
+
+
+def _choose_translate_engine(current: str) -> Optional[str]:
+    """Print the engine menu and return the pick, or ``None`` to cancel."""
+    # 延迟导入：只有这条命令需要引擎清单
+    from . import translate
+
+    names = translate.engine_names()
+    console.print("[bold]选择翻译引擎[/bold]（直接回车保留当前）")
+    for index, name in enumerate(names, start=1):
+        # 当前引擎打个标记，重复配置时一眼看清现状
+        mark = "[green]●[/green]" if name == current else " "
+        console.print(
+            "  {}. {} {}".format(index, mark, translate.ENGINE_LABELS.get(name, name))
+        )
+    # 默认值就是当前引擎（无效时退回列表第一个）
+    default_name = current if current in names else names[0]
+    answer = _prompt_line("序号或引擎名", default_name).strip().lower()
+    # 数字按序号取；越界当作取消
+    if answer.isdigit():
+        index = int(answer)
+        return names[index - 1] if 1 <= index <= len(names) else None
+    # 其它：必须是已知引擎名，否则当作取消
+    return answer if answer in names else None
+
+
+def _ask_engine_credentials(
+    engine: str, current_values: Mapping[str, Any]
+) -> Dict[str, str]:
+    """Prompt for every credential *engine* reads.
+
+    *current_values* is a ``{"translate.key": value}`` view of the settings: it
+    pre-fills the non-secret fields and, for a secret that is already stored, it
+    only says "已设置" instead of echoing the key back into the terminal.
+    """
+    # 延迟导入：同上
+    from . import translate
+
+    values: Dict[str, str] = {}
+    for key in translate.credential_keys(engine):
+        # 提示语直接复用 settings.toml 的行尾注释（单一事实来源）
+        path = "translate.{}".format(key)
+        label = config.COMMENTS.get(path) or key
+        # 已有值：非密钥字段当默认值预填，密钥字段只说"已设置"
+        existing = str(current_values.get(path) or "")
+        default = ""
+        if existing and _is_secret_credential(key):
+            label = "{}（已设置，留空保留）".format(label)
+        elif existing:
+            default = existing
+        answer = _prompt_line(label, default)
+        # 留空 = 保留原值：密钥字段的提示语就是这么承诺的（对非密钥字段 default 已经是原值）
+        values[key] = answer if answer else existing
+    return values
+
+
+def _save_translate_settings(engine: str, values: Mapping[str, str]) -> None:
+    """Write the engine choice and its credentials into ``settings.toml``."""
+    # 重新加载一次，避免把调用方已经改过的其它设置覆盖掉
+    settings = config.load_config()
+    # 引擎名本身也是一项配置
+    settings.set("translate.engine", engine)
+    for key, value in values.items():
+        # 空值也照写：等于把之前配错的密钥清掉
+        settings.set("translate.{}".format(key), value)
+    settings.save()
+
+
+def cmd_config_translate() -> int:
+    """Run the interactive ``werd config translate`` wizard.
+
+    The engine registry lives in :mod:`wreader.translate`, so this only has to ask
+    two things -- *which* engine and *which* credentials -- and the credential list
+    comes from the engine itself, so adding a provider needs no change here.
+    """
+    # 延迟导入：只有跑这条命令时才需要引擎清单
+    from . import translate
+
+    settings = config.load_config()
+    # 当前生效的引擎（engine 为空时回退到旧的 translator.backend）
+    current = str(
+        settings.get("translate.engine")
+        or settings.get("translator.backend")
+        or translate.DEFAULT_ENGINE
+    )
+    # settings.flat() 带着默认值，所以 tencent_region 这种也能预填出来
+    current_values = {
+        path: value
+        for path, value in settings.flat().items()
+        if path.startswith("translate.")
+    }
+
+    engine = _choose_translate_engine(current)
+    if engine is None:
+        console.print("[yellow]已取消，设置没有改动[/yellow]")
+        return 1
+
+    console.print()
+    console.print(
+        "[bold]{} 的密钥[/bold]".format(translate.ENGINE_LABELS.get(engine, engine))
+    )
+    values = _ask_engine_credentials(engine, current_values)
+    _save_translate_settings(engine, values)
+
+    console.print()
+    console.print("已保存：[green]{}[/green]".format(engine))
+    console.print("[dim]file: {}[/dim]".format(settings.path))
+    # 立刻自查一遍：缺什么当场说清楚，别等按了 t 才发现
+    from . import translator
+
+    ready, reason = translator.engine_ready(translator.load_settings())
+    if ready:
+        console.print("[green]引擎已就绪[/green] —— 在阅读器里按 t 即可翻译当前屏幕")
+    else:
+        console.print("[yellow]还差一点：{}[/yellow]".format(reason))
+    console.print("[dim]想换引擎时再跑一次 werd config translate 即可[/dim]")
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """Handle ``werd config [section.key] [value]`` -- view or edit ``settings.toml``.
 
     Keys are dotted paths (``reader.page_height``).  The flat names of the old
     ``config.json`` still resolve, and anything unknown is refused with a
-    suggestion rather than written into the file.
+    suggestion rather than written into the file.  The one special case is
+    ``werd config translate``, which starts the interactive engine wizard instead
+    of touching a single key.
     """
     # 先把当前配置加载出来（不存在就用默认值）
     settings = config.load_config()
@@ -423,6 +565,14 @@ def cmd_config(args: argparse.Namespace) -> int:
         console.print("settings reset to defaults")
         console.print("[dim]file: {}[/dim]".format(settings.path))
         return 0
+
+    # werd config translate：交互式配置翻译引擎（带 value 时才不是向导）
+    if args.key == "translate":
+        if args.value is not None:
+            return _fail(
+                "werd config translate 是交互式的：直接运行 werd config translate"
+            )
+        return cmd_config_translate()
 
     # 没给 key：就是想看全部设置
     if args.key is None:
