@@ -306,7 +306,7 @@ def recent_books(limit: int = 3) -> List[Tuple[str, Dict[str, Any]]]:
     """Return the *limit* most recently read ``(book_id, record)`` pairs.
 
     Only books carrying a ``progress.last_read`` timestamp are listed, and the
-    newest reading time comes first -- the shortlist behind ``wreader continue``.
+    newest reading time comes first -- the shortlist behind ``werd continue``.
     """
     # 收集读过的书，形如 (last_read 时间戳, book_id, 记录)
     read: List[Tuple[str, str, Dict[str, Any]]] = []
@@ -1062,8 +1062,8 @@ def search_books(
     """Fuzzy search by title, author or tag, best matches first.
 
     Matching is case insensitive and falls back to a subsequence match, so
-    ``wreader search hptr`` finds "Harry Potter".  A leading ``#`` restricts the
-    search to tags (``wreader search '#fantasy'``).  An empty keyword returns every
+    ``werd search hptr`` finds "Harry Potter".  A leading ``#`` restricts the
+    search to tags (``werd search '#fantasy'``).  An empty keyword returns every
     book in title order; a keyword of just ``#`` returns nothing.
     """
     # 取书库里的 books 字典

@@ -17,7 +17,7 @@
 - [特性](#特性)
 - [环境要求](#环境要求)
 - [安装](#安装)
-- [新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)
+- [新开一个终端后怎么用 werd](#新开一个终端后怎么用-werd)
 - [快速开始](#快速开始)
 - [命令手册](#命令手册)
 - [阅读器快捷键](#阅读器快捷键)
@@ -48,7 +48,7 @@
 | 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
 | 🏆 成就 | 10 个成就（开卷有益、深夜书虫、七日不断……），命令行显示进度条，解锁时有动画和提示音 |
-| ⚙️ 配置 | 一个 `settings.toml` 管全部，`wreader config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
+| ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
 
 ---
 
@@ -58,7 +58,7 @@
 - **macOS / Linux**：`curses` 是 Python 自带的，开箱即用
 - **Windows**：需要额外装 `windows-curses`（见安装一节）
 - 终端需要支持 UTF-8（读中文书必备；macOS 自带终端、iTerm2、Windows Terminal 都可以）
-- 用 Google 翻译或 `wreader translate` 时需要联网；只想本地读书的话全程离线可用
+- 用 Google 翻译或 `werd translate` 时需要联网；只想本地读书的话全程离线可用
 
 运行时会用到这几个第三方库，安装时会自动装好：
 `rich`（表格和进度条）、`chardet`（编码识别）、`deep-translator`（Google 翻译）、`requests`（DeepSeek 翻译）。
@@ -78,11 +78,11 @@ cd wreader
 ```
 
 `./install.sh` 会自动把剩下的活全干完：建 `.venv` 虚拟环境 → 装 4 个依赖 →
-把 `wreader` 命令**配好别名**（写进 `~/.bashrc` 或 `~/.zshrc`，重复运行不会写第二遍）→ 自检版本号。
+把 `werd` 命令**配好别名**（写进 `~/.bashrc` 或 `~/.zshrc`，重复运行不会写第二遍）→ 自检版本号。
 按它最后的提示 `source ~/.zshrc`（或干脆重开一个终端）就能用了：
 
 ```bash
-wreader --version        # wreader 0.1.0
+werd --version        # werd 0.1.0
 ```
 
 装的时候可以加参数：
@@ -118,19 +118,19 @@ Windows 用户请改用：
 pip install -e ".[windows]"
 ```
 
-装完之后，**在当前这个终端窗口里**就有了 `wreader` 命令：
+装完之后，**在当前这个终端窗口里**就有了 `werd` 命令：
 
 ```bash
-wreader --version
-# wreader 0.1.0
+werd --version
+# werd 0.1.0
 ```
 
 </details>
 
-### 新开一个终端后怎么用 wreader
+### 新开一个终端后怎么用 werd
 
-`wreader` 装在**项目自己的 `.venv`** 里，而 `.venv/bin` 默认不在系统的 `PATH` 上 ——
-所以**关掉终端再新开一个窗口，直接敲 `wreader` 会报 `command not found`**。
+`werd` 装在**项目自己的 `.venv`** 里，而 `.venv/bin` 默认不在系统的 `PATH` 上 ——
+所以**关掉终端再新开一个窗口，直接敲 `werd` 会报 `command not found`**。
 这不是装坏了，是正常的。
 
 **用 `./install.sh` 装的话不用管这一步**：它已经往 `~/.bashrc` / `~/.zshrc` 写好别名了，
@@ -139,41 +139,41 @@ wreader --version
 
 | 办法 | 每次要敲什么 | 说明 |
 | --- | --- | --- |
-| **① 配一次别名**（推荐） | `wreader read <id>` | 配一次，此后**所有新终端**都能直接用 |
-| **② 用完整路径** | `<项目路径>/.venv/bin/wreader read <id>` | 不改任何配置文件 |
-| **③ 每次激活虚拟环境** | `cd <项目路径>` → `source .venv/bin/activate` → `wreader ...` | 顺手，但每个新窗口都要来一遍 |
+| **① 配一次别名**（推荐） | `werd read <id>` | 配一次，此后**所有新终端**都能直接用 |
+| **② 用完整路径** | `<项目路径>/.venv/bin/werd read <id>` | 不改任何配置文件 |
+| **③ 每次激活虚拟环境** | `cd <项目路径>` → `source .venv/bin/activate` → `werd ...` | 顺手，但每个新窗口都要来一遍 |
 
 办法①在 macOS / Linux（zsh）下就是往 `~/.zshrc` 追加一行（把路径换成你的实际位置）：
 
 ```bash
-echo 'alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"' >> ~/.zshrc
+echo 'alias werd="$HOME/Downloads/wreader/.venv/bin/werd"' >> ~/.zshrc
 source ~/.zshrc                       # 立刻生效；或者干脆重开一个窗口
-wreader --version                     # 验证：应输出 wreader 0.1.0
+werd --version                     # 验证：应输出 werd 0.1.0
 ```
 
 用 bash 的话把 `~/.zshrc` 换成 `~/.bashrc`；Windows PowerShell 则在 `$PROFILE` 里定义一个同名函数。
 
 > ⚠️ **不要把 `.venv/bin` 前置进 `PATH`**（`export PATH=".../.venv/bin:$PATH"`）。
-> 那样 `wreader` 确实能用了，但新终端里的 `python3` 和 `pip` 也会一起变成这个虚拟环境的版本，
+> 那样 `werd` 确实能用了，但新终端里的 `python3` 和 `pip` 也会一起变成这个虚拟环境的版本，
 > 会干扰你在其它 Python 项目上的工作；别名只多一条命令，没有这个副作用。
 >
 > `install.sh` 也守着这条：它始终用 `.venv/bin/python -m pip` 装东西，
 > **从不**把 `.venv/bin` 加进 `PATH`。
 
-> **只是临时用一下？** 也可以完全不配置，直接把 `wreader xxx` 换成
+> **只是临时用一下？** 也可以完全不配置，直接把 `werd xxx` 换成
 > `python -m wreader.cli xxx`——本文档里两种写法等价。
 > 面向新手的详细版（含 Windows 写法、以及"为什么书和进度不会丢"）见
 > [使用指南.md](使用指南.md) 的「关掉终端之后」一节。
 
 ### 从旧版 `nr` 升级
 
-这个工具以前叫 `nr`。装过旧版的人**不需要手动搬数据**：第一次运行 `wreader` 时，如果 `~/.wreader`
+这个工具以前叫 `nr`。装过旧版的人**不需要手动搬数据**：第一次运行 `werd` 时，如果 `~/.wreader`
 还不存在而 `~/.nr` 存在，老的整个目录会被搬过去——设置、书库索引、生词本、译文缓存都在里面——
 老目录随即消失。几个老名字的兼容情况：
 
 | 老名字 | 现在 | 兼容方式 |
 | --- | --- | --- |
-| 命令 `nr` | `wreader` | 重新 `pip install -e .`，旧命令随旧发行版一起卸载 |
+| 命令 `nr` | `werd` | 重新 `pip install -e .`，旧命令随旧发行版一起卸载 |
 | `python -m nr.cli` | `python -m wreader.cli` | 模块名随包名改了，老写法不再可用 |
 | `$NR_HOME` / `$NR_NOVELS_DIR` | `$WREADER_HOME` / `$WREADER_NOVELS_DIR` | 新变量没设时，老变量仍然生效 |
 | `~/.nr` | `~/.wreader` | 首次运行自动搬迁（见上） |
@@ -193,19 +193,19 @@ Python 包名也从 `nr` 改成了 `wreader`：`from nr import library` → `fro
 #    文件名写成「作者-书名.txt」最省事，例如：刘慈欣-三体.txt
 
 # ② 导入书库
-wreader import ~/Downloads/books
+werd import ~/Downloads/books
 
 # ③ 看看书库里有什么，把 id 记下来
-wreader list
+werd list
 
 # ④ 开读（把 id 换成上一步看到的）
-wreader read 3e027c4de949
+werd read 3e027c4de949
 
 # 忘了上次读到哪本？它会列出最近打开阅读的三本书
-wreader continue
+werd continue
 ```
 
-`wreader import` 的真实输出长这样：
+`werd import` 的真实输出长这样：
 
 ```
 imported 2 book(s), skipped 0 duplicate(s), 0 failed
@@ -213,7 +213,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
   + 3e027c4de949  《三体》 刘慈欣 · 281 行 · 2000 字 · utf-8 · 41 章
 ```
 
-`wreader list` 的真实输出长这样：
+`werd list` 的真实输出长这样：
 
 ```
                               library (2 book(s))
@@ -239,26 +239,26 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 
 | 命令 | 作用 |
 | --- | --- |
-| `wreader import <路径>` | 扫描文件或目录，把 txt/epub 导入书库 |
-| `wreader list` | 列出书库里的书 |
-| `wreader search <关键词>` | 模糊搜索书名 / 作者 / 标签 |
-| `wreader read <book_id>` | 打开分页阅读器 |
-| `wreader continue` | 列出最近打开阅读的三本书（附 id，抄去 `read` 即可续读） |
-| `wreader translate <book_id>` | 把整本书逐章翻译并缓存 |
-| `wreader vocab` | 生词本：列表 / 复习 / 搜索 / 删除 / 导出 |
-| `wreader stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
-| `wreader achievements` | 成就清单与解锁进度 |
-| `wreader config` | 查看 / 修改设置 |
+| `werd import <路径>` | 扫描文件或目录，把 txt/epub 导入书库 |
+| `werd list` | 列出书库里的书 |
+| `werd search <关键词>` | 模糊搜索书名 / 作者 / 标签 |
+| `werd read <book_id>` | 打开分页阅读器 |
+| `werd continue` | 列出最近打开阅读的三本书（附 id，抄去 `read` 即可续读） |
+| `werd translate <book_id>` | 把整本书逐章翻译并缓存 |
+| `werd vocab` | 生词本：列表 / 复习 / 搜索 / 删除 / 导出 |
+| `werd stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
+| `werd achievements` | 成就清单与解锁进度 |
+| `werd config` | 查看 / 修改设置 |
 
 退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）、
 或翻译出现失败章节时返回 `1`（`Ctrl-C` 中断是 `130`）。
 所有错误都以 `error: ...` 的形式打印，不会甩出 Python traceback。
 
-### `wreader import <路径>`
+### `werd import <路径>`
 
 ```bash
-wreader import ~/Downloads/books        # 递归扫描整个目录
-wreader import ~/Downloads/三体.txt     # 也可以直接导入单个文件
+werd import ~/Downloads/books        # 递归扫描整个目录
+werd import ~/Downloads/三体.txt     # 也可以直接导入单个文件
 ```
 
 - 只认 `.txt` 和 `.epub`，隐藏文件（macOS 的 `._xxx`、`.DS_Store`）自动跳过。
@@ -268,28 +268,28 @@ wreader import ~/Downloads/三体.txt     # 也可以直接导入单个文件
 - 转换后的 UTF-8 正文写进小说目录（`~/novels/<书名>_utf8.txt`），同名自动加 `(2)` 后缀。
 - 重复导入同一本书会显示 `skipped N duplicate(s)`，不会重复占地方。
 
-### `wreader list`
+### `werd list`
 
 ```bash
-wreader list
+werd list
 ```
 
 表格里的 `progress` 是阅读进度百分比，`words` 是按中文习惯格式化的字数（`5.7万`、`1.2亿`）。
 书库为空时会告诉你索引文件和小说的目录在哪。
 
-### `wreader search <关键词>`
+### `werd search <关键词>`
 
 ```bash
-wreader search 三体          # 中文关键词
-wreader search tolkien       # 作者名，大小写无所谓
-wreader search hptr          # 首字母跳跃匹配 → Harry Potter
-wreader search '#fantasy'    # 带 # 前缀表示只搜标签
+werd search 三体          # 中文关键词
+werd search tolkien       # 作者名，大小写无所谓
+werd search hptr          # 首字母跳跃匹配 → Harry Potter
+werd search '#fantasy'    # 带 # 前缀表示只搜标签
 ```
 
 匹配优先级：完全相等 > 前缀 > 包含（越靠前分越高）> 子序列匹配。书名权重是作者的 2 倍。
 没找到就返回 `1` 并提示 `no book matches ...`。
 
-### `wreader read <book_id>`
+### `werd read <book_id>`
 
 整本书的核心体验，详细按键见[阅读器快捷键](#阅读器快捷键)。
 
@@ -297,12 +297,12 @@ wreader search '#fantasy'    # 带 # 前缀表示只搜标签
 - 每 60 秒自动保存一次阅读位置（可关），退出时再完整保存一次。
 - 退出时把这次会话的时长、读过的行数写进统计，并检查有没有达成新成就。
 - **需要真正的交互式终端**，重定向或管道里跑会报错：
-  `error: wreader read needs an interactive terminal (a tty on stdin and stdout)`
+  `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
-### `wreader continue`
+### `werd continue`
 
 ```bash
-wreader continue        # 最近打开阅读的三本书（附 id）
+werd continue        # 最近打开阅读的三本书（附 id）
 ```
 
 按 `last_read`（退出阅读器时写入的时间戳）倒序排列，只列**真正读过**的书，最多三本：
@@ -318,16 +318,16 @@ wreader continue        # 最近打开阅读的三本书（附 id）
 └───┴──────────────┴───────┴────────┴──────────┴───────┘
 ```
 
-把表格里的 `id` 抄给 `wreader read` 就能接着上次的位置读。一本都没读过时它会提示你先
-`wreader list` 挑一本（或 `wreader import` 导入新书），退出码仍是 `0`。
+把表格里的 `id` 抄给 `werd read` 就能接着上次的位置读。一本都没读过时它会提示你先
+`werd list` 挑一本（或 `werd import` 导入新书），退出码仍是 `0`。
 
-> 配上别名（见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)）之后，
-> 重开终端接着读书就是两行：`wreader continue` 看最近在读，`wreader read <id>` 开读。
+> 配上别名（见[新开一个终端后怎么用 werd](#新开一个终端后怎么用-werd)）之后，
+> 重开终端接着读书就是两行：`werd continue` 看最近在读，`werd read <id>` 开读。
 
-### `wreader translate <book_id>`
+### `werd translate <book_id>`
 
 ```bash
-wreader translate 3e027c4de949
+werd translate 3e027c4de949
 ```
 
 适合"想一次性把整本书翻译好，以后随手切双语"的场景。真实输出：
@@ -342,27 +342,27 @@ cache: /Users/you/.wreader/cache/3e027c4de949
 - 单章失败不会中断整轮，失败的章节号会列出来，下次重跑自动补上。
 - 网络不通会直接中止（继续跑只会浪费时间）。
 
-### `wreader vocab`
+### `werd vocab`
 
 不带参数时列出笔记（每页 20 条，新的在前）：
 
 ```bash
-wreader vocab                          # 查看（第 1 页）
-wreader vocab --page 2 --per-page 50    # 翻页，调整每页条数
-wreader vocab --search 公认             # 按含义反查单词（词 / 释义 / 例句都会搜）
-wreader vocab --review                  # 复习模式：打乱顺序，先看单词再按回车核对释义
-wreader vocab --remove ephemeral        # 删掉一个词
-wreader vocab --export anki > deck.txt  # 导出 Anki 制表符格式，可直接导入 Anki
+werd vocab                          # 查看（第 1 页）
+werd vocab --page 2 --per-page 50    # 翻页，调整每页条数
+werd vocab --search 公认             # 按含义反查单词（词 / 释义 / 例句都会搜）
+werd vocab --review                  # 复习模式：打乱顺序，先看单词再按回车核对释义
+werd vocab --remove ephemeral        # 删掉一个词
+werd vocab --export anki > deck.txt  # 导出 Anki 制表符格式，可直接导入 Anki
 ```
 
 `--review` 在真终端里是交互式的（回车看释义，`q` 停）；如果输出被重定向，它会降级成"一次性把所有词和释义都打印出来"。
 `--export anki` 刻意不走 rich，用纯 `stdout` 输出，保证制表符不会被美化掉。
 
-### `wreader stats`
+### `werd stats`
 
 ```bash
-wreader stats          # 人类可读的表格 + 热力图
-wreader stats --json   # 同一个 dict 的原始 JSON，给脚本/看板用
+werd stats          # 人类可读的表格 + 热力图
+werd stats --json   # 同一个 dict 的原始 JSON，给脚本/看板用
 ```
 
 真实输出：
@@ -383,10 +383,10 @@ wreader stats --json   # 同一个 dict 的原始 JSON，给脚本/看板用
 - `--json` 的顶层键：`generated_at`、`today`、`total_seconds`、`total`、`today_seconds`、`week_seconds`、`month_seconds`、`daily_goal_seconds`、`goal_met`、`streak_days`、`streak_min_seconds`、`books_read`、`finished_books`、`vocab_count`、`translations`、`night_seconds`、`longest_session_seconds`、`achievements`、`books`、`daily`、`heatmap`、`heatmap_grid`。
 - 表格和 JSON 是同一份数据渲染的，不会出现"两边数字不一致"。
 
-### `wreader achievements`
+### `werd achievements`
 
 ```bash
-wreader achievements
+werd achievements
 ```
 
 真实输出：
@@ -400,26 +400,26 @@ wreader achievements
   ██████░░░░░░░░  🔥 七日不断 3/7  连续7天每天阅读30分钟
 ```
 
-### `wreader config`
+### `werd config`
 
 ```bash
-wreader config                            # 打印全部设置（值 / 默认值 / 来源文件）
-wreader config --path                     # 只打印设置文件路径
-wreader config reader.page_height         # 读一项
-wreader config reader.page_height 30      # 写一项（立即存盘）
-wreader config --reset                    # 全部恢复默认
+werd config                            # 打印全部设置（值 / 默认值 / 来源文件）
+werd config --path                     # 只打印设置文件路径
+werd config reader.page_height         # 读一项
+werd config reader.page_height 30      # 写一项（立即存盘）
+werd config --reset                    # 全部恢复默认
 ```
 
 真实交互：
 
 ```
-$ wreader config reader.page_height
+$ werd config reader.page_height
 reader.page_height = 24
 
-$ wreader config reader.page_height 30
+$ werd config reader.page_height 30
 reader.page_height = 30 (saved)
 
-$ wreader config reader.pag_height 20
+$ werd config reader.pag_height 20
 error: unknown setting 'reader.pag_height' (did you mean 'reader.page_height'?)
 ```
 
@@ -477,7 +477,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 
 ## 设置项
 
-设置都在 `~/.wreader/settings.toml` 里，分 5 个 section。可以直接用编辑器改，也可以用 `wreader config <section.key> <value>` 改。
+设置都在 `~/.wreader/settings.toml` 里，分 5 个 section。可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
 **删掉任意一行都会回落到默认值**，所以不用担心改坏。
 
 ### `[reader]`
@@ -532,8 +532,8 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 - **google**：走 `deep-translator` 的 `GoogleTranslator`，免费、免注册，但每次请求之间有 1 秒节流，整本翻译比较慢；网络不通就报 `翻译不可用`。
 - **deepseek**：POST 到 OpenAI 兼容的 `/v1/chat/completions`，`temperature` 0.3、开启流式输出，按章整段翻译质量更连贯；必须先给 key：
   ```bash
-  wreader config translator.backend deepseek
-  wreader config translator.deepseek_api_key sk-你的密钥
+  werd config translator.backend deepseek
+  werd config translator.deepseek_api_key sk-你的密钥
   # 或者更安全的做法（不写进文件）：
   export DEEPSEEK_API_KEY=sk-你的密钥
   ```
@@ -543,7 +543,7 @@ q退出 j/space翻页 g跳行 [/]章节 /搜索 n下一个 b书签 v生词 l语�
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `daily_goal_minutes` | `60` | 每日阅读目标（分钟），`0` = 不显示目标 |
-| `show_heatmap` | `true` | `wreader stats` 里是否显示 30 天热力图 |
+| `show_heatmap` | `true` | `werd stats` 里是否显示 30 天热力图 |
 | `achievement_sound` | `true` | 解锁成就时是否响铃（`\a`）；嫌吵就改 `false` |
 
 ### `[vocab]`
@@ -640,7 +640,7 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
 - `book_id` 是转换后正文的 SHA-1 前 12 位，所以重复导入必然被识别。
 - `total_lines` 和每个 `chapters[].line_start` 都是 `正文.split("\n")` 的下标，
   阅读器的 `current_line`、书签的 `line` 用的是同一套坐标，互相不会错位。
-- `tags` 目前由 `wreader search '#tag'` 使用，命令行还没有加标签的入口，需要手改索引。
+- `tags` 目前由 `werd search '#tag'` 使用，命令行还没有加标签的入口，需要手改索引。
 
 ### `~/.wreader/vocab.json` —— 生词本
 
@@ -707,7 +707,7 @@ wreader/
 ├── README.md                中文说明（本文件）
 ├── README.en.md             English README
 ├── 使用指南.md               小白手把手教程（第一次用看这个）
-├── install.sh               一键安装：建 venv、装依赖、配好 wreader 别名（幂等）
+├── install.sh               一键安装：建 venv、装依赖、配好 werd 别名（幂等）
 ├── tools/                   开发期校验脚本：文档锚点/数字对拍/折行/绘制/配色（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
@@ -746,17 +746,17 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 # 跑命令
-wreader --help
-wreader list
+werd --help
+werd list
 
 # 不污染真实数据地做实验：换一个数据目录即可
 export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox/novels
-wreader import /tmp/my-test-books
+werd import /tmp/my-test-books
 ```
 
 调试建议：
 
-- **想清空重来**：删掉 `$WREADER_HOME`（默认 `~/.wreader`）和小说目录即可，`wreader` 下次运行会重新生成默认设置。
+- **想清空重来**：删掉 `$WREADER_HOME`（默认 `~/.wreader`）和小说目录即可，`werd` 下次运行会重新生成默认设置。
 - **想单独调前端逻辑**：`wreader/reader.py` 里 `Pager`、`chapter_bounds`、`read_lines`、`reading_streak`
   都不需要 curses，可以直接 `from wreader.reader import Pager` 在 REPL 里玩。
 - **IDE**：仓库里的 `.vscode/settings.json` 已经把解释器指向 `.venv/bin/python`。
@@ -816,26 +816,26 @@ script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
 
 ## 常见问题
 
-**Q：新开终端后敲 `wreader` 提示 command not found？**
-这是最常见的报错，**不是装坏了**：`wreader` 装在项目自己的 `.venv` 里，而 `.venv/bin` 默认不在 `PATH` 上。
+**Q：新开终端后敲 `werd` 提示 command not found？**
+这是最常见的报错，**不是装坏了**：`werd` 装在项目自己的 `.venv` 里，而 `.venv/bin` 默认不在 `PATH` 上。
 用 `./install.sh` 装的话别名已经写好了 —— 先 `source ~/.zshrc`（bash 换成 `~/.bashrc`）或重开终端；
-还是不行就说明当初用了 `--no-alias` 或手动装的，见[新开一个终端后怎么用 wreader](#新开一个终端后怎么用-wreader)。
-临时也可以用 `<项目路径>/.venv/bin/wreader`、先 `source .venv/bin/activate`，
-或者干脆把 `wreader xxx` 写成 `python -m wreader.cli xxx`。
+还是不行就说明当初用了 `--no-alias` 或手动装的，见[新开一个终端后怎么用 werd](#新开一个终端后怎么用-werd)。
+临时也可以用 `<项目路径>/.venv/bin/werd`、先 `source .venv/bin/activate`，
+或者干脆把 `werd xxx` 写成 `python -m wreader.cli xxx`。
 
 **Q：升级后我原来的书库去哪了？**
-`wreader` 第一次运行时会把 `~/.nr` 整体搬到 `~/.wreader`，不用你动手。如果两个目录都存在，
-`wreader` 只用 `~/.wreader`、不碰 `~/.nr`——确认新目录没问题后可以自己删掉它。
+`werd` 第一次运行时会把 `~/.nr` 整体搬到 `~/.wreader`，不用你动手。如果两个目录都存在，
+`werd` 只用 `~/.wreader`、不碰 `~/.nr`——确认新目录没问题后可以自己删掉它。
 
 **Q：导入时说 `path does not exist` / `no .txt/.epub file found under ...`？**
-路径写错了，或者那个目录里确实没有 `.txt` / `.epub`。`wreader import` 是递归扫描的，直接给上层目录也行。
+路径写错了，或者那个目录里确实没有 `.txt` / `.epub`。`werd import` 是递归扫描的，直接给上层目录也行。
 
 **Q：中文书导入后是乱码？**
 编码按 BOM（UTF-8 / UTF-16 / UTF-32）→ chardet → UTF-8 → GB18030 依次尝试。BOM 只说明文件"想"是什么编码
 （UTF-32 的 BOM 以 UTF-16 的 BOM 开头，损坏的 UTF-16 文件里也可能有非法 surrogate），所以带 BOM 的文件解码失败时
 会用替换字符降级导入，并在编码名后面标 `(replaced)`，而不是让整次导入崩掉。真遇到这种文件，用编辑器另存为
-UTF-8 再重新 `wreader import` 就能拿到干净正文。
-如果仍不正常，先用编辑器把源文件另存为 UTF-8，再重新 `wreader import`。
+UTF-8 再重新 `werd import` 就能拿到干净正文。
+如果仍不正常，先用编辑器把源文件另存为 UTF-8，再重新 `werd import`。
 
 **Q：同一本书导入了两次？**
 不会。书号是正文的 SHA-1，第二次会显示为 `skipped 1 duplicate(s)`。
@@ -843,15 +843,15 @@ UTF-8 再重新 `wreader import` 就能拿到干净正文。
 
 **Q：按了 `t` 却没有译文？**
 `t` 只翻译当前屏幕，且**不缓存**；如果它提示 `当前视图就是原文，无需翻译`，说明你要的正是这本书的原文语言。
-想永久保存译文请按 `T`（整章缓存），或者先在命令行跑一次 `wreader translate <book_id>`。
+想永久保存译文请按 `T`（整章缓存），或者先在命令行跑一次 `werd translate <book_id>`。
 
 **Q：翻译报错 `翻译不可用: ...`？**
-Google 后端需要联网；DeepSeek 后端需要 API key（`wreader config translator.deepseek_api_key sk-xxx`
+Google 后端需要联网；DeepSeek 后端需要 API key（`werd config translator.deepseek_api_key sk-xxx`
 或 `export DEEPSEEK_API_KEY=...`）。国内网络下 Google 可能不通，建议换 deepseek。
 
-**Q：`wreader read` 报 `needs an interactive terminal`？**
+**Q：`werd read` 报 `needs an interactive terminal`？**
 阅读器要在真终端里跑，不能 `| less`、不能重定向、也不能在 CI 里跑。
-（`wreader list` / `wreader stats` 这些可以随便重定向。）
+（`werd list` / `werd stats` 这些可以随便重定向。）
 
 **Q：退出后统计没变？**
 检查两处：`reader.store_history` 是否为 `true`；以及这次会话是否保存成功（磁盘只读或数据目录不可写会静默跳过）。
@@ -861,27 +861,27 @@ Google 后端需要联网；DeepSeek 后端需要 API key（`wreader config tran
 
 **Q：想要安静地读书，不要统计、不要响铃？**
 ```bash
-wreader config reader.store_history false
-wreader config stats.achievement_sound false
-wreader config stats.show_heatmap false
+werd config reader.store_history false
+werd config stats.achievement_sound false
+werd config stats.show_heatmap false
 ```
 
 **Q：怎么把生词导进 Anki？**
 ```bash
-wreader vocab --export anki > deck.txt
+werd vocab --export anki > deck.txt
 ```
 然后 Anki → 文件 → 导入，字段选"制表符分隔"，三列分别是 单词 / 释义 / 例句。
 
 **Q：书删了，索引还在？**
 命令行目前没有删除命令。删掉 `library.json` 里 `books` 下对应的那个 id 即可
-（`wreader list` 会立刻不再显示它）；或用 Python：
+（`werd list` 会立刻不再显示它）；或用 Python：
 ```python
 from wreader import library
 library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正文
 ```
 
 **Q：`settings.toml` 改坏了怎么办？**
-`wreader config --reset` 恢复全部默认；或者删掉文件让它重新生成。删单行则只回落到该行的默认值。
+`werd config --reset` 恢复全部默认；或者删掉文件让它重新生成。删单行则只回落到该行的默认值。
 
 ---
 
@@ -890,10 +890,10 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 这些是当前版本真实存在的限制，写出来比藏着好：
 
 - **`reader.theme` 还没实现**，改了没有任何效果。
-- **加标签没有命令行入口**。`books[].tags` 和 `wreader search '#tag'` 都支持，但目前只能手改 `library.json`。
+- **加标签没有命令行入口**。`books[].tags` 和 `werd search '#tag'` 都支持，但目前只能手改 `library.json`。
 - **EPUB 解析有取舍**：没装 Calibre 的 `ebook-convert` 时用内置提取器，只取正文文本，
   图片、脚注、复杂排版会丢失；能装 Calibre 建议装上。
-- **`wreader read` 只能在真终端里用**（见上方 FAQ）。
+- **`werd read` 只能在真终端里用**（见上方 FAQ）。
 - **Windows 需要额外依赖** `windows-curses`（`pip install -e ".[windows]"`）。
 - **`library.json` 里 `progress` 的数值不做类型强制转换**：手写成字符串（`"current_line": "12"`）
   也能正常读，因为消费方都用 `int(...)` 兜住了，但它不会被自动改回数字。

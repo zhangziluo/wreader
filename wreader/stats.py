@@ -2,7 +2,7 @@
 
 Two things live here:
 
-* the **numbers** behind ``wreader stats`` -- the total, the per book totals, the daily
+* the **numbers** behind ``werd stats`` -- the total, the per book totals, the daily
   buckets that today/week/month are summed from, and the week-grid heatmap; the
   same data is available as JSON through :func:`build_report`,
 * the **achievements**: the definitions in ``wreader/data/achievements.json``, the
@@ -635,7 +635,7 @@ def check_achievements(
 
     # 本次新解锁的成就，按定义顺序返回给调用方做庆祝
     newly: List[Dict[str, Any]] = []
-    # 每个成就的进度快照，写回文件供 `wreader achievements` 展示
+    # 每个成就的进度快照，写回文件供 `werd achievements` 展示
     progress: Dict[str, Dict[str, int]] = {}
     for achievement in definitions:
         # 算出这条成就的当前进度与是否达标
@@ -674,9 +674,9 @@ def build_report(
     # 已加载的配置（读每日目标用）
     settings: Optional[config.Config] = None,
 ) -> Dict[str, Any]:
-    """Return everything ``wreader stats`` shows as plain, JSON serialisable data.
+    """Return everything ``werd stats`` shows as plain, JSON serialisable data.
 
-    The rendered view is built from this very dict, so ``wreader stats --json`` and
+    The rendered view is built from this very dict, so ``werd stats --json`` and
     the pretty table can never drift apart.  Durations stay in seconds; the
     human readable strings are added alongside them as well.  *settings* is the
     loaded settings file, read for the daily goal (``stats.daily_goal_minutes``).

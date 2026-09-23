@@ -1,7 +1,7 @@
 # Project Brief — wreader
 
 > MemoryBank 的根基文件：项目是什么、必须满足哪些硬性要求、边界在哪。
-> 其他文件都从这里派生。最后更新：2026-09-22。
+> 其他文件都从这里派生。最后更新：2026-09-23。
 
 ## 一句话
 
@@ -15,7 +15,7 @@
 | 包名 / 版本 | `wreader` / `0.1.0` |
 | 许可证 | MIT（`LICENSE`，`pyproject.toml` 里 `license = "MIT"`） |
 | Python | **>= 3.11** |
-| 入口 | console script `wreader` → `wreader.cli:main` |
+| 入口 | console script `werd` → `wreader.cli:main` |
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`pyproject.toml`，`[tool.setuptools.package-data]` 带 `data/*.json`） |
 | 版本控制 | **git 仓库**（2026-09-22 建）：`main` 分支，远端 `origin` = `https://github.com/zhangziluo/wreader`；首个提交 `7ecc3eb`，当前 **40 个跟踪文件**，工作区干净且与远端同步 |
@@ -23,7 +23,7 @@
 
 ## 核心功能需求
 
-1. **导入**：`wreader import <路径>` 递归扫描 txt/epub → 统一转 UTF-8 → 按正文 SHA-1 前 12 位生成
+1. **导入**：`werd import <路径>` 递归扫描 txt/epub → 统一转 UTF-8 → 按正文 SHA-1 前 12 位生成
    `book_id` → 去重入库；单个坏文件只进 `failed`，不中止整次导入。
 2. **书库**：`list`、`search <关键词>`（模糊匹配）、`search '#tag'`。
 3. **阅读**：`read <book_id>` 全屏 curses 分页器；位置、书签、本次时长落库，随时续读。
@@ -33,7 +33,7 @@
 5. **生词本**：阅读中按 `v` 查词入库；命令行增删查、`--review` 复习、`--export anki`。
 6. **统计与成就**：阅读时长、热力图、连续天数；`wreader/data/achievements.json` 里 10 个成就，
    条件写成 `指标 比较符 数字` 表达式，用户可自行追加。
-7. **配置**：`~/.wreader/settings.toml`；`wreader config <section.key> [value]` 读写，`--reset` 复原。
+7. **配置**：`~/.wreader/settings.toml`；`werd config <section.key> [value]` 读写，`--reset` 复原。
 
 ## 硬性技术约束（不要破坏）
 

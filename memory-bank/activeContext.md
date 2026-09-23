@@ -1,6 +1,6 @@
 # Active Context — 当前焦点与最近改动
 
-> 每次会话结束前更新这个文件。最后更新：**2026-09-22**。
+> 每次会话结束前更新这个文件。最后更新：**2026-09-23**。
 
 ## 当前状态一句话
 
@@ -8,12 +8,13 @@
 `tools/` 的 7 个校验脚本全绿，且**已 git 化并推送到 GitHub**（`main` = `origin/main`，工作区干净）。
 ⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **2279** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
-本会话完成了：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
+已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
-新增 `wreader continue` 列"最近打开阅读的三本书"（⑰）、**安装压成三行命令 `./install.sh`（⑱）**。
+新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
+**CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**。
 
-## 最近改动（2026-09-22，按时间顺序）
+## 最近改动（2026-09-22 起，按时间顺序）
 
 ### ① 全仓加逐行口语化中文注释（16 个 Python 文件）
 - 范围：`wreader/` 8 个 + `tests/` 8 个（含 `conftest.py`），共 12,491 行。
@@ -130,26 +131,26 @@ def _init_colors() -> None:
   且 `wreader.__file__` 指向克隆副本（排除"其实在测本地 editable 安装"的假阳性）。
   结论：仓库自足，`book/` 不参与测试，忽略它没有任何副作用。
 
-### ⑧ 让 `wreader` 在新终端里可直接敲（`~/.zshrc` 别名）
-- **问题**：用户重开终端后不知道怎么打开 wreader —— 因为它是**项目内** `.venv` 的
-  editable 安装，`.venv/bin` 不在默认 PATH 上，敲 `wreader` 会 `command not found`。
+### ⑧ 让 `werd` 在新终端里可直接敲（`~/.zshrc` 别名）
+- **问题**：用户重开终端后不知道怎么打开 werd —— 因为它是**项目内** `.venv` 的
+  editable 安装，`.venv/bin` 不在默认 PATH 上，敲 `werd` 会 `command not found`。
 - **排查事实**：`~/.zshrc` **原本不存在**；`~/.zprofile`（只有 brew / MacPorts 的 PATH 前置）、
   `~/.zshenv`（只 source cargo env）、`/etc/paths` 与 `/etc/paths.d/*` 全都没配这个 venv。
-- ⚠️ **排查时踩过一个坑（假阳性）**：一开始直接跑 `zsh -l -c 'command -v wreader'` 显示"能找到"，
+- ⚠️ **排查时踩过一个坑（假阳性）**：一开始直接跑 `zsh -l -c 'command -v werd'` 显示"能找到"，
   但那是因为它**继承了我当时那个已激活 venv 的环境**。必须用
   `env -i HOME=$HOME ... zsh -l -i -c ...` 把环境清干净，才测得出真实情况（结论：找不到）。
 - **第一版方案（已推翻）**：`~/.zshrc` 里 `export PATH=".../.venv/bin:$PATH"`。
   能用，但**有副作用**：新终端里 `python3` → `.venv/bin/python3`、`pip` → `.venv/bin/pip`，
   会干扰用户在其它 Python 项目上的工作。
 - **最终方案**：只写一行别名
-  `alias wreader="/Users/zhangziluo/Downloads/wreader/.venv/bin/wreader"`，
+  `alias werd="/Users/zhangziluo/Downloads/wreader/.venv/bin/werd"`，
   并在文件注释里写明**为什么不用 PATH**（防止以后有人好心改回去）。别名只作用于
   交互式 shell，对 `python3` / `pip` 零影响。
 - `~/.zshrc` **在 git 仓库之外**，不受版本控制；排查结论与坑已记进 `techContext.md`。
 
 ### ⑨ 把"新终端怎么打开"写进《使用指南.md》
-- 新增独立章节 `## 关掉终端之后：下次怎么打开 wreader`（放在第 11 步之后、报错急救表之前）：
-  讲清"为什么新终端里 `wreader` 找不到"（装在项目 `.venv` 里、不在 PATH），
+- 新增独立章节 `## 关掉终端之后：下次怎么打开 werd`（放在第 11 步之后、报错急救表之前）：
+  讲清"为什么新终端里 `werd` 找不到"（装在项目 `.venv` 里、不在 PATH），
   给出三种办法 + 对比表 + "到底该选哪个"：
   ① `~/.zshrc` 别名（推荐，含 bash 用 `~/.bashrc`、Windows 用 `$PROFILE` 的写法）、
   ② 直接写完整路径、③ 每次激活 venv。
@@ -169,17 +170,17 @@ def _init_colors() -> None:
   - 测试项数：总数 474→**494**；`test_reader.py` 95→**115**
     （其余 33 / 49 / 116 / 76 / 74 / 31 复查过，本来就对，没动）
   - `474` 一共 **6 处**：两份 README 的"项目结构""运行测试""已解决清单"各一处，**全部改掉**
-- **新增一节**：`README.md` 的「新开一个终端后怎么用 wreader」与 `README.en.md` 的
-  「Using wreader in a new terminal」——内容与《使用指南.md》那节对齐（三种办法 + 对比表 +
+- **新增一节**：`README.md` 的「新开一个终端后怎么用 werd」与 `README.en.md` 的
+  「Using werd in a new terminal」——内容与《使用指南.md》那节对齐（三种办法 + 对比表 +
   「别把 `.venv/bin` 前置进 PATH」的警告 + `python -m wreader.cli` 兜底）。
-  同时把「安装」里"装完之后就有了 `wreader` 命令"改成"**在当前这个终端窗口里**有了"
+  同时把「安装」里"装完之后就有了 `werd` 命令"改成"**在当前这个终端窗口里**有了"
   （原文不准确：换个窗口就没了），并把 FAQ 的 `command not found` 一条改为指向新章节。
 - **顺手改正一处旧笔误**：中文版「已经解决、不再属于已知问题的**六条**」，实际列了 **7** 条
   （英文版写的是 Seven，本来就是对的）。补上本轮三项修复后，中英两版统一为 **十条**。
 - 「特性」表的阅读器一行补上"按终端宽度自动折行（汉字按 2 列算）、配色跟随终端主题与透明背景"。
 - 「已知问题」里"README 陈旧"那一条已删除（不再成立）。
 - 两版 README 的目录（TOC）各加一行指向新章节的链接，保持原有的扁平列表风格
-  （锚点 `#新开一个终端后怎么用-wreader` / `#using-wreader-in-a-new-terminal`，已校验可解析）。
+  （锚点 `#新开一个终端后怎么用-werd` / `#using-werd-in-a-new-terminal`，已校验可解析）。
 - 后果：`progress.md` 待办 #1 与 `activeContext.md` 待办 #1 都已标记完成；
   `techContext.md`、`memory-bank/README.md` 里"README 尚未同步"的提示也一并改掉了。
 
@@ -369,15 +370,15 @@ def _init_colors() -> None:
 | **持续有效的同步判据**（别写死 SHA，否则记一次就过期一次） | 历史起点 `7ecc3eb`；`git rev-list --left-right --count origin/main...main` 应恒为 `0 0`；GitHub API 递归树应恒为 **32 个 blob**（`truncated: false`）。截至本次记录，`main` 已走到 `4434518`（4 个提交），之后每改一次 memory-bank 都会再 +1 |
 | **全新克隆验证**（对 `ee92a95` 做 `git clone` 到 `/tmp/wreader-clone`） | 32 个跟踪文件、2 个提交、`book/` 不存在；**在克隆目录内**跑 `pytest` → **494 passed in 4.12s**；`npx pyright` → `0 errors, 0 warnings` |
 | 克隆内 import 路径确认 | `wreader.__file__` = `/private/tmp/wreader-clone/wreader/__init__.py` —— 证明确实在测克隆副本，而非本地 editable 安装 |
-| 干净 shell 里 `command -v wreader`（改前） | **找不到**，`VIRTUAL_ENV` 为空 —— 确认"重开终端不可用"属实 |
-| 干净「登录+交互」shell 里 `wreader --version`（改后） | `wreader 0.1.0`；`command -v wreader` → `.venv/bin/wreader`（别名生效） |
-| 干净「非登录交互」shell 里 `wreader list`（沙箱 `WREADER_HOME`） | 正常输出 `the library is empty -- add books with wreader import <path>`，真实 `~/.wreader` 未被触碰 |
+| 干净 shell 里 `command -v werd`（改前） | **找不到**，`VIRTUAL_ENV` 为空 —— 确认"重开终端不可用"属实 |
+| 干净「登录+交互」shell 里 `werd --version`（改后） | `werd 0.1.0`；`command -v werd` → `.venv/bin/werd`（别名生效） |
+| 干净「非登录交互」shell 里 `werd list`（沙箱 `WREADER_HOME`） | 正常输出 `the library is empty -- add books with werd import <path>`，真实 `~/.wreader` 未被触碰 |
 | `zsh -n ~/.zshrc` | 语法 OK |
 | 副作用检查（PATH 前置版，已推翻） | `python3` → `.venv/bin/python3`、`pip` → `.venv/bin/pip` —— **不可接受**，故放弃 |
 | 副作用检查（别名版，最终） | `python3` → `/usr/local/bin/python3`、`pip` 不在 PATH —— 与改动前一致，**零影响** |
 | `python3 /tmp/check_guide.py 使用指南.md` | 51 标题 / 24 文内链接 / 84 围栏行（偶数）→ **锚点全部可解析，RESULT: OK** |
 | 同一脚本对照跑 `README.md`、`README.en.md` | 两者**也全过** → 证明脚本的 slug 规则与仓库既有约定一致，上面那个 OK 不是假阴性 |
-| 沙箱实测指南里那条复制粘贴命令 | 造 `$TMPHOME` + 软链项目，照抄 `echo 'alias ... "$HOME/..."' >> ~/.zshrc`：`wreader --version` = `wreader 0.1.0`、`wreader list` 正常；**用户真实 `~/.zshrc` 未被改动** |
+| 沙箱实测指南里那条复制粘贴命令 | 造 `$TMPHOME` + 软链项目，照抄 `echo 'alias ... "$HOME/..."' >> ~/.zshrc`：`werd --version` = `werd 0.1.0`、`werd list` 正常；**用户真实 `~/.zshrc` 未被改动** |
 | 引号风格一致性核对 | 《使用指南.md》全文 38 处引号**清一色 ASCII `"`**，我唯一误写的 `「」` 已改、残留 0；memory-bank 侧用 `「」` 是**既有约定**（HEAD 里就有 4 处），故保留 |
 | `python3 /tmp/verify_readme_numbers.py` | 把 README 声称的数字与真实文件行数、pytest 收集数**逐项对拍** → **ALL OK**：8 个源码行数 × 中英两版 + 7 个测试文件项数 + 两版总数；任一处不符会打印 `FAIL` |
 | `/tmp/check_guide.py` 跑三份文档 | `README.md` 68 / `README.en.md` 68 / `使用指南.md` 84 围栏行（均偶数），**MISSING 锚点：无** → 三份都 `RESULT: OK`（含新增的两处章节锚点） |
@@ -471,13 +472,13 @@ def _init_colors() -> None:
 `test_a_stale_intra_line_offset_never_blanks_the_screen`（窗口变宽后偏移越界的兜底）、
 `test_bookmark_mark_is_not_drawn_on_a_mid_line_resume`（书签不画在半截行上）。
 
-## ⑰ 新增 `wreader continue`（最近打开阅读的三本书）
+## ⑰ 新增 `werd continue`（最近打开阅读的三本书）
 
-**用户诉求**：「优化 wreader 在 linux 重启之后的启动命令，应该控制在一到两行就可以开启 wreader 看书」。
+**用户诉求**：「优化 werd 在 linux 重启之后的启动命令，应该控制在一到两行就可以开启 werd 看书」。
 
 **拆出的两个摩擦点**：
-1. 命令不在 PATH 上 → 重启后新终端敲 `wreader` 报 `command not found`（别名方案早已有，文档里写了）。
-2. **读书要先知道 `book_id`**：得 `wreader list` 找 id → 再 `wreader read <id>`，两步且要记 id。
+1. 命令不在 PATH 上 → 重启后新终端敲 `werd` 报 `command not found`（别名方案早已有，文档里写了）。
+2. **读书要先知道 `book_id`**：得 `werd list` 找 id → 再 `werd read <id>`，两步且要记 id。
 
 第 2 点才是真痛点 —— 因为 `progress.last_read` **早就在退出阅读器时写好了**
 （`reader._write_position` 写 `_iso(moment)`，格式定长 `YYYY-MM-DDTHH:MM:SS`），只是从来没有入口去读它。
@@ -497,10 +498,10 @@ def _init_colors() -> None:
 
 **重启后两行开读**（Linux / macOS 同构）：
 ```bash
-wreader continue      # 最近打开阅读的三本书（附 id）
-wreader read f1ba2379642f
+werd continue      # 最近打开阅读的三本书（附 id）
+werd read f1ba2379642f
 ```
-前置条件只有一条：`wreader` 得能用（配一次别名，见 `techContext.md` 的「开发环境」一节）。
+前置条件只有一条：`werd` 得能用（配一次别名，见 `techContext.md` 的「开发环境」一节）。
 
 **验证证据（2026-09-22 实测）**：
 
@@ -511,7 +512,7 @@ wreader read f1ba2379642f
 | `tools/check_docs.py` | 三份文档 **OK** |
 | `tools/check_doc_numbers.py` | **ALL OK**（`cli.py` 1028、`library.py` 1099、总数 545 全对上） |
 | `tools/verify_wrap.py` / `verify_draw.py` | **40077 / 420**（未受影响，与改动前一致） |
-| 沙箱端到端 | 4 本书（3 本设了 `last_read`、1 本从没读过）→ `wreader continue` 打出 `呐喊 / 基地 / 三体` 三行，**未读那本不出现**；空书库 → 中文提示 + `exit=0` |
+| 沙箱端到端 | 4 本书（3 本设了 `last_read`、1 本从没读过）→ `werd continue` 打出 `呐喊 / 基地 / 三体` 三行，**未读那本不出现**；空书库 → 中文提示 + `exit=0` |
 
 **没踩到的坑（记录一下幸运之处）**：全程没碰落库格式、没碰行号坐标、没动阅读器绘制，
 所以「行号坐标唯一」「CJK 宽度」两条硬约束都不受影响 —— `verify_wrap` / `verify_draw` 数字不变即为证。
@@ -526,10 +527,10 @@ wreader read f1ba2379642f
    （创建被中断会留下空目录，那种情况要重建）；
 3. 用 **`.venv/bin/python -m pip`** 装：`--upgrade pip`（**只在新建 venv 时**）+ `pip install -e .`
    （`--dev` 则 `-e ".[dev]"`）。**全程不 activate**，守住"不污染 PATH"这条既有约定；
-4. 自检 `wreader --version`，跑不起来就当失败；
+4. 自检 `werd --version`，跑不起来就当失败；
 5. **写别名**：按 `${SHELL}` 选 `~/.bashrc` / `~/.zshrc`（认不出来两个都写），
-   `grep -q "^alias wreader="` 判重 + `grep -Fxq` 比对整行；指向别的路径时**只警告、不擅自改**用户文件；
-6. 打印总结 + 下一步（`wreader continue` / `wreader list`）。
+   `grep -q "^alias werd="` 判重 + `grep -Fxq` 比对整行；指向别的路径时**只警告、不擅自改**用户文件；
+6. 打印总结 + 下一步（`werd continue` / `werd list`）。
 
 **选项**：`--dev` / `--no-alias` / `--help`。用 `sh install.sh` 跑会自动 `exec bash "$0" "$@"` 转交
 （脚本用了数组等 bash 特性）。
@@ -550,9 +551,9 @@ wreader read f1ba2379642f
 | 项 | 结果 |
 | --- | --- |
 | `bash -n install.sh` | 通过 |
-| **全新克隆**（`git clone` → `/tmp/wreader-clone`，无 `.venv`） | `HOME=<假家> SHELL=/bin/bash` 下 **exit 0**：venv 建好、15 个包装上、`[ok] 自检通过：wreader 0.1.0`、别名写进假 `~/.bashrc` |
-| 别名真的可用 | `env HOME=<假家> bash -ic 'source ~/.bashrc; wreader --version'` → `wreader 0.1.0` |
-| 幂等（同一 HOME 跑两次） | 第二次 `[ok] 别名已存在`，`grep -c 'alias wreader='` 仍为 **1** |
+| **全新克隆**（`git clone` → `/tmp/wreader-clone`，无 `.venv`） | `HOME=<假家> SHELL=/bin/bash` 下 **exit 0**：venv 建好、15 个包装上、`[ok] 自检通过：werd 0.1.0`、别名写进假 `~/.bashrc` |
+| 别名真的可用 | `env HOME=<假家> bash -ic 'source ~/.bashrc; werd --version'` → `werd 0.1.0` |
+| 幂等（同一 HOME 跑两次） | 第二次 `[ok] 别名已存在`，`grep -c 'alias werd='` 仍为 **1** |
 | `--no-alias` | exit 0，且假 HOME 里**没有任何 rc 文件** |
 | `--dev` | exit 0，`pytest 9.1.1` 已满足 |
 | `--help` / `sh install.sh --help` | 均 exit 0（后者靠 `exec bash` 转交） |
@@ -565,7 +566,7 @@ wreader read f1ba2379642f
 ### 文档
 
 - `README.md` / `README.en.md`：安装节换成「三条命令」+ 参数表，原手动三步折进 `<details>`
-  （Windows 走这条）；「新开一个终端后怎么用 wreader」与 FAQ 改成"install.sh 已配好别名，
+  （Windows 走这条）；「新开一个终端后怎么用 werd」与 FAQ 改成"install.sh 已配好别名，
   只需 `source` 或重开终端"；`PATH` 警告旁补一句"install.sh 也守着这条"；项目结构加 `install.sh`。
 - `使用指南.md`：第 2 步改成 `git clone` 为主 / ZIP 为辅；第 3 步改成 `./install.sh` 一条命令
   （打印样例照抄真实输出），手动四步折进 `<details>`；速查卡、报错急救表（+2 行：
@@ -573,6 +574,51 @@ wreader read f1ba2379642f
   「关掉终端之后」（顶部加"可跳过"提示）全部同步。
 - 顺带修掉一个目录锚点：`#第-3-步安装4-条命令` → `#第-3-步安装一条命令`
   （**`tools/check_docs.py` 抓出来的**，说明这个守卫真的在干活）。
+
+### ⑲ 把 CLI 命令从 `wreader` 改成 `werd`（2026-09-23）
+
+**用户诉求**：命令行太长不好敲，把**用户敲的那个命令名**换成 `werd`；
+但**项目目录名 / 仓库名、Python 包名、数据目录（`~/.wreader`）全部保持 `wreader` 不动**。
+
+**改法**（只动"终端里敲的命令名"，不碰包名 / 数据目录 / 仓库名）：
+
+1. `pyproject.toml` 的 `[project.scripts]`：`wreader = "wreader.cli:main"` → `werd = "wreader.cli:main"`
+   （console script 名字变了，指向的入口仍是 `wreader.cli:main`）。
+2. `wreader/cli.py` 的 `build_parser()`：`prog="wreader"` → `prog="werd"`。
+   这是**唯一真正决定 argv[0] 显示**的硬编码 —— `--help` / `--version` / 报错里的命令名都由它来；
+   顺带把 `--version` 帮助文案 `show the wreader version` 改成 `show the werd version`。
+   （`config` 子命令的 `view or modify the wreader settings` **保留** —— 那里 `wreader` 指应用 / 设置文件，不是命令。）
+3. `install.sh`：`WREADER_BIN` 改指 `$VENV/bin/werd`；别名行 `alias wreader=...` → `alias werd=...`；
+   幂等检测 `grep "^alias wreader="` → `^alias werd=`；各处提示文案里的命令名同步。
+   脚本内部变量名仍叫 `WREADER_BIN`（纯内部标识，不对外）。
+4. 全部模块的 docstring / 注释 / 帮助文本 / 提示里的命令示例：`wreader import/list/read/...` → `werd ...`。
+   **保留**所有 `:mod:`wreader.x``、`from wreader import`、`python -m wreader.cli`、`~/.wreader`、
+   `$WREADER_HOME`、`%APPDATA%\wreader`、`wreader/data/achievements.json`、仓库 URL、`wreader/` 目录树。
+5. 文档：`README.md`、`README.en.md`、`使用指南.md` 的命令示例、命令类标题
+   （`### \`wreader import <路径>\`` → `### \`werd import <路径>\``）与
+   「新开一个终端后怎么用 wreader」/「关掉终端之后：下次怎么打开 wreader」这类**标题 + 锚点 + 目录 + 交叉引用**全部同步。
+   ⚠️ **标题改名必须连带改锚点**，否则目录链接点不动（`tools/check_docs.py` 会抓）。
+6. `tests/` **无需改动**：全量 grep 确认没有任何测试断言命令名 `wreader`
+   （只剩 `from wreader import`、`:mod:`wreader.x``、`~/.wreader` / `DATA_DIRNAME` 这类包名 / 数据目录引用）。
+
+**踩到的坑（重要）**：用 Perl 按「`wreader` + 空格 + 子命令」批替换时，会**误伤三类非命令引用**：
+`from wreader import library`（包名被当成 `wreader import`）、
+`Python 包名也从 \`nr\` 改成了 \`wreader\``、以及 `settings.toml` 头的 `# wreader settings`。
+这三类都已**逐条还原**。教训：**命令名替换必须带上下文判断**，包名和以 `wreader` 开头的英文短语都会撞上。
+
+**验证证据（2026-09-23 实测）**：
+
+| 项 | 结果 |
+| --- | --- |
+| `pip install -e .` | 成功；`.venv/bin/werd` 生成、旧 `.venv/bin/wreader` 消失 |
+| `.venv/bin/werd --version` | `werd 0.1.0`（exit 0） |
+| `.venv/bin/werd --help` | 正常输出，`usage: werd [-h] [-V] <command> ...`，版本行 `show the werd version and exit` |
+| `pytest` | **545 passed**（8.27s） |
+| `npx pyright` | **0 errors / 0 warnings / 0 informations** |
+| `tools/check_docs.py` | **RESULT: OK** |
+| `tools/check_doc_numbers.py` | **RESULT: ALL OK** |
+| `bash -n install.sh` | 通过（仍 219 行） |
+| 残留检查 | 全仓 grep：**命令名已无 `wreader`**；剩余 `wreader` 只剩包名 / 数据目录 / 仓库名 / 许可证 / 包内文档字符串 |
 
 ## 待办 / 下一步
 
@@ -585,9 +631,9 @@ wreader read f1ba2379642f
 3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
 4. ~~把 `/tmp` 的校验脚本搬进 `tests/` 或 `tools/`~~ → **已完成（2026-09-22）**：
    7 个脚本都在 `tools/` 里（见 `techContext.md` 的「命令」一节），`/tmp` 里已无依赖。
-5. 可选：`wreader continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
+5. 可选：`werd continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
    走 `SCHEMA`（项目约定：阅读行为不写魔数）。
-6. 可选（产品取舍，先问再做）：`wreader continue` 只"列 id"，不做交互选择。
+6. 可选（产品取舍，先问再做）：`werd continue` 只"列 id"，不做交互选择。
    若哪天想省掉"抄 id"这一步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+
    无参时续读最近一本 —— 但那会让程序替用户猜要读哪本，需先确认。
 7. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照

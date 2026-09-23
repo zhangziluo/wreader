@@ -18,7 +18,7 @@ Everything wreader can be told to do differently lives in one TOML document,
 
     [stats]
     daily_goal_minutes = 60       # 每日阅读目标（分钟），0 = 关闭
-    show_heatmap = true           # wreader stats 里显示热力图
+    show_heatmap = true           # werd stats 里显示热力图
 
     [vocab]
     highlight_in_reader = true    # 阅读器中高亮生词
@@ -218,7 +218,7 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
     # 统计与成就相关
     "stats": (
         ("daily_goal_minutes", 60, "每日阅读目标（分钟），0 = 关闭"),
-        ("show_heatmap", True, "wreader stats 里显示热力图"),
+        ("show_heatmap", True, "werd stats 里显示热力图"),
         ("achievement_sound", True, "解锁成就时响铃（\\a）"),
     ),
     # 生词本相关
@@ -271,7 +271,7 @@ LEGACY_PATHS: Dict[str, str] = {
 
 # 自动生成的 settings.toml 开头的说明文字
 _FILE_HEADER = (
-    "# wreader settings — 用手改，或者用 `wreader config <section.key> <value>` 改。\n"
+    "# wreader settings — 用手改，或者用 `werd config <section.key> <value>` 改。\n"
     "# 删掉任意一行都会回落到默认值。"
 )
 
@@ -388,7 +388,7 @@ def settings_path() -> Path:
 
 
 def config_path() -> Path:
-    """Alias of :func:`settings_path`, the file ``wreader config`` reads and writes."""
+    """Alias of :func:`settings_path`, the file ``werd config`` reads and writes."""
     # 兼容性别名，语义与 settings_path 完全一样
     return settings_path()
 
@@ -686,7 +686,7 @@ class Config:
         self.path = Path(path)
         # 迁移来源；没有就是 None
         self.migrated_from = Path(migrated_from) if migrated_from else None
-        # 文件里出现但 schema 不认识的键，留着给 `wreader config` 提示用
+        # 文件里出现但 schema 不认识的键，留着给 `werd config` 提示用
         self.unknown: Dict[str, Any] = {}
         # 类型不对被丢弃的键 -> 原因
         self.invalid: Dict[str, str] = {}
@@ -718,7 +718,7 @@ class Config:
                 self._values[path] = coerce_value(path, self._stored[path])
             except ConfigError as exc:
                 # A hand edited file that got a type wrong falls back to the
-                # default and is reported by `wreader config` instead of refusing
+                # default and is reported by `werd config` instead of refusing
                 # to start.
                 # 类型写错：回落到默认值，并把原因记在 invalid 里
                 self.invalid[path] = str(exc)
@@ -932,7 +932,7 @@ def get(path: str, default: Any = None) -> Any:
 
 
 def set(path: str, value: Any) -> Any:
-    """Set one setting and write the file back (``wreader config`` uses this)."""
+    """Set one setting and write the file back (``werd config`` uses this)."""
     # 取当前配置（有缓存就直接用）
     settings = load_config()
     # 写入内存中的值（会校验类型）
@@ -972,7 +972,7 @@ def novels_dir(settings: Optional[Config] = None) -> Path:
 def effective_values(settings: Optional[Config] = None) -> Dict[str, Any]:
     """Return every setting as the rest of wreader will use it, keyed by dotted path.
 
-    The two paths that name a directory are resolved, so ``wreader config`` shows the
+    The two paths that name a directory are resolved, so ``werd config`` shows the
     real location rather than ``~/novels``.
     """
     settings = settings or load_config()

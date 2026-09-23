@@ -16,7 +16,7 @@ the next launch resumes exactly where you stopped.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Using wreader in a new terminal](#using-wreader-in-a-new-terminal)
+- [Using werd in a new terminal](#using-werd-in-a-new-terminal)
 - [Quick start](#quick-start)
 - [Command reference](#command-reference)
 - [Reader key bindings](#reader-key-bindings)
@@ -47,7 +47,7 @@ the next launch resumes exactly where you stopped.
 | 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
 | 🏆 Achievements | 10 achievements (first book, night owl, seven-day streak, …) with progress bars, an unlock animation and a bell |
-| ⚙️ Settings | One `settings.toml` for everything; `wreader config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
+| ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
 
 ---
 
@@ -57,7 +57,7 @@ the next launch resumes exactly where you stopped.
 - **macOS / Linux**: `curses` ships with Python, so nothing extra is needed
 - **Windows**: install `windows-curses` as well (see Installation)
 - A UTF-8 capable terminal (required for Chinese books; the macOS Terminal, iTerm2 and Windows Terminal all qualify)
-- Network access only for Google translation and `wreader translate`; reading locally works entirely offline
+- Network access only for Google translation and `werd translate`; reading locally works entirely offline
 
 These third-party libraries are installed automatically:
 `rich` (tables and progress bars), `chardet` (encoding detection), `deep-translator` (Google translation)
@@ -78,11 +78,11 @@ cd wreader
 ```
 
 `./install.sh` takes care of everything else: it creates the `.venv` virtual environment,
-installs the four dependencies, **sets up the `wreader` alias** (appended to `~/.bashrc` or
+installs the four dependencies, **sets up the `werd` alias** (appended to `~/.bashrc` or
 `~/.zshrc` — running it twice will not add a second line) and finally checks the version:
 
 ```bash
-wreader --version        # wreader 0.1.0
+werd --version        # werd 0.1.0
 ```
 
 Follow its last line (`source ~/.zshrc`, or simply open a new terminal) and you are done.
@@ -118,19 +118,19 @@ On Windows use:
 pip install -e ".[windows]"
 ```
 
-You now have the `wreader` command **in the current terminal window**:
+You now have the `werd` command **in the current terminal window**:
 
 ```bash
-wreader --version
-# wreader 0.1.0
+werd --version
+# werd 0.1.0
 ```
 
 </details>
 
-### Using wreader in a new terminal
+### Using werd in a new terminal
 
-`wreader` lives inside the project's own `.venv`, and `.venv/bin` is not on `PATH` by
-default. So **after you close the terminal and open a new one, typing `wreader` fails
+`werd` lives inside the project's own `.venv`, and `.venv/bin` is not on `PATH` by
+default. So **after you close the terminal and open a new one, typing `werd` fails
 with `command not found`** — that is expected, and it does not mean the install is broken.
 
 **If you installed with `./install.sh` you are already covered**: it wrote the alias into
@@ -140,24 +140,24 @@ installed by hand — pick whichever of the three you prefer:
 
 | Option | What you type each time | Notes |
 | --- | --- | --- |
-| **① Add an alias** (recommended) | `wreader read <id>` | Do it once; works in **every** new terminal |
-| **② Use the full path** | `<project>/.venv/bin/wreader read <id>` | Nothing to configure |
-| **③ Activate the venv** | `cd <project>` → `source .venv/bin/activate` → `wreader ...` | Fine if you work in the project anyway |
+| **① Add an alias** (recommended) | `werd read <id>` | Do it once; works in **every** new terminal |
+| **② Use the full path** | `<project>/.venv/bin/werd read <id>` | Nothing to configure |
+| **③ Activate the venv** | `cd <project>` → `source .venv/bin/activate` → `werd ...` | Fine if you work in the project anyway |
 
 Option ① on macOS / Linux (zsh) is one line appended to `~/.zshrc`
 (put in your real project path):
 
 ```bash
-echo 'alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"' >> ~/.zshrc
+echo 'alias werd="$HOME/Downloads/wreader/.venv/bin/werd"' >> ~/.zshrc
 source ~/.zshrc                       # takes effect now; or simply open a new window
-wreader --version                     # check: prints wreader 0.1.0
+werd --version                     # check: prints werd 0.1.0
 ```
 
 With bash, use `~/.bashrc` instead; on Windows PowerShell, define a function of the
 same name in `$PROFILE`.
 
 > ⚠️ **Do not prepend `.venv/bin` to `PATH`** (`export PATH=".../.venv/bin:$PATH"`).
-> That does make `wreader` work, but it also turns `python3` and `pip` in every new
+> That does make `werd` work, but it also turns `python3` and `pip` in every new
 > terminal into this virtualenv's copies, which will confuse you in other Python
 > projects. An alias adds one command and nothing else.
 >
@@ -165,20 +165,20 @@ same name in `$PROFILE`.
 > and **never** adds `.venv/bin` to `PATH`.
 
 > **Just passing through?** You can skip all of the above and write
-> `python -m wreader.cli xxx` wherever this document says `wreader xxx` — the two are
+> `python -m wreader.cli xxx` wherever this document says `werd xxx` — the two are
 > equivalent. A beginner-oriented version of this section (including the Windows form and
 > why your books and progress are unaffected) is in [使用指南.md](使用指南.md) (Chinese).
 
 ### Upgrading from the old `nr`
 
 The tool used to be called `nr`. Nobody has to move anything by hand: the first
-time `wreader` runs, if `~/.wreader` does not exist yet and `~/.nr` does, the whole
+time `werd` runs, if `~/.wreader` does not exist yet and `~/.nr` does, the whole
 old directory is moved into place — settings, library index, notebook and
 translation cache included — and the old directory disappears.
 
 | Old name | Now | Compatibility |
 | --- | --- | --- |
-| the `nr` command | `wreader` | re-run `pip install -e .`; the old command goes away with the old distribution |
+| the `nr` command | `werd` | re-run `pip install -e .`; the old command goes away with the old distribution |
 | `python -m nr.cli` | `python -m wreader.cli` | the module name follows the package, so the old spelling is gone |
 | `$NR_HOME` / `$NR_NOVELS_DIR` | `$WREADER_HOME` / `$WREADER_NOVELS_DIR` | the old variables are still read when the new one is unset |
 | `~/.nr` | `~/.wreader` | adopted automatically on the first run (see above) |
@@ -199,19 +199,19 @@ Four steps from nothing to reading:
 #     naming files 「author-title.txt」 gives the best metadata, e.g. 刘慈欣-三体.txt
 
 # (2) import them
-wreader import ~/Downloads/books
+werd import ~/Downloads/books
 
 # (3) see what is in the library and note the id
-wreader list
+werd list
 
 # (4) start reading (replace the id with the one you just saw)
-wreader read 3e027c4de949
+werd read 3e027c4de949
 
 # forgot which book you were on? this lists the three you opened most recently
-wreader continue
+werd continue
 ```
 
-Real `wreader import` output:
+Real `werd import` output:
 
 ```
 imported 2 book(s), skipped 0 duplicate(s), 0 failed
@@ -219,7 +219,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
   + 3e027c4de949  《三体》 刘慈欣 · 281 行 · 2000 字 · utf-8 · 41 章
 ```
 
-Real `wreader list` output:
+Real `werd list` output:
 
 ```
                               library (2 book(s))
@@ -247,25 +247,25 @@ At a glance:
 
 | Command | What it does |
 | --- | --- |
-| `wreader import <path>` | Scan a file or directory and import txt/epub books |
-| `wreader list` | List the books in the library |
-| `wreader search <keyword>` | Fuzzy search over title / author / tags |
-| `wreader read <book_id>` | Open the paged reader |
-| `wreader continue` | The three books you opened most recently (with their ids) |
-| `wreader translate <book_id>` | Translate and cache a whole book, chapter by chapter |
-| `wreader vocab` | Vocabulary notebook: list / review / search / remove / export |
-| `wreader stats` | Reading statistics and a heatmap (`--json` for scripts) |
-| `wreader achievements` | Achievement list and unlock progress |
-| `wreader config` | View or edit settings |
+| `werd import <path>` | Scan a file or directory and import txt/epub books |
+| `werd list` | List the books in the library |
+| `werd search <keyword>` | Fuzzy search over title / author / tags |
+| `werd read <book_id>` | Open the paged reader |
+| `werd continue` | The three books you opened most recently (with their ids) |
+| `werd translate <book_id>` | Translate and cache a whole book, chapter by chapter |
+| `werd vocab` | Vocabulary notebook: list / review / search / remove / export |
+| `werd stats` | Reading statistics and a heatmap (`--json` for scripts) |
+| `werd achievements` | Achievement list and unlock progress |
+| `werd config` | View or edit settings |
 
 Exit codes: `0` on success; `1` for a bad argument, nothing found (`no book matches ...`) or a translation
 with failed chapters (`Ctrl-C` gives `130`). Errors are always printed as `error: ...` — never as a raw traceback.
 
-### `wreader import <path>`
+### `werd import <path>`
 
 ```bash
-wreader import ~/Downloads/books        # scan a whole directory recursively
-wreader import ~/Downloads/三体.txt     # or import a single file
+werd import ~/Downloads/books        # scan a whole directory recursively
+werd import ~/Downloads/三体.txt     # or import a single file
 ```
 
 - Only `.txt` and `.epub` are accepted; hidden files (macOS `._xxx`, `.DS_Store`) are skipped.
@@ -278,28 +278,28 @@ wreader import ~/Downloads/三体.txt     # or import a single file
   with a `(2)` suffix if a file of that name already exists.
 - Importing the same book again reports `skipped N duplicate(s)` instead of storing a second copy.
 
-### `wreader list`
+### `werd list`
 
 ```bash
-wreader list
+werd list
 ```
 
 `progress` is the reading percentage; `words` is the word count formatted the Chinese way
 (`5.7万` = 57k, `1.2亿` = 120M). An empty library tells you where the index and the novels directory live.
 
-### `wreader search <keyword>`
+### `werd search <keyword>`
 
 ```bash
-wreader search 三体          # a Chinese keyword
-wreader search tolkien       # an author, case insensitive
-wreader search hptr          # subsequence match → Harry Potter
-wreader search '#fantasy'    # a leading # searches tags only
+werd search 三体          # a Chinese keyword
+werd search tolkien       # an author, case insensitive
+werd search hptr          # subsequence match → Harry Potter
+werd search '#fantasy'    # a leading # searches tags only
 ```
 
 Ranking: exact match > prefix > contains (earlier hits score higher) > subsequence. A title match is
 weighted twice as heavily as an author match. No match returns `1` with `no book matches ...`.
 
-### `wreader read <book_id>`
+### `werd read <book_id>`
 
 The heart of the tool; see [Reader key bindings](#reader-key-bindings) for every key.
 
@@ -308,12 +308,12 @@ The heart of the tool; see [Reader key bindings](#reader-key-bindings) for every
 - The reading position is saved every 60 seconds (configurable) and once more on exit.
 - On exit, the session's duration and lines read are written to the statistics and achievements are checked.
 - It **needs a real interactive terminal**; in a pipe or with redirected output you get:
-  `error: wreader read needs an interactive terminal (a tty on stdin and stdout)`
+  `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
-### `wreader continue`
+### `werd continue`
 
 ```bash
-wreader continue        # the three books you opened most recently (with ids)
+werd continue        # the three books you opened most recently (with ids)
 ```
 
 Sorted by `last_read` (the timestamp written when you leave the reader), listing only books you have
@@ -330,16 +330,16 @@ actually read, at most three:
 └───┴──────────────┴───────┴────────┴──────────┴───────┘
 ```
 
-Copy an `id` into `wreader read` to pick up where you stopped. When nothing has been read yet it tells
-you to pick a book with `wreader list` (or import one) and still exits `0`.
+Copy an `id` into `werd read` to pick up where you stopped. When nothing has been read yet it tells
+you to pick a book with `werd list` (or import one) and still exits `0`.
 
-> With the alias from [Using wreader in a new terminal](#using-wreader-in-a-new-terminal) in place,
-> resuming after a reboot is two lines: `wreader continue` for the shortlist, `wreader read <id>` to open.
+> With the alias from [Using werd in a new terminal](#using-werd-in-a-new-terminal) in place,
+> resuming after a reboot is two lines: `werd continue` for the shortlist, `werd read <id>` to open.
 
-### `wreader translate <book_id>`
+### `werd translate <book_id>`
 
 ```bash
-wreader translate 3e027c4de949
+werd translate 3e027c4de949
 ```
 
 For "translate the whole book once, then flip between views freely". Real output:
@@ -355,28 +355,28 @@ cache: /Users/you/.wreader/cache/3e027c4de949
 - A single failing chapter does not abort the run; the chapter numbers are listed and the next run picks them up.
 - A connectivity failure does abort, because retrying every remaining chapter would only waste time.
 
-### `wreader vocab`
+### `werd vocab`
 
 With no flags it lists the notebook (20 words per page, newest first):
 
 ```bash
-wreader vocab                          # view (page 1)
-wreader vocab --page 2 --per-page 50    # turn the page, change the page size
-wreader vocab --search 公认             # reverse lookup by meaning (word / translation / context)
-wreader vocab --review                  # review mode: shuffled, see the word then press Enter to check
-wreader vocab --remove ephemeral        # delete a word
-wreader vocab --export anki > deck.txt  # export Anki's tab separated format
+werd vocab                          # view (page 1)
+werd vocab --page 2 --per-page 50    # turn the page, change the page size
+werd vocab --search 公认             # reverse lookup by meaning (word / translation / context)
+werd vocab --review                  # review mode: shuffled, see the word then press Enter to check
+werd vocab --remove ephemeral        # delete a word
+werd vocab --export anki > deck.txt  # export Anki's tab separated format
 ```
 
 `--review` is interactive in a real terminal (Enter reveals the meaning, `q` stops). If the output is
 redirected it degrades to printing every word with its meaning in one go.
 `--export anki` deliberately bypasses rich and writes to plain `stdout`, so the tabs survive redirection.
 
-### `wreader stats`
+### `werd stats`
 
 ```bash
-wreader stats          # human readable table + heatmap
-wreader stats --json   # the same data as raw JSON, for scripts and dashboards
+werd stats          # human readable table + heatmap
+werd stats --json   # the same data as raw JSON, for scripts and dashboards
 ```
 
 Real output:
@@ -397,16 +397,16 @@ Real output:
 then the 30-day heatmap with its legend.)
 
 - Each heatmap **column** is one week (Monday on top, Sunday at the bottom); days outside the window are blank.
-- `wreader stats --json` top-level keys: `generated_at`, `today`, `total_seconds`, `total`, `today_seconds`,
+- `werd stats --json` top-level keys: `generated_at`, `today`, `total_seconds`, `total`, `today_seconds`,
   `week_seconds`, `month_seconds`, `daily_goal_seconds`, `goal_met`, `streak_days`, `streak_min_seconds`,
   `books_read`, `finished_books`, `vocab_count`, `translations`, `night_seconds`,
   `longest_session_seconds`, `achievements`, `books`, `daily`, `heatmap`, `heatmap_grid`.
 - The table and the JSON are rendered from the same dict, so the two can never disagree.
 
-### `wreader achievements`
+### `werd achievements`
 
 ```bash
-wreader achievements
+werd achievements
 ```
 
 Real output:
@@ -423,26 +423,26 @@ Real output:
 (`1/10 unlocked`, the unlocked entry with its timestamp, then `进行中` = "in progress" with one progress bar per
 remaining achievement.)
 
-### `wreader config`
+### `werd config`
 
 ```bash
-wreader config                            # print every setting (value / default / source file)
-wreader config --path                     # print just the settings file path
-wreader config reader.page_height         # read one setting
-wreader config reader.page_height 30      # write one setting (saved immediately)
-wreader config --reset                    # restore every default
+werd config                            # print every setting (value / default / source file)
+werd config --path                     # print just the settings file path
+werd config reader.page_height         # read one setting
+werd config reader.page_height 30      # write one setting (saved immediately)
+werd config --reset                    # restore every default
 ```
 
 Real interactions:
 
 ```
-$ wreader config reader.page_height
+$ werd config reader.page_height
 reader.page_height = 24
 
-$ wreader config reader.page_height 30
+$ werd config reader.page_height 30
 reader.page_height = 30 (saved)
 
-$ wreader config reader.pag_height 20
+$ werd config reader.pag_height 20
 error: unknown setting 'reader.pag_height' (did you mean 'reader.page_height'?)
 ```
 
@@ -507,7 +507,7 @@ Useful details:
 ## Settings
 
 Everything lives in `~/.wreader/settings.toml`, split into 5 sections. Edit the file directly, or use
-`wreader config <section.key> <value>`. **Deleting any line falls back to that setting's default**, so you cannot
+`werd config <section.key> <value>`. **Deleting any line falls back to that setting's default**, so you cannot
 really break it.
 
 ### `[reader]`
@@ -566,8 +566,8 @@ How the two backends differ:
 - **deepseek**: POSTs to the OpenAI-compatible `/v1/chat/completions` with `temperature` 0.3 and streaming
   enabled, which gives more coherent paragraph-level translations. It needs a key first:
   ```bash
-  wreader config translator.backend deepseek
-  wreader config translator.deepseek_api_key sk-your-key
+  werd config translator.backend deepseek
+  werd config translator.deepseek_api_key sk-your-key
   # or, without writing the key into a file:
   export DEEPSEEK_API_KEY=sk-your-key
   ```
@@ -577,7 +577,7 @@ How the two backends differ:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `daily_goal_minutes` | `60` | Daily reading goal in minutes; `0` hides the goal line |
-| `show_heatmap` | `true` | Show the 30-day heatmap in `wreader stats` |
+| `show_heatmap` | `true` | Show the 30-day heatmap in `werd stats` |
 | `achievement_sound` | `true` | Ring the bell (`\a`) when an achievement unlocks; set `false` if your terminal is loud |
 
 ### `[vocab]`
@@ -674,7 +674,7 @@ Worth knowing:
 - `book_id` is the first 12 hex digits of the SHA-1 of the converted text, which is why duplicates are always caught.
 - `total_lines` and every `chapters[].line_start` are indexes into `text.split("\n")`. The reader's
   `current_line` and a bookmark's `line` use that same coordinate system, so they can never drift apart.
-- `tags` is consumed by `wreader search '#tag'`, but there is no CLI command to add tags yet — edit the index by hand.
+- `tags` is consumed by `werd search '#tag'`, but there is no CLI command to add tags yet — edit the index by hand.
 
 ### `~/.wreader/vocab.json` — the vocabulary notebook
 
@@ -742,7 +742,7 @@ wreader/
 ├── README.md                中文说明 (Chinese)
 ├── README.en.md             this file
 ├── 使用指南.md               step-by-step beginner guide (Chinese only)
-├── install.sh               one-shot installer: venv, dependencies, wreader alias (idempotent)
+├── install.sh               one-shot installer: venv, dependencies, werd alias (idempotent)
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
@@ -781,12 +781,12 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 # run it
-wreader --help
-wreader list
+werd --help
+werd list
 
 # experiment without touching your real data: point the environment elsewhere
 export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox/novels
-wreader import /tmp/my-test-books
+werd import /tmp/my-test-books
 ```
 
 Debugging tips:
@@ -856,21 +856,21 @@ exit code 0 = pass, 1 = something to look at. See [tools/README.md](tools/README
 
 ## FAQ
 
-**Q: After opening a new terminal, `wreader` says command not found?**
-The most common report — and **not** a broken install: `wreader` lives in the project's own `.venv`,
+**Q: After opening a new terminal, `werd` says command not found?**
+The most common report — and **not** a broken install: `werd` lives in the project's own `.venv`,
 whose `bin` directory is not on `PATH` by default. If you installed with `./install.sh` the alias is
 already in place, so just run `source ~/.zshrc` (or `~/.bashrc`) or open another terminal; if it still
 fails you either passed `--no-alias` or installed by hand — see
-[Using wreader in a new terminal](#using-wreader-in-a-new-terminal). Alternatively call
-`<project>/.venv/bin/wreader` directly, run `source .venv/bin/activate` first, or simply write
-`python -m wreader.cli xxx` instead of `wreader xxx`.
+[Using werd in a new terminal](#using-werd-in-a-new-terminal). Alternatively call
+`<project>/.venv/bin/werd` directly, run `source .venv/bin/activate` first, or simply write
+`python -m wreader.cli xxx` instead of `werd xxx`.
 
 **Q: Where did my library go after upgrading?**
-The first run of `wreader` moves `~/.nr` into `~/.wreader` for you. When both directories exist, `wreader`
+The first run of `werd` moves `~/.nr` into `~/.wreader` for you. When both directories exist, `werd`
 only ever uses `~/.wreader` and leaves `~/.nr` alone — delete it yourself once you are happy with the new one.
 
 **Q: `path does not exist` / `no .txt/.epub file found under ...` on import?**
-Either the path is wrong, or the directory really holds no `.txt` / `.epub`. `wreader import` scans recursively,
+Either the path is wrong, or the directory really holds no `.txt` / `.epub`. `werd import` scans recursively,
 so pointing at a parent folder is fine.
 
 **Q: My Chinese book shows up as mojibake.**
@@ -887,16 +887,16 @@ Renaming the file does not help (the content is unchanged), but **editing** the 
 **Q: I pressed `t` and got no translation.**
 `t` translates the current screen and deliberately does not cache. If it says `当前视图就是原文，无需翻译`
 ("this view is already the source text"), the language you asked for is the book's own. To keep a translation
-permanently press `T` (caches the chapter) or run `wreader translate <book_id>` once from the shell.
+permanently press `T` (caches the chapter) or run `werd translate <book_id>` once from the shell.
 
 **Q: Translation fails with `翻译不可用: ...`.**
 The Google backend needs connectivity; the DeepSeek backend needs an API key
-(`wreader config translator.deepseek_api_key sk-xxx` or `export DEEPSEEK_API_KEY=...`). Google is often unreachable
+(`werd config translator.deepseek_api_key sk-xxx` or `export DEEPSEEK_API_KEY=...`). Google is often unreachable
 from mainland China — switch to DeepSeek there.
 
-**Q: `wreader read` says `needs an interactive terminal`.**
+**Q: `werd read` says `needs an interactive terminal`.**
 The reader must run in a real terminal: no `| less`, no redirection, no CI.
-(`wreader list` / `wreader stats` and friends are happy to be redirected.)
+(`werd list` / `werd stats` and friends are happy to be redirected.)
 
 **Q: The statistics did not change after a session.**
 Check two things: is `reader.store_history` still `true`, and was the session saved at all (a read-only disk
@@ -907,19 +907,19 @@ Today always counts — it is about to become a fact. The real threshold is 30 a
 
 **Q: I want silent reading: no statistics, no bell.**
 ```bash
-wreader config reader.store_history false
-wreader config stats.achievement_sound false
-wreader config stats.show_heatmap false
+werd config reader.store_history false
+werd config stats.achievement_sound false
+werd config stats.show_heatmap false
 ```
 
 **Q: How do I get my words into Anki?**
 ```bash
-wreader vocab --export anki > deck.txt
+werd vocab --export anki > deck.txt
 ```
 Then Anki → File → Import, choose "tab" as the field separator; the three columns are word / meaning / example.
 
 **Q: I deleted a book file but the index still lists it.**
-There is no CLI command for that yet. Delete the key under `books` in `library.json` (`wreader list` stops showing
+There is no CLI command for that yet. Delete the key under `books` in `library.json` (`werd list` stops showing
 it immediately), or use Python:
 ```python
 from wreader import library
@@ -927,7 +927,7 @@ library.remove_book("3e027c4de949")   # also deletes the UTF-8 text under ~/nove
 ```
 
 **Q: I broke `settings.toml`.**
-`wreader config --reset` restores every default, or delete the file and it is regenerated. Deleting a single line
+`werd config --reset` restores every default, or delete the file and it is regenerated. Deleting a single line
 just reverts that one setting.
 
 ---
@@ -937,10 +937,10 @@ just reverts that one setting.
 These are the limitations that genuinely exist today; better to write them down than to hide them:
 
 - **`reader.theme` is not implemented** — changing it has no effect.
-- **No CLI command to add tags.** `books[].tags` and `wreader search '#tag'` work, but for now you edit `library.json`.
+- **No CLI command to add tags.** `books[].tags` and `werd search '#tag'` work, but for now you edit `library.json`.
 - **EPUB parsing is a trade-off**: without Calibre's `ebook-convert` the built-in extractor only keeps body text,
   so images, footnotes and complex layout are lost. Installing Calibre is recommended.
-- **`wreader read` only works in a real terminal** (see the FAQ above).
+- **`werd read` only works in a real terminal** (see the FAQ above).
 - **Windows needs the extra dependency** `windows-curses` (`pip install -e ".[windows]"`).
 - **Numeric values under `progress` in `library.json` are not coerced**: a hand written string
   (`"current_line": "12"`) still works because every consumer wraps it in `int(...)`, but it is not

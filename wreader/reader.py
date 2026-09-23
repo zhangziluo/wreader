@@ -1,6 +1,6 @@
 """Reader core: a curses paged reading experience.
 
-``wreader read <book_id>`` pages through the UTF-8 text that :mod:`wreader.library`
+``werd read <book_id>`` pages through the UTF-8 text that :mod:`wreader.library`
 produced at import time.  The pager works in **source lines**: the stored file is
 split on ``\\n`` exactly the way the importer split it, so
 ``progress["current_line"]``, ``progress["bookmarks"][].line`` and every
@@ -1952,7 +1952,7 @@ def save_session(
 ) -> None:
     """Write position, bookmarks and, optionally, the session to the index.
 
-    The position and the bookmarks are always stored so ``wreader read`` resumes where
+    The position and the bookmarks are always stored so ``werd read`` resumes where
     you stopped.  ``record_history`` (the ``reader.store_history`` setting) also
     appends the session with its duration to the book and to the global ``stats``.
     """
@@ -2200,7 +2200,7 @@ def open_reader(book_id: str) -> int:
     # 需要真实终端才能进全屏界面
     if not _has_terminal():
         raise library.LibraryError(
-            "wreader read needs an interactive terminal (a tty on stdin and stdout)"
+            "werd read needs an interactive terminal (a tty on stdin and stdout)"
         )
 
     # 读配置（三个段落分别用到）

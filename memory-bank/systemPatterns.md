@@ -102,7 +102,7 @@
 | --- | --- |
 | 导入一本书 | `cli.cmd_import` → `library.import_books` → `load_source_text`（编码识别/EPUB）→ `write_utf8_text` → `build_record` → `save_library` |
 | 打开阅读器 | `cli.cmd_read` → `reader.open_reader` → `read_lines`（保持行号一致）→ `Pager(...)` → `curses.wrapper(_run)` → `_run` 首行 `_init_colors()` |
-| 继续上次的书 | `cli.cmd_continue` → `library.recent_books(limit=3)`（按 `progress.last_read` 倒序，跳过从没读过的书）→ `_book_table` 打印 id，抄给 `wreader read` |
+| 继续上次的书 | `cli.cmd_continue` → `library.recent_books(limit=3)`（按 `progress.last_read` 倒序，跳过从没读过的书）→ `_book_table` 打印 id，抄给 `werd read` |
 | 画一帧 | `_run` → `_draw` → `Pager.visible_rows(rows, width-1)` → 逐行 `_draw_text` → `_draw_status` → `refresh` |
 | 翻页 | `handle_key` → `Pager.next_page/previous_page` → `next_top/previous_top(page_budget, viewport_width)` → `move_to(行, 段内偏移)` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行**；屏顶坐标是 `(position, line_offset)` |
 | 鼠标/触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |

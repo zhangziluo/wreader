@@ -339,7 +339,7 @@ def search_words(keyword: str) -> List[Dict[str, Any]]:
     """Return the entries whose word, translation or context contains *keyword*.
 
     Searching all three fields makes the notebook usable from the other
-    direction too: ``wreader vocab --search 公认`` finds the word by its meaning.
+    direction too: ``werd vocab --search 公认`` finds the word by its meaning.
     """
     # 关键词同样先做"去空白 + 小写"，实现大小写不敏感的模糊匹配
     needle = str(keyword or "").strip().lower()

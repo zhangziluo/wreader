@@ -1,6 +1,6 @@
 # Tech Context — 技术栈、环境与命令
 
-> 用什么技术、怎么装、什么约束、跑哪些命令。最后更新：2026-09-22。
+> 用什么技术、怎么装、什么约束、跑哪些命令。最后更新：2026-09-23。
 
 ## 运行时依赖（`pyproject.toml`）
 
@@ -19,7 +19,7 @@
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # 可编辑安装 + pytest
-wreader --version                # wreader 0.1.0
+werd --version                # werd 0.1.0
 ```
 
 - **本机实测环境**：macOS（darwin），`.venv/bin/python` 为 Python **3.13**，
@@ -28,24 +28,24 @@ wreader --version                # wreader 0.1.0
   并把工作区根加进 `python.analysis.extraPaths`（否则 Pylance 报 `rich.console` 无法解析）。
 - **`[tool.pyright]` 只对 pyright CLI 生效**，VS Code 的 Pylance 读的是 `.vscode/settings.json`；
   两者都指向同一个 `.venv`。
-- **新终端里怎么敲 `wreader`**（2026-09-22 补）：它是**项目内** `.venv` 的可编辑安装，
+- **新终端里怎么敲 `werd`**（2026-09-22 补）：它是**项目内** `.venv` 的可编辑安装，
   `.venv/bin` **不在**默认 PATH 上，且 `~/.zprofile`/`~/.zshenv`/`/etc/paths*` 都没配它，
-  所以**重开终端后 `wreader` 默认不可用**（实测干净 shell 里 `command -v wreader` 找不到）。
+  所以**重开终端后 `werd` 默认不可用**（实测干净 shell 里 `command -v werd` 找不到）。
   为此新建了 `~/.zshrc`（此前不存在），里面只加了一行**别名**：
-  `alias wreader="/Users/zhangziluo/Downloads/wreader/.venv/bin/wreader"`。
+  `alias werd="/Users/zhangziluo/Downloads/wreader/.venv/bin/werd"`。
   别名只在交互式 shell 生效，**`python3` / `pip` 不受影响**。
   ⚠️ **故意不用 PATH 前置**：实测把 `.venv/bin` 前置进 PATH 后，新终端的
   `python3` 会变成 `.venv/bin/python3`、`pip` 会变成 `.venv/bin/pip`，会干扰其它 Python 项目。
   数据（`~/.wreader`、`~/novels`）与 `.venv` 无关，所以换环境不会丢书和进度。
-  没有别名时的两种等价写法：`.venv/bin/wreader ...`，或
-  `cd <项目> && source .venv/bin/activate` 之后再敲 `wreader`。
-  这三种办法与"为什么新终端找不到 wreader"已写进面向用户的文档
-  **《使用指南.md》的「关掉终端之后：下次怎么打开 wreader」一节**（2026-09-22）。
-- **Linux 上同理，重启后两行开读**（2026-09-22 补，用户诉求「重启之后一到两行就能开 wreader 看书」）：
+  没有别名时的两种等价写法：`.venv/bin/werd ...`，或
+  `cd <项目> && source .venv/bin/activate` 之后再敲 `werd`。
+  这三种办法与"为什么新终端找不到 werd"已写进面向用户的文档
+  **《使用指南.md》的「关掉终端之后：下次怎么打开 werd」一节**（2026-09-22）。
+- **Linux 上同理，重启后两行开读**（2026-09-22 补，用户诉求「重启之后一到两行就能开 werd 看书」）：
   bash 写 `~/.bashrc`、zsh 写 `~/.zshrc`，内容都是
-  `alias wreader="$HOME/Downloads/wreader/.venv/bin/wreader"`（**只配一次**）。
-  之后重启再开终端，日常就是两行：`wreader continue`（列出最近打开阅读的**三本**书，抄 id）
-  → `wreader read <id>`。数据在 `~/.wreader` / `~/novels`，与 `.venv` 无关，
+  `alias werd="$HOME/Downloads/wreader/.venv/bin/werd"`（**只配一次**）。
+  之后重启再开终端，日常就是两行：`werd continue`（列出最近打开阅读的**三本**书，抄 id）
+  → `werd read <id>`。数据在 `~/.wreader` / `~/novels`，与 `.venv` 无关，
   所以重启机器 / 换环境都不会丢书和进度。
 
 ## 环境变量
@@ -84,7 +84,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 路径 | 说明 |
 | --- | --- |
 | `wreader/` | 包本体（8 个模块 + `data/achievements.json`） |
-| `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `wreader` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
+| `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
 | `tests/` | 8 个测试文件（含 `conftest.py`），545 项 |
 | `tools/` | **开发期校验脚本**（7 个 + `README.md`）：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
@@ -105,22 +105,22 @@ git clone https://github.com/zhangziluo/wreader.git && cd wreader && ./install.s
 ./install.sh --dev                            # 额外装 pytest（要跑测试时）
 ./install.sh --no-alias                       # 不改 ~/.bashrc / ~/.zshrc
 
-# 启动（新终端里 `wreader` 来自 ~/.zshrc 的别名，见「开发环境」一节）
-wreader --version                             # wreader 0.1.0
-.venv/bin/wreader list                        # 没配别名 / 没激活 venv 时的等价写法
-source .venv/bin/activate                     # 或先激活 venv，之后直接敲 wreader
+# 启动（新终端里 `werd` 来自 ~/.zshrc 的别名，见「开发环境」一节）
+werd --version                             # werd 0.1.0
+.venv/bin/werd list                        # 没配别名 / 没激活 venv 时的等价写法
+source .venv/bin/activate                     # 或先激活 venv，之后直接敲 werd
 
 # 功能
-wreader import <路径>            # 导入 txt/epub
-wreader list                     # 看书库（记下 book_id）
-wreader search <关键词>          # 模糊搜索；'#tag' 按标签
-wreader read <book_id>           # 开读（真 TTY）
-wreader continue                 # 最近打开阅读的三本书（附 id，抄去 read 续读）
-wreader translate <book_id>      # 命令行整本/整章翻译
-wreader vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page N]
-wreader stats [--json]
-wreader achievements
-wreader config [<section.key> [value]] [--path] [--reset]
+werd import <路径>            # 导入 txt/epub
+werd list                     # 看书库（记下 book_id）
+werd search <关键词>          # 模糊搜索；'#tag' 按标签
+werd read <book_id>           # 开读（真 TTY）
+werd continue                 # 最近打开阅读的三本书（附 id，抄去 read 续读）
+werd translate <book_id>      # 命令行整本/整章翻译
+werd vocab [--review|--export anki|--search KW|--remove W|--page N|--per-page N]
+werd stats [--json]
+werd achievements
+werd config [<section.key> [value]] [--path] [--reset]
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
 git status                                    # 动手前先看工作区是否干净
@@ -181,7 +181,7 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `tests/test_vocab.py` | 31 |
 | **合计** | **545** |
 
-> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 新增 `wreader continue`，
+> **两份 README 的结构数字已与代码同步**（最近一次：2026-09-22 新增 `werd continue`，
 > 行数、测试总数 **545**、`test_reader.py` **159**）。以后改完代码或测试，跑一句 `tools/check_doc_numbers.py` 就能查出漂移 ——
 > 它把 README 声称的数字与真实文件行数、pytest 实际收集数逐项对拍（当前 **ALL OK**）。
 

@@ -1,4 +1,4 @@
-"""Command line interface for ``wreader``.
+"""Command line interface for ``werd``.
 
 Owns argument parsing and the top level command dispatch.  Every sub-command is
 declared in :func:`build_parser` and wired to a handler function through
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # 标准库的命令行参数解析器，所有子命令都靠它声明
 import argparse
-# `wreader stats --json` 要把报告原样输出成 JSON
+# `werd stats --json` 要把报告原样输出成 JSON
 import json
 # 直接写 sys.stdout/sys.exit，绕过 rich 的渲染避免污染重定向输出
 import sys
@@ -41,10 +41,10 @@ err_console = Console(stderr=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the top level ``wreader`` parser including every sub-command."""
+    """Create the top level ``werd`` parser including every sub-command."""
     # 顶层解析器：定义程序名和整体描述
     parser = argparse.ArgumentParser(
-        prog="wreader",
+        prog="werd",
         description=(
             "A terminal novel reader with translation, vocabulary notebook, "
             "reading statistics and achievements."
@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version="%(prog)s {}".format(__version__),
-        help="show the wreader version and exit",
+        help="show the werd version and exit",
     )
 
     # 子命令容器：dest="command" 让解析结果里带一个 command 字段，用来查 handler
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
 
-    # wreader import <path>：导入书籍的子命令
+    # werd import <path>：导入书籍的子命令
     import_parser = subparsers.add_parser(
         "import",
         help="scan a directory and import txt/epub books into the library",
@@ -78,10 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="book file or directory to scan for .txt/.epub books",
     )
 
-    # wreader list：不带任何参数，列出书库
+    # werd list：不带任何参数，列出书库
     subparsers.add_parser("list", help="list the books stored in the library")
 
-    # wreader search <keyword>：按标题/作者/标签模糊搜索
+    # werd search <keyword>：按标题/作者/标签模糊搜索
     search_parser = subparsers.add_parser(
         "search", help="fuzzy search books by title, author or tag",
     )
@@ -90,26 +90,26 @@ def build_parser() -> argparse.ArgumentParser:
         "keyword", help="keyword matched against title, author and tags",
     )
 
-    # wreader read <book_id>：进入 curses 阅读界面
+    # werd read <book_id>：进入 curses 阅读界面
     read_parser = subparsers.add_parser(
         "read", help="open the paged curses reader for a book",
     )
     # 位置参数 book_id：要阅读的书
     read_parser.add_argument("book_id", help="id of the book to read")
 
-    # wreader continue：列出最近在读的几本书，方便接着上次的进度读
+    # werd continue：列出最近在读的几本书，方便接着上次的进度读
     subparsers.add_parser(
         "continue", help="list the books you read most recently",
     )
 
-    # wreader translate <book_id>：把整本书翻成目标语言并缓存
+    # werd translate <book_id>：把整本书翻成目标语言并缓存
     translate_parser = subparsers.add_parser(
         "translate", help="translate a book into the configured target language",
     )
     # 位置参数 book_id：要翻译的书
     translate_parser.add_argument("book_id", help="id of the book to translate")
 
-    # wreader vocab：默认分页列出笔记本
+    # werd vocab：默认分页列出笔记本
     vocab_parser = subparsers.add_parser(
         "vocab", help="manage the vocabulary notebook",
     )
@@ -153,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="words per page when listing (default 20)",
     )
 
-    # wreader stats [--json]：阅读统计（时长、热力图等）
+    # werd stats [--json]：阅读统计（时长、热力图等）
     stats_parser = subparsers.add_parser("stats", help="show reading statistics")
     # --json：输出机器可读的原始数据，而不是彩色表格
     stats_parser.add_argument(
@@ -162,12 +162,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the raw numbers as JSON instead of the table",
     )
 
-    # wreader achievements：查看成就解锁情况
+    # werd achievements：查看成就解锁情况
     subparsers.add_parser(
         "achievements", help="list achievements and unlock progress",
     )
 
-    # wreader config [section.key] [value]：查看/修改设置
+    # werd config [section.key] [value]：查看/修改设置
     config_parser = subparsers.add_parser(
         "config", help="view or modify the wreader settings",
     )
@@ -212,7 +212,7 @@ def _fail(message: str, code: int = 1) -> int:
 
 
 def _book_table(title: str, rows: Sequence[Tuple[str, Dict[str, Any]]]) -> Table:
-    """Build the rich table shared by ``wreader list`` and ``wreader search``."""
+    """Build the rich table shared by ``werd list`` and ``werd search``."""
     # 每行形如 (book_id, book_dict)，列宽由 rich 自动算
     table = Table(title=title, title_justify="left")
     # 六列：序号、id、书名、作者、进度、字数
@@ -238,7 +238,7 @@ def _book_table(title: str, rows: Sequence[Tuple[str, Dict[str, Any]]]) -> Table
 
 
 def _default_repr(path: str) -> str:
-    """Render the default of one setting the way ``wreader config`` shows it."""
+    """Render the default of one setting the way ``werd config`` shows it."""
     # 从配置模块的默认值平表里查这个点号路径
     value = config.DEFAULT_FLAT.get(path)
     # 没有静态默认值（比如依赖其他设置的项）就显示 (auto)
@@ -307,7 +307,7 @@ def _print_config(settings: config.Config) -> None:
 # Sub-command handlers.
 # ---------------------------------------------------------------------------
 def cmd_import(args: argparse.Namespace) -> int:
-    """Handle ``wreader import <path>`` -- scan, convert and store books."""
+    """Handle ``werd import <path>`` -- scan, convert and store books."""
     # 真正的扫描/解析/入库逻辑都在 library 里，这里只负责展示结果
     result = library.import_books(args.path)
 
@@ -353,14 +353,14 @@ def cmd_import(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    """Handle ``wreader list`` -- show the whole library."""
+    """Handle ``werd list`` -- show the whole library."""
     # 从索引里取出所有书
     books = library.list_books()
 
     # 书库是空的时候，顺手告诉用户书在哪、怎么导入
     if not books:
         console.print(
-            "the library is empty -- add books with [bold]wreader import <path>[/bold]"
+            "the library is empty -- add books with [bold]werd import <path>[/bold]"
         )
         console.print("[dim]index:  {}[/dim]".format(config.library_file()))
         console.print("[dim]novels: {}[/dim]".format(config.novels_dir()))
@@ -372,7 +372,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
-    """Handle ``wreader search <keyword>`` -- fuzzy search the library."""
+    """Handle ``werd search <keyword>`` -- fuzzy search the library."""
     # 关键词同时匹配标题、作者、标签，具体规则在 library 里
     books = library.search_books(args.keyword)
 
@@ -389,7 +389,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
-    """Handle ``wreader config [section.key] [value]`` -- view or edit ``settings.toml``.
+    """Handle ``werd config [section.key] [value]`` -- view or edit ``settings.toml``.
 
     Keys are dotted paths (``reader.page_height``).  The flat names of the old
     ``config.json`` still resolve, and anything unknown is refused with a
@@ -415,7 +415,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     if args.key is None:
         # 只给 value 不给 key 是用法错误
         if args.value is not None:
-            return _fail("a value needs a key: wreader config <section.key> <value>")
+            return _fail("a value needs a key: werd config <section.key> <value>")
         _print_config(settings)
         return 0
 
@@ -441,7 +441,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 def cmd_read(args: argparse.Namespace) -> int:
-    """Handle ``wreader read <book_id>`` -- open the paged curses reader."""
+    """Handle ``werd read <book_id>`` -- open the paged curses reader."""
     try:
         # 延迟导入：curses 在部分平台（如某些 Windows 环境）不可用
         from . import reader
@@ -453,17 +453,17 @@ def cmd_read(args: argparse.Namespace) -> int:
 
 
 def cmd_continue(args: argparse.Namespace) -> int:
-    """Handle ``wreader continue`` -- show the books read most recently."""
+    """Handle ``werd continue`` -- show the books read most recently."""
     # 按 last_read 取最近读过的几本（没读过的书不会出现，时间从新到旧）
     books = library.recent_books()
     # 一本都没读过：提示先去挑一本；退出码与空书库的 list 保持一致，都是 0
     if not books:
         console.print(
-            "还没有阅读记录 —— 用 [bold]wreader list[/bold] 挑一本，"
-            "或 [bold]wreader import <路径>[/bold] 导入新书"
+            "还没有阅读记录 —— 用 [bold]werd list[/bold] 挑一本，"
+            "或 [bold]werd import <路径>[/bold] 导入新书"
         )
         return 0
-    # 复用书库表格：id 列直接摆出来，抄给 wreader read 就能接着读
+    # 复用书库表格：id 列直接摆出来，抄给 werd read 就能接着读
     console.print(_book_table("最近在读 (recent)", books))
     return 0
 
@@ -503,7 +503,7 @@ def _report_unlocked(newly: Sequence[Dict[str, Any]]) -> None:
 
 
 def cmd_translate(args: argparse.Namespace) -> int:
-    """Handle ``wreader translate <book_id>`` -- translate every chapter of a book.
+    """Handle ``werd translate <book_id>`` -- translate every chapter of a book.
 
     Chapters already in the cache are skipped, so re-running the command after an
     interruption simply carries on where it stopped.
@@ -661,7 +661,7 @@ def _vocab_export(args: argparse.Namespace, vocab: Any) -> int:
     """Print the notebook in Anki's tab separated import format.
 
     Written with plain ``sys.stdout`` rather than rich so the tabs survive being
-    redirected into a file: ``wreader vocab --export anki > deck.txt``.
+    redirected into a file: ``werd vocab --export anki > deck.txt``.
     """
     # 导出的是全部生词，不分页
     words = vocab.list_words()
@@ -738,7 +738,7 @@ def _vocab_review(vocab: Any) -> int:
 
 
 def cmd_vocab(args: argparse.Namespace) -> int:
-    """Handle ``wreader vocab`` -- list, review, export, search or remove words.
+    """Handle ``werd vocab`` -- list, review, export, search or remove words.
 
     With no flags the notebook is listed a page at a time, newest first.
     """
@@ -832,7 +832,7 @@ def _heatmap_text(report: Dict[str, Any]) -> str:
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
-    """Handle ``wreader stats`` -- reading time totals plus a 30 day heatmap grid.
+    """Handle ``werd stats`` -- reading time totals plus a 30 day heatmap grid.
 
     ``--json`` prints the very dict the table is rendered from, so scripts and
     the human readable view always agree.  ``stats.show_heatmap`` hides the grid
@@ -912,14 +912,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_achievements(args: argparse.Namespace) -> int:
-    """Handle ``wreader achievements`` -- unlocked list plus progress on the rest."""
+    """Handle ``werd achievements`` -- unlocked list plus progress on the rest."""
     try:
         # 成就是根据统计数据判定的，先读书库索引
         document = library.load_library()
         # 读出成就定义（名称、条件等）
         definitions = stats.load_achievements()
         # Recording is idempotent, and doing it here means progress earned outside
-        # the reader (through `wreader translate`, say) still gets a timestamp instead
+        # the reader (through `werd translate`, say) still gets a timestamp instead
         # of waiting for the next book to be closed.  No fanfare: that belongs to
         # the moment of unlocking while reading.
         # 顺手补记一次解锁：这个操作是幂等的，重复调用不会重复记录
@@ -1002,7 +1002,7 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Entry point used by the ``wreader`` console script."""
+    """Entry point used by the ``werd`` console script."""
     # 构造解析器（每次调用都新建，测试里可以重复使用）
     parser = build_parser()
     # 解析参数；argv 为 None 时 argparse 会自动取 sys.argv[1:]

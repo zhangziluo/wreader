@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# wreader 一键安装：建虚拟环境、装依赖、配好 wreader 别名。
+# werd 一键安装：建虚拟环境、装依赖、配好 werd 别名。
 #
 #   git clone https://github.com/zhangziluo/wreader.git
 #   cd wreader
@@ -42,15 +42,15 @@ die() { printf '%s  [xx]%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 # 帮助文本
 usage() {
   cat <<'EOF'
-wreader 一键安装
+werd 一键安装
 
 用法:
-  ./install.sh              普通用户：建 venv、装依赖、配好 wreader 别名
+  ./install.sh              普通用户：建 venv、装依赖、配好 werd 别名
   ./install.sh --dev        开发者：额外装上 pytest
   ./install.sh --no-alias   不要动 ~/.bashrc / ~/.zshrc
   ./install.sh --help       显示这段帮助
 
-装完之后，新开一个终端就能直接敲 wreader。
+装完之后，新开一个终端就能直接敲 werd。
 EOF
 }
 
@@ -74,9 +74,9 @@ done
 cd "$(dirname "$0")"
 PROJECT_DIR="$(pwd)"
 VENV="$PROJECT_DIR/.venv"
-WREADER_BIN="$VENV/bin/wreader"
+WREADER_BIN="$VENV/bin/werd"
 
-say "${BOLD}wreader 安装${RESET}"
+say "${BOLD}werd 安装${RESET}"
 say "${DIM}项目目录：$PROJECT_DIR${RESET}"
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ if [ "$WITH_DEV" -eq 1 ]; then
 else
   "$VENV/bin/python" -m pip install -e . || die "安装失败，请检查网络后重试"
 fi
-ok "wreader 已安装（可编辑模式）"
+ok "werd 已安装（可编辑模式）"
 
 # ---------------------------------------------------------------------------
 # 4. 自检：能打印版本号就说明真的装好了
@@ -145,23 +145,23 @@ fi
 ok "自检通过：$("$WREADER_BIN" --version)"
 
 # ---------------------------------------------------------------------------
-# 5. 配别名：让新终端 / 重启之后也能直接敲 wreader
+# 5. 配别名：让新终端 / 重启之后也能直接敲 werd
 # ---------------------------------------------------------------------------
 # 写进 rc 文件的整行内容（路径用双引号包住，含空格的路径也能用）
-ALIAS_LINE="alias wreader=\"$WREADER_BIN\""
+ALIAS_LINE="alias werd=\"$WREADER_BIN\""
 
 # 把别名幂等地加进一个 rc 文件
 add_alias_to() {
   # 目标 rc 文件的绝对路径
   local rc="$1"
-  # 已经有 wreader 别名了：只报状态，绝不重复追加
-  if [ -f "$rc" ] && grep -q "^alias wreader=" "$rc" 2>/dev/null; then
+  # 已经有 werd 别名了：只报状态，绝不重复追加
+  if [ -f "$rc" ] && grep -q "^alias werd=" "$rc" 2>/dev/null; then
     # 同一行（同一个路径）就是"已配好"
     if grep -Fxq "$ALIAS_LINE" "$rc"; then
       ok "别名已存在：$rc"
     else
       # 指向别的路径（比如项目被挪走了）：不擅自改动用户文件，只提醒
-      warn "$rc 里已有另一个 wreader 别名，未改动；想换成新路径请手动编辑"
+      warn "$rc 里已有另一个 werd 别名，未改动；想换成新路径请手动编辑"
     fi
     return 0
   fi
@@ -197,7 +197,7 @@ fi
 # ---------------------------------------------------------------------------
 # 有别名就用短命令提示；没配就给完整路径
 if [ "$WITH_ALIAS" -eq 1 ]; then
-  HINT="wreader"
+  HINT="werd"
 else
   HINT="$WREADER_BIN"
 fi

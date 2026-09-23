@@ -1,6 +1,6 @@
 # Progress — 已完成 / 待办 / 已知问题
 
-> 项目整体进度与决策演变。最后更新：**2026-09-22**。
+> 项目整体进度与决策演变。最后更新：**2026-09-23**。
 
 ## 当前状态
 
@@ -12,7 +12,7 @@
 | 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 仍有 **2279** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档，44 KB）、`README.en.md`（46 KB）、`使用指南.md`（38 KB）；数字由 `tools/check_doc_numbers.py` 自动对拍 |
 | 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`），**41 个跟踪文件**，工作区干净、与远端一致（提交数每次提交都会变，故不写死） |
-| CLI 冒烟 | `wreader --version` → `wreader 0.1.0` |
+| CLI 冒烟 | `werd --version` → `werd 0.1.0` |
 | 编译 | `py_compile` 全部 **23 个** .py 通过（wreader 8 + tests 8 + tools 7） |
 | 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项全过 |
 
@@ -26,8 +26,8 @@
   （`书名（中）下册` 保持完整）；全角/半角冒号都认。
 - 去重：`book_id` = 正文 SHA-1 前 12 位；坏文件只进 `failed` 列表，不中止整批。
 - 章节识别：`parse_chapters`（`第一章/第1章/卷X·…` 等），起点写入 `chapters[].line_start`。
-- **`wreader continue`**（2026-09-22 新增）：按 `progress.last_read` 倒序列出**最近打开阅读的三本**书，
-  表格复用 `_book_table`（带 id），把 id 抄给 `wreader read` 就能续读；一本都没读过时给提示并返回 `0`。
+- **`werd continue`**（2026-09-22 新增）：按 `progress.last_read` 倒序列出**最近打开阅读的三本**书，
+  表格复用 `_book_table`（带 id），把 id 抄给 `werd read` 就能续读；一本都没读过时给提示并返回 `0`。
   纯函数在 `library.recent_books(limit=3)`：跳过 `last_read` 为空的书，时间戳是定长 ISO 字符串，
   所以直接按字典序倒排（不解析 datetime）。
 
@@ -75,7 +75,7 @@
 
 ### 配置
 - `settings.toml`，5 个 section / 24 个键，由 `SCHEMA` 单一事实来源驱动（默认值、类型、写序、行尾注释）。
-- `wreader config <section.key> [value]`、`--path`、`--reset`；类型不合法会明确报错。
+- `werd config <section.key> [value]`、`--path`、`--reset`；类型不合法会明确报错。
 - 旧扁平 `config.json` 自动折叠进 section 并备份为 `config.json.bak`。
 - 旧数据目录 `~/.nr` 首次运行时整体搬迁到 `~/.wreader`。
 
@@ -103,7 +103,7 @@
 1. ~~更正 `README.md` / `README.en.md` 的过期信息~~ → **已完成（2026-09-22）**：
    8 个源码文件的行数、测试总数 **494**、`test_reader.py` **115** 全部按实测改对；
    「已知问题」里补记了自动换行 / 按显示列数 / 配色跟随终端 三项修复；
-   两份 README 都新增了「新开一个终端后怎么用 wreader / Using wreader in a new terminal」一节。
+   两份 README 都新增了「新开一个终端后怎么用 werd / Using werd in a new terminal」一节。
    顺手改正一处旧笔误：那份"已解决"清单原文写"六条"，实际列了 7 条
    （英文版写的是 Seven，是对的），现已扩成 **十条**，中英两版一致。
    同性质的守卫见 #3（把校验脚本搬进仓库，以后改代码就能自动查出这类数字漂移）。
@@ -129,7 +129,7 @@
    (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
    (c) 全量补齐 2279 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
 5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
-6. **标签的命令行入口**：`books[].tags` 与 `wreader search '#tag'` 都已支持，
+6. **标签的命令行入口**：`books[].tags` 与 `werd search '#tag'` 都已支持，
    但只能手改 `library.json` 才能加标签。
 7. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
    因为消费方都用 `int(...)` 兜住），但不会被自动改回数字。可考虑在 `save_library` 时规整。
@@ -175,5 +175,6 @@
 | **2026-09-22** | 翻页改为**按屏幕行**推进（`viewport_rows` + `next_position`/`previous_position`，复用 `visible_rows`/`_wrap_line`） | 用户报告长段落翻页会跳行：原步长是"文本行数"，而长段落会被折成多屏行，一次翻页跳过的内容远超一屏。**拒绝**了"用 `ceil(len(text)/width)` 估算屏幕行"的提案 —— 汉字占 2 列，`len()` 必然算错，且会劈单词、漏掉双语视图 |
 | **2026-09-22** | `reader.page_height` 降级为"拿不到终端尺寸时的回退值" | 翻页基准改成真实正文区高度后它不再参与真实路径；保留它是为了不破坏旧配置与既有测试，但文档必须讲清楚它已不是翻页基准 |
 | **2026-09-22** | 屏顶坐标升级为 `(源行号, 段内偏移)`：`Pager.line_offset` 只作**显示态**，`current_line` 仍只写源行号 | 只记源行号时，一屏中途被折行截断的"半截段落"在下一页会被整个跳过（现象：段落突然少了半页）。改成两元组后长段落能被一屏一屏完整读完。**不落库**是为了守住「行号坐标唯一」这条硬约束（书签 / 章节 / 翻译缓存都依赖它），代价是重开书从行首开始 |
-| **2026-09-22** | 新增 `wreader continue` 列"最近打开阅读的三本书" | 用户诉求是「重启之后一到两行就能开 wreader 看书」：原先必须 `wreader list` 找 id 再 `wreader read`。`progress.last_read` 其实**早就在退出阅读器时写好了**，缺的只是一个入口。**故意只"列 id"、不自动打开第一本** —— 最近读的不一定是此刻想读的，程序不该替用户猜；而且"列 id + 抄 id"正好就是用户要的「一到两行」 |
-| **2026-09-22** | 新增 `./install.sh`，把安装压成「三行命令」（clone → cd → install.sh） | 用户诉求：简化安装流程。原先要 `venv` → `activate` → `pip install -e .` 三步，且"重启后能用 wreader"还得**另外**配别名（散在两节文档里）。脚本把这些串成**一条幂等命令**。别名写入做成**自动但可跳过**（`--no-alias`），而不是不做 —— 用户明确选了"自动写入、装完重启即可用"；同时保留"手动安装"作为 Windows / 脚本跑不动时的退路 |
+| **2026-09-22** | 新增 `werd continue` 列"最近打开阅读的三本书" | 用户诉求是「重启之后一到两行就能开 werd 看书」：原先必须 `werd list` 找 id 再 `werd read`。`progress.last_read` 其实**早就在退出阅读器时写好了**，缺的只是一个入口。**故意只"列 id"、不自动打开第一本** —— 最近读的不一定是此刻想读的，程序不该替用户猜；而且"列 id + 抄 id"正好就是用户要的「一到两行」 |
+| **2026-09-22** | 新增 `./install.sh`，把安装压成「三行命令」（clone → cd → install.sh） | 用户诉求：简化安装流程。原先要 `venv` → `activate` → `pip install -e .` 三步，且"重启后能用 werd"还得**另外**配别名（散在两节文档里）。脚本把这些串成**一条幂等命令**。别名写入做成**自动但可跳过**（`--no-alias`），而不是不做 —— 用户明确选了"自动写入、装完重启即可用"；同时保留"手动安装"作为 Windows / 脚本跑不动时的退路 |
+| **2026-09-23** | CLI 命令改名 `wreader` → `werd`（`pyproject.toml` 的 console script + `cli.py` 的 `prog` + `install.sh` 的别名与路径 + 全部文档示例）；**包名 / 仓库名 / 数据目录仍叫 `wreader`** | 用户诉求：命令行太长不好敲。刻意把"命令名"与"包名 / 数据目录"分开 —— 数据目录 `~/.wreader`、环境变量 `WREADER_HOME`、`python -m wreader.cli`、`from wreader import` 一律不动，换来的好处是**零数据迁移**、旧配置与既有测试照常可用；真正变的只有用户敲的那个词 |
