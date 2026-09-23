@@ -9,8 +9,10 @@
 （`main` 跟踪 `origin/main`）。
 ⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 还有 **3164** 条语句上方没有紧邻注释行
 （见 ⑪ 与 `progress.md` 待办 #4）—— 早先那句 `TOTAL: 0` 已作废。
-⚠️ IDE 里还飘着一个**幽灵告警**：`cli.py:24: 未定义"Optional"`。实测**无法复现**，
-来源是仓库根那个野生 `cli.py`（㉒ 坑 #1，早已删除）的陈旧诊断，详见 **㉔** —— 下次再看到别去改代码。
+⚠️ IDE 里还飘着**幽灵告警**（现已两见）：`cli.py:24: 未定义"Optional"`（㉔）与
+`cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`（㉕）。实测**都无法复现**，
+来源是仓库根那个野生 `cli.py`（㉒ 坑 #1 里 `editor` 假成功写出的**143 行**碎片，早已删除）留下的
+陈旧诊断 —— 下次再看到**别去改代码**，先 `ls` 报错指向的那个路径。
 已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
 README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
 翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
@@ -913,10 +915,53 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 然后 **Developer: Reload Window**（或 `Python: Restart Language Server`）即可。
 VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到该路径的痕迹，
 说明它只活在**当时那个运行中的 Pylance 会话**内存里。
+⚠️ **这条后来被推翻**：2026-09-23 的 ㉕ 里用 `sqlite3` 读 `state.vscdb`，**搜到了**该路径的 3 处痕迹
+（`history.entries` + 两个编辑器 `memento`），所以它并不只活在 Pylance 内存里。
+当时的 `grep` 漏了，原因未查明；**引用"搜不到痕迹"时请先自己重跑一遍那条 `grep`**。
 
 **教训（接 ㉒ 坑 #1）**：那条"`editor` 假成功"不只是脏文件问题 ——
 **它还会在 IDE 里留下指向不存在文件的告警**。以后看到"某文件某行未定义 X"，
 先 `ls` 那个路径、再 `grep` 真实文件，**别直接照报错改代码**。
+
+### ㉕ 第二次幽灵告警：`cli.py:143` 返回类型 `int` —— 还是那份野生碎片，零代码改动（2026-09-23）
+
+**报告**：Pylance 说 `cli.py` 第 143 行「所声明的返回类型为"int"的函数必须在所有代码路径上返回值；
+`None` 不可分配给 `int`」。**结论：现盘代码没有这个错误** —— 报错对象**仍是** ㉒ 坑 #1 / ㉔ 里那份
+**仓库根的野生 `cli.py`**（**143 行**、当时已删），路径是工作区根，**该文件不存在**。
+
+**本次实测证据**：
+
+| 项 | 结果 |
+| --- | --- |
+| `find . -name 'cli.py'`（排除 `.git/`） | 仓库根 **无此文件**；只命中 `wreader/cli.py`（1237 行）与 `.venv/` 里别的包 |
+| `git --no-pager log --all -- cli.py` / `git ls-files \| grep cli.py` | 历史上**从未跟踪过**根 `cli.py`；只有 `tests/test_cli.py`、`wreader/cli.py` |
+| `npx pyright wreader/cli.py` | **0 errors / 0 warnings / 0 informations** |
+| `npx pyright`（全仓） | **0 errors / 0 warnings / 0 informations** |
+| `pytest tests/` | **654 passed**；`tests/test_cli.py` 单独跑 **41 passed** |
+| 143 行窗口扫描（脚本：在 `wreader/cli.py` 里找"相对第 24 行含 `Optional`、相对第 143 行是 `def … -> int:`"的窗口） | **0 命中** —— 碎片**不是**现盘文件的连续切片（它是编辑中途的 `new_text`，行号无法用现文件复原） |
+| VS Code `workspaceStorage/cdd18f67a9633099378310d8bbff10f6/state.vscdb`（**先 `cp` 到 `/tmp` 再用 `sqlite3` 读**，不锁真库） | **搜到该路径 3 处痕迹**：`history.entries`（`file:///…/wreader/cli.py`，`"forceFile":true`）、`memento/workbench.parts.editor`、`memento/workbench.editors.files.textFileEditor` |
+
+**为什么能指认"最后一行的函数头"**：`textFileEditor` 里那条记录的 `cursorState` 是
+**第 143 行、列 45–48、且处于选中态** —— 143 正好是那份碎片的**总行数**。列 45–48 落在
+`def xxx(args: argparse.Namespace) -> int:` 这种行的 `int:` 上（例：`cmd_read` 那一行共 47 列，
+45–47 = `nt:`，48 = 行尾之后的插入位）。把"143 = 文件最后一行"与"该行是带 `-> int` 的函数头"
+合起来只剩一种解释：**`editor` 那次长替换把文件截断在函数头处**，函数**没有函数体**，
+于是 Pylance 报"所有代码路径都必须 return"。症状与报错**逐字吻合**。
+
+**㉔ 的一处更正**：㉔ 写"`workspaceStorage` 里已搜不到该路径的痕迹"，**现在搜得到**（见上表）。
+判据：`grep -rl 'Downloads/wreader/cli.py' ~/Library/Application\ Support/Code/User/{workspaceStorage,History} .../Backups`
+命中 `state.vscdb`。所以那条陈旧诊断**不只在当时的 Pylance 内存里** ——
+编辑器的"最近打开 / 标签页视图状态"也在把它一遍遍带回来。
+
+**给用户的处置（零代码改动）**：关掉那个指向仓库根 `cli.py` 的标签页，然后
+**Developer: Reload Window**（或 `Python: Restart Language Server`）。
+若关掉后还自动恢复，就**完全退出 VS Code**（关窗口不等于退出），
+那条 `state.vscdb` 记录才会随状态落盘消失。
+
+**教训（同一个坑累积到第二次）**：文案换了、行号变了，**判据没变** ——
+「**报错指向的文件不存在**」比「报错的文案像不像真问题」可靠得多：
+先 `ls` 报错路径，再 `git log/ls-files` 看它有没有进过版本库，最后才轮到看代码。
+项目侧的答案始终是 `npx pyright` + `pytest` 双绿。
 
 ## 待办 / 下一步
 
