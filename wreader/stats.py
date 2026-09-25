@@ -36,8 +36,8 @@ from pathlib import Path
 # 类型注解：TextIO 表示"可写文本流"
 from typing import Any, Dict, List, Optional, Sequence, TextIO, Tuple
 
-# 同包引用：配置（读每日目标）、书库（读写索引）、生词本（统计生词数）
-from . import config, library, vocab
+# 同包引用：配置（读每日目标 + 数据目录）、书库（读写索引）
+from . import config, library
 
 # 模块公开的名字：常量 + 各项统计/成就函数
 __all__ = [
@@ -499,10 +499,44 @@ def book_totals(document: Dict[str, Any]) -> List[Tuple[str, str, int]]:
     return rows
 
 
+def _vocab_file_size() -> int:
+    """Count the entries still in ``vocab.json``, or 0 when it is unusable.
+
+    The ``vocab_count`` metric outlives the vocabulary notebook itself: the
+    achievement conditions are written against it, so a notebook left behind by
+    an older version still reports its size.  A file that cannot be read counts
+    as 0 rather than failing the whole metric set.
+    """
+    # 笔记本沿用老位置与老文件名：<数据目录>/vocab.json
+    path = config.data_dir() / "vocab.json"
+    # 没有这个文件说明从没建过笔记本，直接 0
+    if not path.exists():
+        return 0
+    try:
+        # 以 UTF-8 读进来解析成 JSON
+        with path.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    # 文件坏了（语法错、权限、其实是目录……）：按 0 处理
+    except (json.JSONDecodeError, OSError):
+        return 0
+    # 老版本包了一层 {"words": [...]}，把里面的列表取出来
+    if isinstance(raw, dict):
+        raw = raw.get("words") or []
+    # 结构还是不对（不是列表）就当空笔记本
+    if not isinstance(raw, list):
+        return 0
+    # 只数真带 word 的记录，与老 load_vocab 的口径一致
+    return sum(
+        1
+        for item in raw
+        if isinstance(item, dict) and str(item.get("word") or "").strip()
+    )
+
+
 def compute_metrics(
     # 书库文档（含 books 与 stats）
     document: Dict[str, Any],
-    # 生词总数；不传就自己去读生词本
+    # 生词总数；不传就自己去数数据目录里的 vocab.json
     vocab_size: Optional[int] = None,
 ) -> Dict[str, int]:
     """Return every metric the achievement conditions are written against.
@@ -510,7 +544,8 @@ def compute_metrics(
     ``books_read`` counts books with at least one recorded session, ``finished``
     counts books left at the last line, ``night_time`` and ``single_session`` are
     derived from the session timestamps, and the rest come straight out of
-    ``stats``.
+    ``stats``.  ``vocab_count`` and ``translations`` stay in the mapping because
+    the achievement conditions reference them.
     """
     # 防御性取值：文档结构不对也不炸
     books = document.get("books") if isinstance(document, dict) else None
@@ -544,12 +579,9 @@ def compute_metrics(
             night_time += night_overlap(session.get("start"), session.get("end"))
             longest_session = max(longest_session, session_seconds(session))
 
-    # 没传生词数就现去数（生词本坏了按 0 处理，不影响其它统计）
+    # 没传生词数就现去数文件（读不动按 0 处理，不影响其它统计）
     if vocab_size is None:
-        try:
-            vocab_size = len(vocab.load_vocab())
-        except vocab.VocabError:
-            vocab_size = 0
+        vocab_size = _vocab_file_size()
 
     # 这就是成就条件里可以引用的全部变量
     return {

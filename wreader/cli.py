@@ -5,8 +5,7 @@ declared in :func:`build_parser` and wired to a handler function through
 ``_HANDLERS``.
 
 Every command is wired up: ``import``, ``list``, ``search``, ``read``,
-``continue``, ``translate``, ``vocab``, ``stats``, ``achievements``, ``config``
-and ``toc``.
+``continue``, ``stats``, ``achievements``, ``config`` and ``toc``.
 """
 
 # 延迟求值类型注解，避免运行时解析注解带来的开销和顺序问题
@@ -20,20 +19,16 @@ import json
 import sys
 # datetime：daily_open 事件要带上"什么时候打开的"
 from datetime import datetime
-# --export 要拼出 ~/books/notes_<id>.md 这样的路径
-from pathlib import Path
 # 类型注解：Callable 表示"可调用的函数"，其余是容器和可选类型
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # rich 的 Console：带颜色、高亮的终端输出
 from rich.console import Console
-# 进度条相关组件：转圈、柱状条、文字列
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
-# rich 的表格，list/search/vocab/stats 都用它排版
+# rich 的表格，list/search/stats 都用它排版
 from rich.table import Table
 
-# 同包内引用：版本号 + 配置 + 书库 + 统计 + 成就事件 + 笔记
-from . import __version__, achievements, config, library, notes, stats
+# 同包内引用：版本号 + 配置 + 书库 + 统计 + 成就事件
+from . import __version__, achievements, config, library, stats
 
 # 对外只暴露这两个函数：构造解析器和程序入口
 __all__ = ["build_parser", "main"]
@@ -88,8 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="werd",
         description=(
-            "A terminal novel reader with translation, vocabulary notebook, "
-            "reading statistics and achievements."
+            "A terminal novel reader with reading statistics and achievements."
         ),
     )
     # 全局 -V/--version 选项：打印版本后直接退出（action="version" 自动干这事）
@@ -152,57 +146,6 @@ def build_parser() -> argparse.ArgumentParser:
         "continue", help="list the books you read most recently",
     )
 
-    # werd translate <book_id>：把整本书翻成目标语言并缓存
-    translate_parser = subparsers.add_parser(
-        "translate", help="translate a book into the configured target language",
-    )
-    # 位置参数 book_id：要翻译的书
-    translate_parser.add_argument("book_id", help="id of the book to translate")
-
-    # werd vocab：默认分页列出笔记本
-    vocab_parser = subparsers.add_parser(
-        "vocab", help="manage the vocabulary notebook",
-    )
-    # --review：复习模式，先只给单词、按回车才揭晓释义
-    vocab_parser.add_argument(
-        "--review",
-        action="store_true",
-        help="shuffle the words and hide each meaning until you ask for it",
-    )
-    # --export：目前只支持导出成 anki 格式
-    vocab_parser.add_argument(
-        "--export",
-        choices=("anki",),
-        metavar="FORMAT",
-        help="export the notebook (only 'anki' for now)",
-    )
-    # --search：按拼写、释义或例句找词
-    vocab_parser.add_argument(
-        "--search",
-        metavar="KEYWORD",
-        help="find words by spelling, meaning or context",
-    )
-    # --remove：从笔记本里删掉某个词
-    vocab_parser.add_argument(
-        "--remove",
-        metavar="WORD",
-        help="delete a word from the notebook",
-    )
-    # --page：列表模式看第几页，默认第 1 页
-    vocab_parser.add_argument(
-        "--page",
-        type=int,
-        default=1,
-        help="page to show when listing (default 1)",
-    )
-    # --per-page：列表模式每页显示多少个词，默认 20
-    vocab_parser.add_argument(
-        "--per-page",
-        type=int,
-        default=20,
-        help="words per page when listing (default 20)",
-    )
-
     # werd stats [--json]：阅读统计（时长、热力图等）
     stats_parser = subparsers.add_parser("stats", help="show reading statistics")
     # --json：输出机器可读的原始数据，而不是彩色表格
@@ -257,23 +200,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--rebuild",
         action="store_true",
         help="re-parse the book text and rewrite the cache",
-    )
-
-    # werd notes [book_id]：看笔记清单，或翻看某一本的笔记
-    notes_parser = subparsers.add_parser(
-        "notes", help="list your notes, or page through one book's notes",
-    )
-    # 位置参数 book_id 可省略：不给就是"列出所有有笔记的书"
-    notes_parser.add_argument(
-        "book_id",
-        nargs="?",
-        help="id of the book to page through (omit it to list every book)",
-    )
-    # --export：把这本书的笔记导出成 markdown
-    notes_parser.add_argument(
-        "--export",
-        action="store_true",
-        help="export this book's notes to ~/books (needs a book id)",
     )
 
     # werd werd / werd word：名字彩蛋（两个写法都留着，反正就是同一个玩笑）
@@ -476,154 +402,12 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prompt_line(prompt: str, default: str = "") -> str:
-    """Ask for one line on stdin; an empty answer keeps *default*.
-
-    Kept as a module level function so the tests can replace the input source
-    (exactly like ``reader._prompt`` does for the reader).
-    """
-    # 提示里带上默认值，直接回车就用它
-    suffix = " [{}]".format(default) if default else ""
-    try:
-        answer = input("{}{}: ".format(prompt, suffix))
-    except EOFError:
-        # 没有输入了（管道 / CI）：当作"保持默认"
-        return default
-    # 去掉首尾空白；空输入就是"用默认"
-    return answer.strip() or default
-
-
-def _is_secret_credential(key: str) -> bool:
-    """Whether *key* holds something that must not be echoed back."""
-    # 密钥类字段一律不回显（APPID / 地域 / 模型名这些不算）
-    return "secret" in key or key.endswith("key")
-
-
-def _choose_translate_engine(current: str) -> Optional[str]:
-    """Print the engine menu and return the pick, or ``None`` to cancel."""
-    # 延迟导入：只有这条命令需要引擎清单
-    from . import translate
-
-    names = translate.engine_names()
-    console.print("[bold]选择翻译引擎[/bold]（直接回车保留当前）")
-    for index, name in enumerate(names, start=1):
-        # 当前引擎打个标记，重复配置时一眼看清现状
-        mark = "[green]●[/green]" if name == current else " "
-        console.print(
-            "  {}. {} {}".format(index, mark, translate.ENGINE_LABELS.get(name, name))
-        )
-    # 默认值就是当前引擎（无效时退回列表第一个）
-    default_name = current if current in names else names[0]
-    answer = _prompt_line("序号或引擎名", default_name).strip().lower()
-    # 数字按序号取；越界当作取消
-    if answer.isdigit():
-        index = int(answer)
-        return names[index - 1] if 1 <= index <= len(names) else None
-    # 其它：必须是已知引擎名，否则当作取消
-    return answer if answer in names else None
-
-
-def _ask_engine_credentials(
-    engine: str, current_values: Mapping[str, Any]
-) -> Dict[str, str]:
-    """Prompt for every credential *engine* reads.
-
-    *current_values* is a ``{"translate.key": value}`` view of the settings: it
-    pre-fills the non-secret fields and, for a secret that is already stored, it
-    only says "已设置" instead of echoing the key back into the terminal.
-    """
-    # 延迟导入：同上
-    from . import translate
-
-    values: Dict[str, str] = {}
-    for key in translate.credential_keys(engine):
-        # 提示语直接复用 settings.toml 的行尾注释（单一事实来源）
-        path = "translate.{}".format(key)
-        label = config.COMMENTS.get(path) or key
-        # 已有值：非密钥字段当默认值预填，密钥字段只说"已设置"
-        existing = str(current_values.get(path) or "")
-        default = ""
-        if existing and _is_secret_credential(key):
-            label = "{}（已设置，留空保留）".format(label)
-        elif existing:
-            default = existing
-        answer = _prompt_line(label, default)
-        # 留空 = 保留原值：密钥字段的提示语就是这么承诺的（对非密钥字段 default 已经是原值）
-        values[key] = answer if answer else existing
-    return values
-
-
-def _save_translate_settings(engine: str, values: Mapping[str, str]) -> None:
-    """Write the engine choice and its credentials into ``settings.toml``."""
-    # 重新加载一次，避免把调用方已经改过的其它设置覆盖掉
-    settings = config.load_config()
-    # 引擎名本身也是一项配置
-    settings.set("translate.engine", engine)
-    for key, value in values.items():
-        # 空值也照写：等于把之前配错的密钥清掉
-        settings.set("translate.{}".format(key), value)
-    settings.save()
-
-
-def cmd_config_translate() -> int:
-    """Run the interactive ``werd config translate`` wizard.
-
-    The engine registry lives in :mod:`wreader.translate`, so this only has to ask
-    two things -- *which* engine and *which* credentials -- and the credential list
-    comes from the engine itself, so adding a provider needs no change here.
-    """
-    # 延迟导入：只有跑这条命令时才需要引擎清单
-    from . import translate
-
-    settings = config.load_config()
-    # 当前生效的引擎（engine 为空时回退到旧的 translator.backend）
-    current = str(
-        settings.get("translate.engine")
-        or settings.get("translator.backend")
-        or translate.DEFAULT_ENGINE
-    )
-    # settings.flat() 带着默认值，所以 tencent_region 这种也能预填出来
-    current_values = {
-        path: value
-        for path, value in settings.flat().items()
-        if path.startswith("translate.")
-    }
-
-    engine = _choose_translate_engine(current)
-    if engine is None:
-        console.print("[yellow]已取消，设置没有改动[/yellow]")
-        return 1
-
-    console.print()
-    console.print(
-        "[bold]{} 的密钥[/bold]".format(translate.ENGINE_LABELS.get(engine, engine))
-    )
-    values = _ask_engine_credentials(engine, current_values)
-    _save_translate_settings(engine, values)
-
-    console.print()
-    console.print("已保存：[green]{}[/green]".format(engine))
-    console.print("[dim]file: {}[/dim]".format(settings.path))
-    # 立刻自查一遍：缺什么当场说清楚，别等按了 t 才发现
-    from . import translator
-
-    ready, reason = translator.engine_ready(translator.load_settings())
-    if ready:
-        console.print("[green]引擎已就绪[/green] —— 在阅读器里按 t 即可翻译当前屏幕")
-    else:
-        console.print("[yellow]还差一点：{}[/yellow]".format(reason))
-    console.print("[dim]想换引擎时再跑一次 werd config translate 即可[/dim]")
-    return 0
-
-
 def cmd_config(args: argparse.Namespace) -> int:
     """Handle ``werd config [section.key] [value]`` -- view or edit ``settings.toml``.
 
     Keys are dotted paths (``reader.page_height``).  The flat names of the old
     ``config.json`` still resolve, and anything unknown is refused with a
-    suggestion rather than written into the file.  The one special case is
-    ``werd config translate``, which starts the interactive engine wizard instead
-    of touching a single key.
+    suggestion rather than written into the file.
     """
     # 先把当前配置加载出来（不存在就用默认值）
     settings = config.load_config()
@@ -640,14 +424,6 @@ def cmd_config(args: argparse.Namespace) -> int:
         console.print("settings reset to defaults")
         console.print("[dim]file: {}[/dim]".format(settings.path))
         return 0
-
-    # werd config translate：交互式配置翻译引擎（带 value 时才不是向导）
-    if args.key == "translate":
-        if args.value is not None:
-            return _fail(
-                "werd config translate 是交互式的：直接运行 werd config translate"
-            )
-        return cmd_config_translate()
 
     # 没给 key：就是想看全部设置
     if args.key is None:
@@ -751,22 +527,6 @@ def cmd_toc(args: argparse.Namespace) -> int:
     return 0
 
 
-def _count_translations(count: int) -> List[Dict[str, Any]]:
-    """Record *count* translation uses and return the achievements they unlocked."""
-    try:
-        # 统计写在书库索引文件里，先读出来
-        document = library.load_library()
-        # 把翻译次数累加上去
-        stats.bump_translations(document, count)
-        # 再写回磁盘
-        library.save_library(document)
-    except library.LibraryError:
-        # 索引坏了也没关系：章节缓存已经落盘，计数下次再补
-        return []  # the chapters are cached either way; the counter can wait
-    # 计数更新后让成就引擎重算一次（"双语者"就是看 translations 指标）
-    return _record_achievements("check")
-
-
 def _report_unlocked(newly: Sequence[Dict[str, Any]]) -> None:
     """Name the achievements that just unlocked -- a line, not a fanfare."""
     # 没有新成就不用打印任何东西
@@ -779,266 +539,6 @@ def _report_unlocked(newly: Sequence[Dict[str, Any]]) -> None:
             "、".join(str(entry.get("name") or entry.get("id")) for entry in newly),
         )
     )
-
-
-def cmd_translate(args: argparse.Namespace) -> int:
-    """Handle ``werd translate <book_id>`` -- translate every chapter of a book.
-
-    Chapters already in the cache are skipped, so re-running the command after an
-    interruption simply carries on where it stopped.
-    """
-    # 延迟导入 translator：它依赖网络/后端配置，不用的时候不想加载
-    from . import translator
-
-    try:
-        # 读取翻译相关的设置（后端、目标语言、批大小等）
-        settings = translator.load_settings()
-        # 按 id 找书
-        book = library.get_book(args.book_id)
-        # 查不到就报错退出
-        if book is None:
-            return _fail("unknown book id: {}".format(args.book_id))
-        # 数一数这本书有多少章，用来初始化进度条
-        chapters = translator.chapter_count(book)
-    except translator.TranslationError as exc:
-        # 设置或书籍有问题，统一转成友好错误
-        return _fail(str(exc))
-
-    # 先打印一行摘要，让用户知道在用什么后端、要翻多少章
-    console.print(
-        "translating [bold]{}[/bold] · {} chapter(s) · backend [cyan]{}[/cyan] · "
-        "batch {} chars".format(
-            book.get("title") or args.book_id,
-            chapters,
-            settings.backend,
-            settings.batch_size,
-        )
-    )
-
-    # 翻译结果汇总；失败时保持 None，靠 failure 传错误信息
-    summary: Optional[Dict[str, Any]] = None
-    failure = ""
-    # with 块负责起停进度条渲染
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-    ) as progress:
-        # 注册一个叫 chapters 的任务，总数是章节数
-        task = progress.add_task("chapters", total=chapters)
-
-        def report(done: int, total: int) -> None:
-            # 回调：translator 每完成一章就调一次，用来刷新进度条
-            progress.update(task, completed=done, total=total)
-
-        try:
-            # 真正的翻译循环；进度通过 report 回调回传
-            summary = translator.translate_book(
-                args.book_id, progress=report, settings=settings
-            )
-        except translator.TranslationError as exc:
-            # 整个翻译过程级别的错误（比如后端不可用）
-            failure = str(exc)
-
-    # 有全局错误就直接失败
-    if failure:
-        return _fail(failure)
-    # 理论上 translate_book 一定返回，这里只是兜底
-    if summary is None:  # pragma: no cover - translate_book always returns
-        return _fail("translation produced no result")
-
-    # 打印统计：成功、跳过（已缓存）、失败各多少章
-    console.print(
-        "translated [green]{}[/green], skipped [yellow]{}[/yellow] (already cached), "
-        "[red]{}[/red] failed".format(
-            len(summary["translated"]), len(summary["skipped"]), len(summary["failed"])
-        )
-    )
-    # 失败章节逐条列出原因（索引是 0 开始的，展示时 +1）
-    for index, reason in summary["failed"]:
-        err_console.print("  [red]![/red] chapter {}: {}".format(index + 1, reason))
-    # 告诉用户译文缓存放在哪，方便手动清理
-    console.print("[dim]cache: {}[/dim]".format(translator.book_cache_dir(args.book_id, settings)))
-    # 只要真的翻了内容，就更新翻译次数统计并检查成就
-    if summary["translated"]:
-        _report_unlocked(_count_translations(len(summary["translated"])))
-    # 有失败章节就返回 1，全成功返回 0
-    return 1 if summary["failed"] else 0
-
-
-def _vocab_table(title: str, entries: Sequence[Dict[str, Any]]) -> Table:
-    """Build the table shared by the vocabulary listings."""
-    # 五列：序号、单词、释义、来源书名、加入日期
-    table = Table(title=title, title_justify="left")
-    table.add_column("#", justify="right", style="dim")
-    table.add_column("word", style="bold cyan")
-    table.add_column("translation")
-    table.add_column("book", style="dim")
-    table.add_column("added", style="dim")
-    # 从 1 开始编号
-    for position, entry in enumerate(entries, start=1):
-        # 所有字段都兜成空串，避免表格里出现 "None"
-        table.add_row(
-            str(position),
-            str(entry.get("word") or ""),
-            str(entry.get("translation") or ""),
-            str(entry.get("book") or ""),
-            # 只取日期部分，ISO 字符串前 10 位就是 YYYY-MM-DD
-            str(entry.get("date_added") or "")[:10],
-        )
-    return table
-
-
-def _vocab_list(args: argparse.Namespace, vocab: Any) -> int:
-    """List the notebook a page at a time, newest first."""
-    # 取出全部生词（list_words 默认最新在前）
-    words = vocab.list_words()
-    # 空笔记本：提示用阅读器里的 v 键做标记
-    if not words:
-        console.print(
-            "the vocabulary notebook is empty -- mark words with "
-            "[bold]v[/bold] while reading"
-        )
-        return 0
-    # 按 --page/--per-page 切片，拿回「本页数据、总页数、实际页码」
-    page_items, pages, current = vocab.paginate(words, args.page, args.per_page)
-    # 标题里带上总数和页码信息
-    console.print(
-        _vocab_table(
-            "vocabulary · {} word(s) · page {}/{}".format(len(words), current, pages),
-            page_items,
-        )
-    )
-    # 多页时提示怎么翻页
-    if pages > 1:
-        console.print(
-            "[dim]use --page N to turn the page ({} per page)[/dim]".format(args.per_page)
-        )
-    return 0
-
-
-def _vocab_search(args: argparse.Namespace, vocab: Any) -> int:
-    """Find words by spelling, meaning or context."""
-    # 关键词会同时匹配单词、释义、例句三处
-    hits = vocab.search_words(args.search)
-    # 没命中按惯例返回 1
-    if not hits:
-        console.print(
-            "nothing in the notebook matches [bold]{}[/bold]".format(args.search)
-        )
-        return 1
-    # 命中结果不分页，一次全列出来
-    console.print(
-        _vocab_table("{} match(es) for '{}'".format(len(hits), args.search), hits)
-    )
-    return 0
-
-
-def _vocab_export(args: argparse.Namespace, vocab: Any) -> int:
-    """Print the notebook in Anki's tab separated import format.
-
-    Written with plain ``sys.stdout`` rather than rich so the tabs survive being
-    redirected into a file: ``werd vocab --export anki > deck.txt``.
-    """
-    # 导出的是全部生词，不分页
-    words = vocab.list_words()
-    # 空笔记本没什么可导的，提示写在 stderr（不污染导出的数据流）
-    if not words:
-        err_console.print("[yellow]the vocabulary notebook is empty[/yellow]")
-        return 0
-    # 用裸 sys.stdout 写，避免 rich 把制表符渲染成空格或自动折行
-    sys.stdout.write(vocab.export_anki(words))
-    # 立刻刷新缓冲区，保证重定向到文件时数据及时落盘
-    sys.stdout.flush()
-    # 统计信息写到 stderr，这样 `> deck.txt` 里只有干净的数据
-    err_console.print("[dim]exported {} word(s) as Anki tsv[/dim]".format(len(words)))
-    return 0
-
-
-def _vocab_remove(args: argparse.Namespace, vocab: Any) -> int:
-    """Delete one word from the notebook."""
-    # remove_word 返回被删掉的那条；没找到会返回 None
-    removed = vocab.remove_word(args.remove)
-    if removed is None:
-        return _fail("not in the notebook: {}".format(args.remove))
-    # 告诉用户删掉的是哪个词（用记录里规范化的拼写，而不是用户输入的）
-    console.print("removed [bold]{}[/bold]".format(removed["word"]))
-    return 0
-
-
-def _vocab_review(vocab: Any) -> int:
-    """Shuffle the words and hide each meaning until the reader asks for it."""
-    # 打乱顺序，避免每次复习都按同样的次序背
-    entries = vocab.review_order()
-    # 空笔记本没什么可复习的
-    if not entries:
-        console.print("the vocabulary notebook is empty")
-        return 0
-    # 总数用于显示 x/y 进度
-    total = len(entries)
-    # 非交互环境（比如输出被管道接走）没法等回车，改成直接全部列出来
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        console.print("[dim]not a terminal: printing every word with its meaning[/dim]")
-        for position, entry in enumerate(entries, start=1):
-            console.print(
-                "{:>3}/{:<3} [bold cyan]{}[/bold cyan]  {}".format(
-                    position, total, entry["word"], entry["translation"]
-                )
-            )
-        return 0
-
-    # 交互模式：一行操作提示
-    console.print("[dim]review: recall the meaning, press Enter to check, q to stop[/dim]")
-    for position, entry in enumerate(entries, start=1):
-        # 只露单词，先不给释义；用户先自己回忆
-        console.print(
-            "\n[dim]{}/{})[/dim] [bold cyan]{}[/bold cyan]".format(
-                position, total, entry["word"]
-            )
-        )
-        try:
-            # 等用户按回车（或输入 q）再揭晓答案
-            answer = input()
-        except (EOFError, KeyboardInterrupt):
-            # Ctrl-D / Ctrl-C 都视为"提前结束"，礼貌地换行退出
-            console.print()
-            break
-        # 输入 q/quit/exit 就结束本次复习
-        if answer.strip().lower() in ("q", "quit", "exit"):
-            break
-        # 揭晓释义（没有释义时给个占位提示）
-        console.print("    [green]{}[/green]".format(entry["translation"] or "(no meaning)"))
-        # 有例句就一并显示，帮助回忆语境
-        if entry["context"]:
-            console.print("    [dim]{}[/dim]".format(entry["context"]))
-    return 0
-
-
-def cmd_vocab(args: argparse.Namespace) -> int:
-    """Handle ``werd vocab`` -- list, review, export, search or remove words.
-
-    With no flags the notebook is listed a page at a time, newest first.
-    """
-    # 延迟导入：只有真的用到 vocab 命令时才加载
-    from . import vocab
-
-    try:
-        # 五个分支按"互斥的旗标"从上往下判断，谁先命中就走谁
-        if args.export:
-            return _vocab_export(args, vocab)
-        if args.search:
-            return _vocab_search(args, vocab)
-        if args.remove:
-            return _vocab_remove(args, vocab)
-        if args.review:
-            return _vocab_review(vocab)
-        # 什么旗标都没给：默认分页列出笔记本
-        return _vocab_list(args, vocab)
-    except vocab.VocabError as exc:
-        # 笔记本损坏等情况统一转成友好错误
-        return _fail(str(exc))
 
 
 # 这几个指标本身是"秒"，展示时要换算成小时/分钟
@@ -1110,177 +610,6 @@ def _heatmap_text(report: Dict[str, Any]) -> str:
     )
 
 
-# --------------------------------------------------------------------------- #
-# Notes (`werd notes`).
-# --------------------------------------------------------------------------- #
-#: Where ``werd notes <id> --export`` drops the markdown (a directory -- the file
-#: name inside it is ``notes_<book_id>.md``).
-# --export 默认落在哪：~/books，文件名由 notes.export_notes 补成 notes_<id>.md
-DEFAULT_NOTES_EXPORT_DIR = "~/books"
-# 翻看笔记时引用前面那个符号（与阅读器引用区一致）
-_NOTE_QUOTE_PREFIX = "> "
-
-
-def _read_one_key() -> str:
-    """Read a single keypress without waiting for Enter.
-
-    A pipe gets an empty string (nothing to wait for), and a terminal without
-    ``termios`` (Windows) falls back to a line of input -- so the pager below
-    always terminates instead of hanging.
-    """
-    # 非交互（管道 / 测试里的 capsys）：没有按键可等
-    if not sys.stdin.isatty():
-        return ""
-    try:
-        # 局部导入：Windows 上这两个模块不存在
-        import termios
-        import tty
-    except ImportError:  # pragma: no cover - 只有 Windows 会走到
-        try:
-            # 退化成"按回车继续"
-            return input()
-        except (EOFError, KeyboardInterrupt):
-            return "q"
-    # 单字符原始模式：按空格立刻返回，不必再敲回车
-    descriptor = sys.stdin.fileno()
-    saved = termios.tcgetattr(descriptor)
-    try:
-        tty.setraw(descriptor)
-        return sys.stdin.read(1)
-    except (OSError, KeyboardInterrupt):  # pragma: no cover - 终端消失等少见情况
-        return "q"
-    finally:
-        # 无论怎么退出都把终端属性还原回去
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
-
-
-def _paging_is_interactive() -> bool:
-    """Whether ``werd notes <id>`` should wait for keypresses.
-
-    Both ends must be a terminal: stdout being redirected (``| less``, a CI log)
-    means paging has nobody to page to -- and waiting there would hang the caller
-    forever.  Same rule as the reader's tty check.
-    """
-    # 输入输出都是终端才算"有人在按键"
-    return bool(sys.stdin.isatty() and sys.stdout.isatty())
-
-
-def _notes_table() -> int:
-    """Print every book that has notes, newest first."""
-    try:
-        entries = notes.list_all_notes()
-    except notes.NotesError as exc:
-        return _fail(str(exc))
-    # 一条笔记都没有：给一句引导，不是错误
-    if not entries:
-        console.print("[dim]还没有笔记：阅读时按 m 标记、y 复制，再按 o 打开面板写[/dim]")
-        return 0
-    # 按最后修改时间倒序（ISO 字符串的字典序就是时间序）
-    rows = sorted(
-        entries.items(),
-        key=lambda item: str(item[1].get("last_modified") or ""),
-        reverse=True,
-    )
-    table = Table(title="笔记", title_justify="left")
-    table.add_column("book", style="bold")
-    table.add_column("id", style="cyan", no_wrap=True)
-    table.add_column("条数", justify="right")
-    table.add_column("最后修改", style="dim")
-    for book_id, entry in rows:
-        table.add_row(
-            str(entry.get("title") or book_id),
-            book_id,
-            str(entry.get("count") or 0),
-            str(entry.get("last_modified") or ""),
-        )
-    console.print(table)
-    # 预览单独列在表格下面：塞进表格会被挤没
-    for book_id, entry in rows:
-        if entry.get("preview"):
-            console.print("[dim]{} · {}[/dim]".format(book_id, entry["preview"]))
-    return 0
-
-
-def _page_notes(book_id: str, stored: Sequence[Dict[str, Any]]) -> int:
-    """Show one book's notes one screen at a time (space = next, q = stop)."""
-    total = len(stored)
-    console.print(
-        "[dim]{} · {} 条笔记 · 空格看下一条，q 退出[/dim]".format(book_id, total)
-    )
-    for position, note in enumerate(stored, start=1):
-        # 每一条前面画一条分隔线（规格里的 --- 分隔）
-        console.print("---")
-        # 标题行带上章节（笔记里记了的话），一眼看出这段话出自哪里
-        chapter = str(note.get("chapter") or "").strip()
-        console.print(
-            "[bold]#{} {}{}[/bold]".format(
-                note.get("index"),
-                note.get("time") or "",
-                " · {}".format(chapter) if chapter else "",
-            )
-        )
-        # 引用与译文都按灰字显示（都是"别人的话"），自己的想法正常显示
-        if note.get("quote"):
-            console.print("[dim]{}{}[/dim]".format(_NOTE_QUOTE_PREFIX, note["quote"]))
-        if note.get("translation"):
-            console.print("[dim]译文：{}[/dim]".format(note["translation"]))
-        if note.get("content"):
-            console.print(str(note["content"]))
-        # 最后一条不用等按键
-        if position >= total:
-            break
-        # 管道 / CI：不等按键，把余下的都打出来
-        if not _paging_is_interactive():
-            continue
-        # 空格（或回车）看下一条；q / Ctrl-C / Esc 退出
-        choice = _read_one_key()
-        if choice and choice.lower() in ("q", "\x03", "\x1b"):
-            console.print()
-            return 0
-    return 0
-
-
-def cmd_notes(args: argparse.Namespace) -> int:
-    """Handle ``werd notes [book_id] [--export]``.
-
-    Without a book id it lists every book that has notes (a derived index, see
-    :mod:`wreader.notes`).  With one it pages through that book's notes, and
-    ``--export`` copies the markdown out to ``~/books`` so it can be shared.
-    """
-    # 位置参数可以省略
-    book_id = getattr(args, "book_id", None)
-    if getattr(args, "export", False):
-        # 导出必须说明是哪本书
-        if not book_id:
-            return _fail("--export needs a book id: werd notes <book_id> --export")
-        # 目标写成完整的文件名：目录还不存在时 export_notes 会先建目录，
-        # 否则（把 ~/books 当成文件）会导出一个名叫 books 的文件
-        target = Path(DEFAULT_NOTES_EXPORT_DIR).expanduser() / notes.EXPORT_TEMPLATE.format(
-            book_id
-        )
-        try:
-            written = notes.export_notes(book_id, target)
-        except notes.NotesError as exc:
-            return _fail(str(exc))
-        console.print("已导出到 [bold]{}[/bold]".format(written))
-        return 0
-    # 没给 id：列清单
-    if not book_id:
-        return _notes_table()
-    try:
-        stored = notes.load_notes(book_id)
-    except notes.NotesError as exc:
-        return _fail(str(exc))
-    # 这本书还没写过笔记
-    if not stored:
-        console.print(
-            "[dim]{} 还没有笔记：阅读时按 m 标记、y 复制，再按 o 打开面板写[/dim]".format(
-                book_id
-            )
-        )
-        return 0
-    return _page_notes(book_id, stored)
-
 
 def cmd_stats(args: argparse.Namespace) -> int:
     """Handle ``werd stats`` -- reading time totals plus a 30 day heatmap grid.
@@ -1327,16 +656,13 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 " [green]✓[/green]" if report["goal_met"] else "",
             )
         )
-    # 连续天数、读完本数、生词数、翻译次数
+    # 连续天数、读完本数
     console.print(
-        "连续 [bold]{}[/bold] 天（每天 ≥{} 分钟） · 读完 [bold]{}[/bold] 本 · "
-        "生词 [bold]{}[/bold] 个 · 用过翻译 [bold]{}[/bold] 次".format(
+        "连续 [bold]{}[/bold] 天（每天 ≥{} 分钟） · 读完 [bold]{}[/bold] 本".format(
             report["streak_days"],
             # 秒换算成分钟展示
             report["streak_min_seconds"] // 60,
             report["finished_books"],
-            report["vocab_count"],
-            report["translations"],
         )
     )
 
@@ -1367,12 +693,12 @@ def cmd_achievements(args: argparse.Namespace) -> int:
 
     The unlock state lives in ``<data dir>/achievements.json`` (see
     :mod:`wreader.achievements`).  Running the command also re-checks everything,
-    so progress earned outside the reader (through ``werd translate``, say) still
-    gets a timestamp instead of waiting for the next book to be closed.  That is
-    idempotent, and a secret achievement keeps its name to itself until it fires.
+    so progress earned outside the reader still gets a timestamp instead of
+    waiting for the next book to be closed.  That is idempotent, and a secret
+    achievement keeps its name to itself until it fires.
     """
     try:
-        # 顺手补记一次（幂等）：把书库/生词本那边的进度也结算成解锁；同时数一次
+        # 顺手补记一次（幂等）：把书库那边的进度也结算成解锁；同时数一次
         # "翻开了成就页"，"成就猎人"就是靠它（超过 10 次）
         _record_achievements("achievements_view")
         # 读出全部成就：名字、描述、分类、进度、是否隐藏、解锁时间
@@ -1463,13 +789,10 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "search": cmd_search,
     "read": cmd_read,
     "continue": cmd_continue,
-    "translate": cmd_translate,
-    "vocab": cmd_vocab,
     "stats": cmd_stats,
     "achievements": cmd_achievements,
     "config": cmd_config,
     "toc": cmd_toc,
-    "notes": cmd_notes,
     "werd": cmd_werd,
     "word": cmd_word,
 }

@@ -215,5 +215,5 @@ say "  1. 导入你的书     $HINT import ~/Downloads/books"
 say "  2. 看看书库       $HINT list"
 say "  3. 接着上次读     $HINT continue   ${DIM}→ 把 id 抄给${RESET} $HINT read <id>"
 say ""
-say "${DIM}进度、生词本、统计都存在 ~/.wreader，和 .venv 无关，重装不会丢。${RESET}"
+say "${DIM}进度、统计、成就都存在 ~/.wreader，和 .venv 无关，重装不会丢。${RESET}"
 

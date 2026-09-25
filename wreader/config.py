@@ -9,26 +9,18 @@ Everything wreader can be told to do differently lives in one TOML document,
     status_bar_format = "time|chapter|duration"
     auto_save_interval = 60       # 自动保存进度间隔（秒），0 = 关闭
 
-    [translator]
-    backend = "google"            # google | deepseek
-    batch_size = 3000             # 每次请求的字符数上限
-    cache_dir = "~/.wreader/cache"     # 译文缓存目录
-    deepseek_api_key = ""         # 或读环境变量 DEEPSEEK_API_KEY
-    auto_translate_chapter = false  # 是否自动翻译新章节
-
     [stats]
     daily_goal_minutes = 60       # 每日阅读目标（分钟），0 = 关闭
     show_heatmap = true           # werd stats 里显示热力图
 
-    [vocab]
-    highlight_in_reader = true    # 阅读器中高亮生词
-    auto_add_on_mark = true       # 标记后自动加入生词本
+    [toc]
+    cache_dir = "~/.wreader/cache"     # 派生缓存目录
 
 Keys are addressed by their dotted path::
 
     settings = config.load_config()
     settings.get("reader.page_height")              # 24
-    settings.set("translator.backend", "deepseek")
+    settings.set("reader.page_height", 30)
     settings.save()
 
 or, in one line each, through the module helpers::
@@ -38,7 +30,6 @@ or, in one line each, through the module helpers::
 
 The sections the specification lists come first in every table; the keys the rest
 of wreader already used (``page_height``, ``theme``, ``store_history``,
-``source_language``, ``target_language``, ``deepseek_model``, ``deepseek_url``,
 ``achievement_sound``, ``novels_dir``) follow them, and ``library.novels_dir``
 gets a section of its own.
 
@@ -46,7 +37,7 @@ Three locations matter to wreader:
 
 * the **data directory** (``~/.wreader``) holding ``settings.toml`` and ``library.json``,
 * the **novels directory** (``~/novels``) holding the UTF-8 converted texts,
-* the **cache directory** (``~/.wreader/cache``) holding the translated chapters.
+* the **cache directory** (``~/.wreader/cache``) holding derived caches.
 
 Each one is resolved as follows (first match wins):
 
@@ -54,15 +45,15 @@ Each one is resolved as follows (first match wins):
   (``%APPDATA%\\wreader`` on Windows)
 * novels directory -- ``$WREADER_NOVELS_DIR``, otherwise ``library.novels_dir``,
   otherwise ``~/novels``
-* cache directory  -- ``translator.cache_dir``, where the documented default
+* cache directory  -- ``toc.cache_dir``, where the documented default
   follows the data directory
 
 The tool was called ``nr`` before the rename, so three old names are still
 understood: the environment variables ``$NR_HOME`` / ``$NR_NOVELS_DIR`` (used
 only when the new one is unset), the data directory ``~/.nr`` (adopted once,
 see :func:`migrate_legacy_data_dir`) and the ``~/.nr/cache`` default value of
-``translator.cache_dir`` (still read as "follow the data directory" rather than
-as a literal path).
+``toc.cache_dir`` (still read as "follow the data directory" rather than as a
+literal path).
 
 The flat ``config.json`` older versions wrote is folded into the matching
 sections the first time the settings are loaded, and then renamed to
@@ -150,7 +141,7 @@ SETTINGS_FILENAME = "settings.toml"
 LEGACY_CONFIG_FILENAME = "config.json"
 # 书库索引文件名
 LIBRARY_FILENAME = "library.json"
-# 译文缓存目录的目录名（放在数据目录下面）
+# 派生缓存目录的目录名（放在数据目录下面）
 CACHE_DIRNAME = "cache"
 
 # 数据目录的目录名：POSIX 下是 ~/.wreader，Windows 下是 %APPDATA%\wreader
@@ -163,9 +154,9 @@ DATA_DIRNAME = ".wreader"
 LEGACY_APP_NAME = "nr"
 LEGACY_DATA_DIRNAME = ".nr"
 
-# translator.cache_dir 的"字面默认值"；写进文件的是这个字符串，
+# toc.cache_dir 的"字面默认值"；写进文件的是这个字符串，
 # 但解析时会理解成"跟随数据目录"，这样 $WREADER_HOME 依然生效
-#: The documented default of ``translator.cache_dir``.  It is written to the file
+#: The documented default of ``toc.cache_dir``.  It is written to the file
 #: as ``~/.wreader/cache`` but resolved beside the data directory, so ``$WREADER_HOME`` keeps
 #: working and a test run never writes into the real home directory.
 DEFAULT_CACHE_DIR = "~/.wreader/cache"
@@ -203,32 +194,6 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         ("theme", "default", "配色主题名（预留）"),
         ("store_history", True, "退出时把本次会话时长记入统计"),
     ),
-    # 翻译后端相关
-    "translator": (
-        ("backend", "google", "google | deepseek"),
-        ("batch_size", 3000, "每次请求的字符数上限"),
-        ("cache_dir", DEFAULT_CACHE_DIR, "译文缓存目录，默认跟随数据目录"),
-        ("deepseek_api_key", "", "或读环境变量 DEEPSEEK_API_KEY"),
-        ("auto_translate_chapter", False, "是否自动翻译新章节"),
-        ("source_language", "auto", "原文语言，auto = 自动识别"),
-        ("target_language", "zh-CN", "译文语言"),
-        ("deepseek_model", "deepseek-chat", "DeepSeek 模型名"),
-        ("deepseek_url", "https://api.deepseek.com/v1/chat/completions", "接口地址"),
-    ),
-    # 可插拔翻译引擎的选择与密钥（详见 wreader/translate/）
-    "translate": (
-        ("engine", "", "google | baidu | youdao | tencent | deepseek | local，空 = 沿用 translator.backend"),
-        ("baidu_appid", "", "百度翻译 APPID"),
-        ("baidu_secret", "", "百度翻译密钥（MD5 签名用）"),
-        ("youdao_appid", "", "有道智云应用 ID"),
-        ("youdao_secret", "", "有道智云应用密钥"),
-        ("tencent_secret_id", "", "腾讯云 SecretId"),
-        ("tencent_secret_key", "", "腾讯云 SecretKey"),
-        ("tencent_region", "ap-beijing", "腾讯云地域（参与签名）"),
-        ("deepseek_api_key", "", "DeepSeek API key，或读环境变量 DEEPSEEK_API_KEY"),
-        ("deepseek_model", "deepseek-chat", "DeepSeek 模型名"),
-        ("deepseek_url", "https://api.deepseek.com/v1/chat/completions", "DeepSeek 接口地址"),
-    ),
     # 统计与成就相关
     "stats": (
         ("daily_goal_minutes", 60, "每日阅读目标（分钟），0 = 关闭"),
@@ -236,18 +201,14 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         ("achievement_sound", True, "解锁成就时响铃（\\a）"),
         ("geo_lookup", True, "联网查所在位置用于地理成就；关掉 = 完全离线"),
     ),
-    # 生词本相关
-    "vocab": (
-        ("highlight_in_reader", True, "阅读器中高亮生词"),
-        ("auto_add_on_mark", True, "标记后自动加入生词本"),
-    ),
     # 书库位置相关
     "library": (
         ("novels_dir", None, "留空 = ~/novels"),
     ),
-    # 目录（章节表）相关
+    # 目录（章节表）与派生缓存相关
     "toc": (
         ("patterns", "", "追加的章节标题正则，多个用 | 分隔"),
+        ("cache_dir", DEFAULT_CACHE_DIR, "派生缓存目录，默认跟随数据目录"),
     ),
 }
 
@@ -281,11 +242,8 @@ LEGACY_PATHS: Dict[str, str] = {
     "library_path": "library.novels_dir",
     "novels_dir": "library.novels_dir",
     "page_height": "reader.page_height",
-    "source_language": "translator.source_language",
     "store_history": "reader.store_history",
-    "target_language": "translator.target_language",
     "theme": "reader.theme",
-    "translator": "translator.backend",
 }
 
 # 自动生成的 settings.toml 开头的说明文字
@@ -431,7 +389,7 @@ def default_novels_dir() -> Path:
 
 
 def default_cache_dir() -> Path:
-    """Return the directory used when ``translator.cache_dir`` is the default."""
+    """Return the directory used when ``toc.cache_dir`` is the default."""
     # 缓存目录默认跟随数据目录，所以 $WREADER_HOME 一改，缓存也跟着走
     return data_dir() / CACHE_DIRNAME
 
@@ -549,7 +507,7 @@ def coerce_value(path: str, value: Any) -> Any:
 
 
 def resolve_cache_dir(raw: Any) -> Path:
-    """Resolve ``translator.cache_dir``, keeping the default beside the data dir.
+    """Resolve ``toc.cache_dir``, keeping the default beside the data dir.
 
     Both the current default and the pre-rename ``~/.nr/cache`` mean "follow the
     data directory", so a settings file written before the rename keeps working
@@ -565,11 +523,11 @@ def resolve_cache_dir(raw: Any) -> Path:
 
 
 def cache_dir(settings: Optional["Config"] = None) -> Path:
-    """Return the resolved directory holding the translated chapters."""
+    """Return the resolved directory holding derived caches (chapter tables)."""
     # 没传配置就现加载一份
     settings = settings or load_config()
     # 读配置里的原始值，再解析成真实路径
-    return resolve_cache_dir(settings.get("translator.cache_dir"))
+    return resolve_cache_dir(settings.get("toc.cache_dir"))
 
 
 def _flatten(document: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
@@ -675,7 +633,7 @@ def _migrate_legacy(document: Any) -> Dict[str, Any]:
         path = LEGACY_PATHS.get(str(key))
         if path is None:
             continue
-        # 把 "translator.backend" 拆成 section="translator"、name="backend"
+        # 把 "reader.page_height" 拆成 section="reader"、name="page_height"
         section, _, name = path.partition(".")
         # setdefault 保证 section 这一层字典存在，再塞进对应的键
         migrated.setdefault(section, {})[name] = value
@@ -688,8 +646,8 @@ class Config:
 
     ``values`` holds the coerced values (defaults included) and ``stored`` the
     raw ones that came out of the file, so a caller that wants to validate a
-    value itself -- the translator checking ``backend`` -- can ask for the
-    untouched value with :meth:`stored` or :meth:`raw_section`.
+    value itself can ask for the untouched value with :meth:`stored` or
+    :meth:`raw_section`.
     """
 
     def __init__(
@@ -744,7 +702,7 @@ class Config:
                 self._values[path] = DEFAULT_FLAT[path]
 
     def get(self, path: str, default: Any = None) -> Any:
-        """Return the value of *path* (``"translator.backend"``).
+        """Return the value of *path* (``"reader.page_height"``).
 
         An unknown path raises :class:`ConfigError` so a typo is never silently
         answered with a default.
@@ -999,7 +957,7 @@ def effective_values(settings: Optional[Config] = None) -> Dict[str, Any]:
     values = settings.flat()
     # 把"目录类"设置替换成解析后的真实绝对路径，展示更直观
     values["library.novels_dir"] = str(novels_dir(settings))
-    values["translator.cache_dir"] = str(resolve_cache_dir(values["translator.cache_dir"]))
+    values["toc.cache_dir"] = str(resolve_cache_dir(values["toc.cache_dir"]))
     return values
 
 

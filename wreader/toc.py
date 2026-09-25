@@ -60,7 +60,7 @@ TOC_CACHE_SUFFIX = "_toc.json"
 
 def toc_cache_path(book_id: str, settings: Optional[config.Config] = None) -> Path:
     """Return the path of one book's table-of-contents cache."""
-    # 缓存根目录下按 "<book_id>_toc.json" 命名；与 translator 的 <book_id>/ 子目录不冲突
+    # 缓存根目录下按 "<book_id>_toc.json" 命名；缓存目录由 toc.cache_dir 决定
     return config.cache_dir(settings) / "{}{}".format(book_id, TOC_CACHE_SUFFIX)
 
 

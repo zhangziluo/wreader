@@ -9,12 +9,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wreader"
 version = "0.1.0"
-description = "A terminal novel reader with translation, vocabulary notebook, reading statistics and achievements."
+description = "A terminal novel reader with reading statistics and achievements."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-keywords = ["reader", "novel", "epub", "txt", "terminal", "translation"]
+keywords = ["reader", "novel", "epub", "txt", "terminal"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Environment :: Console :: Curses",
@@ -28,18 +28,12 @@ classifiers = [
 dependencies = [
     "chardet",
     "rich",
-    # The default translation engine (`google`) is built on this, so removing it
-    # would break translation out of the box -- it stays a required dependency.
-    # `requests` carries the four HTTP engines (baidu / youdao / tencent / deepseek).
-    "deep-translator",
+    # `requests` carries the one networked feature left: the optional geo lookup
+    # behind the geography achievements (`stats.geo_lookup`).
     "requests",
 ]
 
 [project.optional-dependencies]
-# Optional translation engines. `local` (Argos Translate) is the only heavy one --
-# its language models are hundreds of megabytes -- so it is opt-in:
-#   pip install -e ".[local]"
-local = ["argostranslate"]
 windows = ["windows-curses"]
 dev = ["pytest>=8"]
 

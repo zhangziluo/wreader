@@ -3,7 +3,7 @@
 
 真实 curses 对越界写入会抛错，而阅读器把它吞掉，后果是**整行文字静默消失**（不是截断）。
 所以这里把每次 addstr 都记下来，断言 `起始列 + 文本显示宽度 <= 终端宽度`。
-覆盖 4 种正文 × 7 种宽度 × 5 种高度 × 3 种视图，顺便把双语、搜索高亮、书签、超长消息行都走到。
+覆盖 4 种正文 × 7 种宽度 × 5 种高度，顺便把搜索高亮、书签、超长消息行都走到。
 
 用法（在仓库任意目录都能跑）：python tools/verify_draw.py
 退出码：0 = 全部通过，1 = 有越界（异常里带着那组尺寸与文本，方便复现）。
@@ -59,11 +59,6 @@ class RecordingWindow:
         """假刷新：什么都不用做。"""
         pass
 
-    def move(self, row: int, column: int) -> None:
-        """移动光标（阅读器画生词下划线时会用到）。"""
-        self.cursor_row = row
-        self.cursor_column = column
-
     def addstr(self, *args: Any) -> None:
         """模拟 curses.addstr：两种调用形式都要接得住，并同步推进光标。"""
         values: list[Any] = list(args)
@@ -99,28 +94,24 @@ def main() -> int:
     for lines in BOOKS:
         for width in (10, 16, 24, 33, 40, 80, 120):
             for height in (4, 6, 12, 24, 40):
-                for mode in ("zh", "en", "both"):
-                    # 正文区高度 = 总高度 - 2：下面两行留给状态栏与消息行
-                    pager = reader.Pager(lines, chapters=[], page_height=height - 2)
-                    pager.mode = mode
-                    # 每行都塞一条译文，顺便把双语视图那条路径也走一遍
-                    pager.translations = {index: "EN:" + text for index, text in enumerate(lines)}
-                    # 触发搜索高亮，再放一条超长中文消息，压一压消息行的宽度处理
-                    pager.search("第")
-                    pager.say("这是一条很长的中文消息，用来测试消息行会不会超出屏幕宽度")
-                    window = RecordingWindow(height, width)
-                    reader._draw(window, pager, MOMENT)
+                # 正文区高度 = 总高度 - 2：下面两行留给状态栏与消息行
+                pager = reader.Pager(lines, chapters=[], page_height=height - 2)
+                # 触发搜索高亮，再放一条超长中文消息，压一压消息行的宽度处理
+                pager.search("第")
+                pager.say("这是一条很长的中文消息，用来测试消息行会不会超出屏幕宽度")
+                window = RecordingWindow(height, width)
+                reader._draw(window, pager, MOMENT)
 
-                    for row, column, text, _attr in window.writes:
-                        # 真实 curses 会拒绝写到右边界之外 —— 这条是核心断言
-                        assert column + width_of(text) <= width, (
-                            lines, width, height, mode, row, column, repr(text)
-                        )
-                        # 行号也不能出界
-                        assert row < height, (lines, width, height, mode, row)
-                    # 状态栏那两行必须有内容：历史上出现过「整行消失」的 bug
-                    assert window.row(height - 2), (lines, width, height, mode)
-                    checks += 1
+                for row, column, text, _attr in window.writes:
+                    # 真实 curses 会拒绝写到右边界之外 —— 这条是核心断言
+                    assert column + width_of(text) <= width, (
+                        lines, width, height, row, column, repr(text)
+                    )
+                    # 行号也不能出界
+                    assert row < height, (lines, width, height, row)
+                # 状态栏那两行必须有内容：历史上出现过「整行消失」的 bug
+                assert window.row(height - 2), (lines, width, height)
+                checks += 1
     print("OK: {} draw checks passed".format(checks))
     return 0
 

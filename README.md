@@ -1,10 +1,10 @@
 # wreader · 终端小说阅读器
 
-> 在终端里读 txt / epub 小说：中英双语对照、生词本、阅读统计与成就。
-> 纯 Python 命令行工具，书存在本地，进度、生词和统计都记得住。
+> 在终端里读 txt / epub 小说：自动分页、章节跳转、书签、阅读统计与成就。
+> 纯 Python 命令行工具，书存在本地，进度和统计都记得住。
 
 不用鼠标，不用装 GUI。把小说丢进一个文件夹，敲一行命令，就能在终端里一页一页往下读；
-读到不认识的词按一个键就查、顺手收进生词本；读完关掉终端，下次打开自动回到原来的位置。
+读完关掉终端，下次打开自动回到原来的位置。
 
 **第一次用？直接看 [使用指南.md](使用指南.md)** —— 从安装 Python 开始，一步一步带你读出第一页。
 
@@ -43,10 +43,6 @@
 | 🔖 章节 | 导入时自动识别章节标题（`第一章`、`Chapter 1` 等）；阅读中按 `Tab` 呼出**目录浮层**（可搜索过滤、回车跳转），也能用 `werd toc <id>` 单独看；epub 会优先采用它自带的 `nav` / `toc` 标题 |
 | 🔍 搜索 | 模糊搜索书库：标题、作者、标签都认，还能首字母跳跃匹配（`hptr` 找得到 *Harry Potter*） |
 | 📖 阅读器 | curses 分页阅读：跳行、跳章、搜索高亮、书签、状态栏、自动保存进度；按终端宽度自动折行（汉字按 2 列算），配色跟随终端主题与透明背景 |
-| 🌍 三种视图 | `中文` / `英文` / `双语对照`，按 `l` 循环切换；本来就是中文的书看中文视图不需要翻译，离线也能读 |
-| 🈶 翻译 | **可插拔引擎**：Google（免密钥，默认）/ 百度 / 有道智云 / 腾讯云 / DeepSeek / 本地 Argos；`werd config translate` 向导式配置。章节级翻译 + 磁盘缓存，译一次永久复用 |
-| 📝 生词本 | 阅读中按 `v` 查词并收录，阅读器里自动给生词加下划线；支持搜索、复习、删除、导出 Anki |
-| 🗒️ 笔记 | 按 `m` 在**当前屏**里用 `h/j/k/l`（或方向键）选中一段文字（反色高亮），`y` 复制；按 `o` 展开**笔记面板**（下方 25%）：上半只读引用选中的原文，下半是编辑区，`Tab` 切换焦点，`Ctrl+S` 保存。笔记**落盘成 markdown**（`~/.wreader/notes/<book_id>.md`），`werd notes` 查看 / 导出；编辑区每 30 秒自动留一份草稿，掉电也不丢 |
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
 | 🏆 成就 | **48 个**成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音；阅读中按下 `?` 可以翻帮助页 |
 | ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
@@ -59,10 +55,10 @@
 - **macOS / Linux**：`curses` 是 Python 自带的，开箱即用
 - **Windows**：需要额外装 `windows-curses`（见安装一节）
 - 终端需要支持 UTF-8（读中文书必备；macOS 自带终端、iTerm2、Windows Terminal 都可以）
-- 用 Google 翻译或 `werd translate` 时需要联网；只想本地读书的话全程离线可用
+- 全程离线可用：只有「地理成就」会发一个 HTTP 请求（可关），其余功能一个字节都不出网
 
-运行时会用到这几个第三方库，安装时会自动装好：
-`rich`（表格和进度条）、`chardet`（编码识别）、`deep-translator`（Google 翻译）、`requests`（DeepSeek 翻译）。
+运行时会用到这三个第三方库，安装时会自动装好：
+`rich`（表格和进度条）、`chardet`（编码识别）、`requests`（只给「地理成就」那一次可选的位置查询用）。
 
 ---
 
@@ -78,7 +74,7 @@ cd wreader
 ./install.sh
 ```
 
-`./install.sh` 会自动把剩下的活全干完：建 `.venv` 虚拟环境 → 装 4 个依赖 →
+`./install.sh` 会自动把剩下的活全干完：建 `.venv` 虚拟环境 → 装 3 个依赖 →
 把 `werd` 命令**配好别名**（写进 `~/.bashrc` 或 `~/.zshrc`，重复运行不会写第二遍）→ 自检版本号。
 按它最后的提示 `source ~/.zshrc`（或干脆重开一个终端）就能用了：
 
@@ -169,7 +165,7 @@ werd --version                     # 验证：应输出 werd 0.1.0
 ### 从旧版 `nr` 升级
 
 这个工具以前叫 `nr`。装过旧版的人**不需要手动搬数据**：第一次运行 `werd` 时，如果 `~/.wreader`
-还不存在而 `~/.nr` 存在，老的整个目录会被搬过去——设置、书库索引、生词本、译文缓存都在里面——
+还不存在而 `~/.nr` 存在，老的整个目录会被搬过去——设置、书库索引、成就状态都在里面——
 老目录随即消失。几个老名字的兼容情况：
 
 | 老名字 | 现在 | 兼容方式 |
@@ -229,7 +225,7 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 读到一半退出的样子（`q` 键）：
 
 ```
-[双语对照 · 停在 120/281 行 (42.7%) · 本次 12:30 · 书签 2 个]
+[21:34 · 第一章 科学边界 · 本章 12:30]
 ```
 
 ---
@@ -245,18 +241,14 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `werd search <关键词>` | 模糊搜索书名 / 作者 / 标签 |
 | `werd read <book_id>` | 打开分页阅读器 |
 | `werd continue` | 列出最近打开阅读的三本书（附 id，抄去 `read` 即可续读） |
-| `werd translate <book_id>` | 把整本书逐章翻译并缓存 |
-| `werd vocab` | 生词本：列表 / 复习 / 搜索 / 删除 / 导出 |
 | `werd stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
 | `werd achievements` | 成就清单与解锁进度 |
 | `werd toc <book_id>` | 查看某本书的目录（章节 + 进度百分比）；`--rebuild` 强制重解析 |
-| `werd notes [book_id]` | 笔记：不带参数列出有笔记的书；带 id 逐条翻看（空格翻页 / `q` 退出）；`--export` 导出 markdown |
 | `werd werd` / `werd word` / `werd --werd` | 名字彩蛋（顺手解锁「名字彩蛋」成就） |
 | `werd config` | 查看 / 修改设置 |
 
-退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）、
-或翻译出现失败章节时返回 `1`（`Ctrl-C` 中断是 `130`）。
-所有错误都以 `error: ...` 的形式打印，不会甩出 Python traceback。
+退出码约定：成功 `0`；参数有误、找不到东西（`no book matches ...`）时返回 `1`
+（`Ctrl-C` 中断是 `130`）。所有错误都以 `error: ...` 的形式打印，不会甩出 Python traceback。
 
 ### `werd import <路径>`
 
@@ -297,12 +289,12 @@ werd search '#fantasy'    # 带 # 前缀表示只搜标签
 
 整本书的核心体验，详细按键见[阅读器快捷键](#阅读器快捷键)。
 
-- 打开时自动检测书的语言，中文书默认进中文视图，英文书默认进英文视图（检测靠 CJK 字符占比，离线纯本地计算）。
+- 打开时自动检测书的语言（靠 CJK 字符占比，离线纯本地计算），屏幕上就直接显示正文。
 - 每 60 秒自动保存一次阅读位置（可关），退出时再完整保存一次。
 - 退出时把这次会话的时长、读过的行数写进统计，并把 `session_end` 事件交给成就引擎
   （本次读过的**行区间**会按行号去重地折算成字数，所以同一页读两遍不会重复计数）。
 - 每次启动 `werd` 都会记一次 `daily_open` 事件（「百日筑基」「清晨第一眼」看的就是它），
-  `werd import` 记 `book_add`，`werd translate` 之后再让引擎重算一次。
+  `werd import` 记 `book_add`。
 - **需要真正的交互式终端**，重定向或管道里跑会报错：
   `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
@@ -331,40 +323,6 @@ werd continue        # 最近打开阅读的三本书（附 id）
 > 配上别名（见[新开一个终端后怎么用 werd](#新开一个终端后怎么用-werd)）之后，
 > 重开终端接着读书就是两行：`werd continue` 看最近在读，`werd read <id>` 开读。
 
-### `werd translate <book_id>`
-
-```bash
-werd translate 3e027c4de949
-```
-
-适合"想一次性把整本书翻译好，以后随手切双语"的场景。真实输出：
-
-```
-translating 《三体》 · 41 chapter(s) · backend google · batch 3000 chars
-translated 41, skipped 0 (already cached), 0 failed
-cache: /Users/you/.wreader/cache/3e027c4de949
-```
-
-- **按章缓存**，已经译好的章节会自动跳过，所以中途 Ctrl-C 了再跑一遍就是断点续传。
-- 单章失败不会中断整轮，失败的章节号会列出来，下次重跑自动补上。
-- 网络不通会直接中止（继续跑只会浪费时间）。
-
-### `werd vocab`
-
-不带参数时列出笔记（每页 20 条，新的在前）：
-
-```bash
-werd vocab                          # 查看（第 1 页）
-werd vocab --page 2 --per-page 50    # 翻页，调整每页条数
-werd vocab --search 公认             # 按含义反查单词（词 / 释义 / 例句都会搜）
-werd vocab --review                  # 复习模式：打乱顺序，先看单词再按回车核对释义
-werd vocab --remove ephemeral        # 删掉一个词
-werd vocab --export anki > deck.txt  # 导出 Anki 制表符格式，可直接导入 Anki
-```
-
-`--review` 在真终端里是交互式的（回车看释义，`q` 停）；如果输出被重定向，它会降级成"一次性把所有词和释义都打印出来"。
-`--export anki` 刻意不走 rich，用纯 `stdout` 输出，保证制表符不会被美化掉。
-
 ### `werd stats`
 
 ```bash
@@ -378,7 +336,7 @@ werd stats --json   # 同一个 dict 的原始 JSON，给脚本/看板用
 总阅读时长 12小时34分钟
 今日 45分钟 · 本周 5小时12分钟 · 本月 12小时34分钟
 每日目标 1小时 · 今日 75% ✓
-连续 3 天（每天 ≥30 分钟） · 读完 2 本 · 生词 128 个 · 用过翻译 46 次
+连续 3 天（每天 ≥30 分钟） · 读完 2 本
 最近 30 天（2026-08-23 → 2026-09-21，每列一周，周一开始）
 一   ░ · · ▒ ▓
 二   · ▒ ░ · █
@@ -387,7 +345,9 @@ werd stats --json   # 同一个 dict 的原始 JSON，给脚本/看板用
 ```
 
 - 热力图每一列是一周（周一在上、周日在下），没数据的格子留白。
-- `--json` 的顶层键：`generated_at`、`today`、`total_seconds`、`total`、`today_seconds`、`week_seconds`、`month_seconds`、`daily_goal_seconds`、`goal_met`、`streak_days`、`streak_min_seconds`、`books_read`、`finished_books`、`vocab_count`、`translations`、`night_seconds`、`longest_session_seconds`、`achievements`、`books`、`daily`、`heatmap`、`heatmap_grid`。
+- `--json` 的顶层键：`generated_at`、`today`、`total_seconds`、`total`、`today_seconds`、`week_seconds`、`month_seconds`、`daily_goal_seconds`、`goal_met`、`streak_days`、`streak_min_seconds`、`books_read`、`finished_books`、`night_seconds`、`longest_session_seconds`、`achievements`、`books`、`daily`、`heatmap`、`heatmap_grid`，外加两个**历史遗留**的键
+  `vocab_count`（老生词本 `vocab.json` 里的条目数）与 `translations`（老 `library.json` 里记的翻译次数）——
+  阅读器早就不产生这两个数了，但为了不弄坏别人写好的看板脚本，它们仍然照读、照输出。
 - 表格和 JSON 是同一份数据渲染的，不会出现"两边数字不一致"。
 
 ### `werd achievements`
@@ -399,7 +359,7 @@ werd achievements
 真实输出：
 
 ```
-已解锁 1/28
+已解锁 1/48
   🏆 🗄️ 书库初成 书库里添加第 1 本书  解锁于 2026-09-21T16:13:43
 
 进行中
@@ -414,35 +374,6 @@ werd achievements
 
 行首数字是"已解锁 / 总数"，解锁的会带时间戳；未解锁的按**分类**分组，每条一个进度条。
 
-### `werd notes`
-
-```bash
-werd notes                          # 列出写过笔记的书（条数 / 最后修改 / 预览，按时间倒序）
-werd notes 3e027c4de949             # 逐条翻看这本书的笔记（空格看下一条，q 退出）
-werd notes 3e027c4de949 --export    # 导出到 ~/books/notes_3e027c4de949.md
-```
-
-笔记本体就是 markdown，放在 `~/.wreader/notes/`：
-
-```markdown
-# 三体
-
-书籍ID: 3e027c4de949
-创建时间: 2026-09-23T15:10:00
-
-## 笔记 #1 — 2026-09-23 15:10
-
-汪淼看到了一串数字在眼前跳动。
-我的想法：
-
-这段和《球状闪电》呼应。
-```
-
-- 一本书一个文件（`<book_id>.md`）；第一次写时自动建目录、写文件头，之后**只追加不覆盖**。
-- `index.json` 是**派生索引**（书名 / 条数 / 最后修改 / 预览）：删掉会自动重建，手改 `.md` 也不会让它跑偏。
-- 两个进程同时写（两个终端、或 ssh 上的两台机器）靠 `index.json.lock` 文件锁串行化，一条都不会丢。
-- 输出被重定向 / 管道时 `werd notes <id>` **不会**停下来等按键，直接把全部笔记打出来（否则 `| less` 会挂住）。
-
 ### `werd config`
 
 ```bash
@@ -450,7 +381,6 @@ werd config                            # 打印全部设置（值 / 默认值 / 
 werd config --path                     # 只打印设置文件路径
 werd config reader.page_height         # 读一项
 werd config reader.page_height 30      # 写一项（立即存盘）
-werd config translate                  # 交互式配置翻译引擎与密钥（向导）
 werd config --reset                    # 全部恢复默认
 ```
 
@@ -494,7 +424,7 @@ werd toc 3e027c4de949 --rebuild  # 忽略缓存，重新解析正文并覆写缓
 阅读器**底部提示栏默认就写着这排按键**（有临时消息时才临时被替换掉），所以不用背：
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 m标记 o笔记 l语言 t翻屏 T翻章 c中文 ?帮助
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助
 ```
 
 | 按键 | 作用 |
@@ -512,14 +442,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `/` | 搜索关键词（中文也能输；命中后自动跳到第一个匹配并高亮） |
 | `n` | 跳到下一个匹配（循环） |
 | `b` | 在当前行加 / 删书签，状态栏显示书签数量 |
-| `l` | 循环切换视图：`中文` → `英文` → `双语对照` → `中文`…… |
-| `c` | 直接切到中文视图（英文书常用：边读边看中文） |
-| `t` | 翻译**当前屏幕**上的段落，译文在底部弹窗显示 **3 秒**（任意键提前关掉），**不写缓存**（适合随手瞄一眼）；引擎没配好时会先提示你跑 `werd config translate` |
-| `T` | 翻译并缓存**整章**，带进度条；下次再进这一章直接读缓存，不花钱 |
-| `v` | 查一个单词并收进生词本（输入框会预填当前行最长的英文单词） |
-| `m` | 进入**标记模式**：光标变成反色方块，用 `h` / `j` / `k` / `l`（或方向键）扩展选区；`y` 复制选中的文字，`Esc` 取消。标记模式下**不翻页**，只能在同一屏内选字 |
-| `o` | 展开 / 折叠**笔记面板**（占屏幕下方 25%，正文区相应缩小）：上半是**引用区**（只读，灰字，显示刚才 `y` 复制的文字，格式 `> …`），下半是**编辑区**（`curses` 文本框，回车换行、退格、左右光标）；`Tab` 在引用区 / 编辑区之间切焦点，`Ctrl+S` 保存，`Esc` 关闭面板。标记模式下按 `t` 还能把选中的这一段翻好、连着引用一起写进笔记 |
-| `?` | 打开**帮助页**（居中的浮层，`↑↓` / `j` / `k` 滚动，`q` / `Esc` / `回车` 关闭）：里面列了全部按键、章节 / 搜索 / 翻译 / 笔记的用法，以及设置文件在哪 |
+| `?` | 打开**帮助页**（居中的浮层，`↑↓` / `j` / `k` 滚动，`q` / `Esc` / `回车` 关闭）：里面列了全部按键、章节 / 搜索 / 书签的用法，以及设置文件在哪 |
 
 几个实用细节：
 
@@ -530,21 +453,12 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
   ⚠️ 有个终端限制：terminfo 里缺 `XM` 能力的终端（**macOS 自带终端**就是）只能上报"滚轮上"，
   滚轮下不会触发；那种环境下用方向键或拖动即可，功能不受影响。
 - **底部两行是状态栏**：倒数第二行由 `reader.status_bar_format` 拼成（反色显示），
-  最后一行是提示栏——平时显示按键清单，有临时消息（"已加入生词本：xxx = 承认"之类）时优先显示消息。
+  最后一行是提示栏——平时显示按键清单，有临时消息（"已加书签：第 42 行"之类）时优先显示消息。
 - **阅读中解锁成就，会在右上角闪一块牌子**（`🏆 成就解锁 · <成就名>` + 一行说明），
   停留 **5 秒**后自己消失，不拦任何按键、也不会打断你正在读的段落；
   ⚠️ 窗口太小（宽 < 24 列、高 < 6 行）时会退到最下面那行提示栏里显示。
 - **每行最左边一列是书签栏**：有书签的行显示 `★`，其余行留空。
 - **搜索高亮**：当前跳到的命中行是反色，同一批的其他命中行是加粗。
-- **生词会有下划线**（`vocab.highlight_in_reader = true` 时）；关闭后就不打扰阅读。
-- **按 `v` 之后**：如果 `vocab.auto_add_on_mark = true`，查完直接收进生词本；设为 `false` 则会弹一个小窗问你 `[y] 加入生词本　其他键 取消`。
-- **记笔记**：`m` 进入标记模式 → `h/j/k/l`（或方向键）选中一段 → `y` 复制（超过 2000 字自动截断并提示）→ `o` 打开面板，引用区自动显示选中的原文，在编辑区写批注 → `Ctrl+S` 保存。
-  面板折叠时底部提示行会显示 `📝 N条笔记 | 按o展开`。四个要知道的点：
-  1. 编辑区基于 `curses.textpad.Textbox`，**中文输入依赖系统 IME**，实际以英文 / 拼音为主；
-  2. `Ctrl+S` 需要终端没开 XON/XOFF 流控（阅读器启动时会尝试自动关掉 `IXON`，关不掉就只能改用别的键）；
-  3. **笔记会落盘**：`Ctrl+S` 追加到 `~/.wreader/notes/<book_id>.md`（纯 markdown，可以直接拿编辑器改），按 `Esc` 关面板时也会把没提交的内容存成一条；
-  4. 编辑区**每 30 秒自动存一份草稿**（`<book_id>.draft.md`）：崩溃、掉电或 `Ctrl-C` 关掉面板都不会丢字，下次打开面板自动捞回来。`Ctrl-C` 只留草稿不提交，`Esc` 才提交成正式笔记。
-- **读到很慢的章节**（同一章停留超过 30 分钟），提示栏会顺手建议你按 `c` 看看中文。
 - **中途 Ctrl-C** 不会丢进度：退出前同样会保存位置和本次时长。
 - **意外中断（崩溃 / 断电 / 被 `kill`）**：下次打开**同一本书**时，会先弹一个小窗问
   `上次好像没有正常退出 · 上次读到第 N 行`，`y` 接着上次的位置读，其他键从头开始；
@@ -555,7 +469,8 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 
 ## 设置项
 
-设置都在 `~/.wreader/settings.toml` 里，分 6 个 section。可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
+设置都在 `~/.wreader/settings.toml` 里，分 4 个 section（`reader` / `stats` / `library` / `toc`），一共 16 项。
+可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
 **删掉任意一行都会回落到默认值**，所以不用担心改坏。
 
 ### `[reader]`
@@ -572,7 +487,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `theme` | `"default"` | 配色主题名（当前预留，尚未生效） |
 | `store_history` | `true` | 退出时把本次会话时长记入统计；设 `false` 可只读书不记时长 |
 
-`status_bar_format` 可用的段落共 12 个，拼出来的样子是 `段1 · 段2 · 段3`：
+`status_bar_format` 可用的段落共 9 个，拼出来的样子是 `段1 · 段2 · 段3`：
 
 | 标记 | 显示 |
 | --- | --- |
@@ -581,79 +496,13 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `chapter` | 当前章节标题（没有章节时显示 `无章节`） |
 | `position` | `行 120/281` |
 | `percent` | `42.7%` |
-| `mode` | 当前视图 `中文` / `英文` / `双语对照` |
 | `duration` | `本章 05:20` |
 | `elapsed` | `本次 12:30` |
 | `streak` | `连续 3 天` |
 | `bookmarks` | `书签 2` |
-| `vocab` | `生词 128` |
-| `translations` | `翻译 46` |
 
 写错标记不会显示原文，而是被安静地忽略；如果一段都拼不出来，会退回只显示时钟。
-
-### `[translator]`
-
-| 键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `backend` | `"google"` | **旧字段**：当 `[translate] engine` 为空时用它选引擎（`google` / `deepseek`） |
-| `batch_size` | `3000` | 每次请求的字符数上限 |
-| `cache_dir` | `"~/.wreader/cache"` | 译文缓存目录；默认跟随数据目录（所以 `$WREADER_HOME` 也管用） |
-| `deepseek_api_key` | `""` | 留空则读环境变量 `DEEPSEEK_API_KEY` |
-| `auto_translate_chapter` | `false` | 进入新章节时自动翻译整章（真·懒人模式） |
-| `source_language` | `"auto"` | 原文语言，`auto` = 自动识别 |
-| `target_language` | `"zh-CN"` | 译文语言 |
-| `deepseek_model` | `"deepseek-chat"` | DeepSeek 模型名 |
-| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | 接口地址（兼容 OpenAI 协议的服务也能填这里） |
-
-引擎的选择与密钥**不在这一节**，见下面的 `[translate]`。
-
-### `[translate]`
-
-翻译引擎是**可插拔**的：`wreader/translate/` 里每个厂商一个模块，`[translate] engine` 挑用哪个。
-**最快的方式是跑向导**，它会列出所有引擎、逐个问密钥、写完立刻自查一遍：
-
-```bash
-werd config translate
-```
-
-手动配置就是改这一节：
-
-| 键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `engine` | `""` | `google` / `baidu` / `youdao` / `tencent` / `deepseek` / `local`；**空 = 回退到 `[translator] backend`** |
-| `baidu_appid` / `baidu_secret` | `""` | 百度翻译的 APPID 与密钥（MD5 签名） |
-| `youdao_appid` / `youdao_secret` | `""` | 有道智云的应用 ID 与应用密钥（SHA-256 签名） |
-| `tencent_secret_id` / `tencent_secret_key` | `""` | 腾讯云的 SecretId 与 SecretKey（TC3-HMAC-SHA256 签名） |
-| `tencent_region` | `"ap-beijing"` | 腾讯云地域，**参与签名**，写错会被服务端拒 |
-| `deepseek_api_key` | `""` | 留空则读环境变量 `DEEPSEEK_API_KEY` |
-| `deepseek_model` | `"deepseek-chat"` | DeepSeek 模型名 |
-| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | 接口地址（兼容 OpenAI 协议的服务也能填这里） |
-
-六个引擎的差别：
-
-| 引擎 | 要不要密钥 | 说明 |
-| --- | --- | --- |
-| `google` | 不用 | **默认**。走 `deep-translator`，免注册开箱可用；每批之间有 1 秒节流，整本翻译偏慢 |
-| `baidu` | 要（APPID + 密钥） | 通用翻译 API V2，国内快、有免费额度 |
-| `youdao` | 要（应用 ID + 密钥） | 有道智云 v3，中英互译质量不错 |
-| `tencent` | 要（SecretId + SecretKey） | 腾讯云 TMT，签名最复杂（TC3），适合已经在用腾讯云的人 |
-| `deepseek` | 要（API key） | 大模型翻译，按章整段翻质量最连贯；`temperature` 0.3、流式输出 |
-| `local` | 不用，但**要装包** | 本地 Argos Translate，**完全离线**；先 `pip install 'wreader[local]'` 并装好语言包，否则不可用 |
-
-几个例子：
-
-```bash
-werd config translate.engine deepseek
-werd config translate.deepseek_api_key sk-你的密钥
-# 或者更安全的做法（不写进文件）：
-export DEEPSEEK_API_KEY=sk-你的密钥
-
-werd config translate.engine baidu
-werd config translate.baidu_appid 你的APPID
-werd config translate.baidu_secret 你的密钥
-```
-
-⚠️ 引擎没配好时，阅读器里按 `t` 不会去发请求，而是直接提示你跑 `werd config translate`。
+整段整段地塞：宽度不够时**从尾部整段丢掉**，而不是把某一段切成两半。
 
 ### `[stats]`
 
@@ -663,13 +512,6 @@ werd config translate.baidu_secret 你的密钥
 | `show_heatmap` | `true` | `werd stats` 里是否显示 30 天热力图 |
 | `achievement_sound` | `true` | 解锁成就时是否响铃（`\a`）；嫌吵就改 `false` |
 | `geo_lookup` | `true` | 是否联网查所在位置（用于地理成就）。改成 `false` 就**完全离线**：连缓存都不刷新，地理成就自然也不再前进（缓存文件 `~/.wreader/geo.json` 仍可用） |
-
-### `[vocab]`
-
-| 键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `highlight_in_reader` | `true` | 阅读器里给生词加下划线 |
-| `auto_add_on_mark` | `true` | 按 `v` 查到词后直接收录，不弹确认框 |
 
 ### `[library]`
 
@@ -682,6 +524,7 @@ werd config translate.baidu_secret 你的密钥
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `patterns` | `""` | **追加**的章节标题正则；多个用 `\|` 分隔（内置规则始终生效），用来认 `### 楔子` 这类写法 |
+| `cache_dir` | `""` | 目录缓存目录，留空 = 数据目录下的 `cache/`；缓存文件就放在这里（`<book_id>_toc.json`） |
 
 ---
 
@@ -694,19 +537,16 @@ werd config translate.baidu_secret 你的密钥
 | 成就状态 | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | 阅读现场 | `~/.wreader/reading_session.json`（"我正在读这本书"的标记，正常退出时删除；崩溃后下次开书靠它问一句要不要接着读） | `$WREADER_HOME` |
 | 地理位置缓存 | `~/.wreader/geo.json`（ip-api 的结果，缓存 1 小时；删掉只是下次要重查一遍） | `$WREADER_HOME` |
-| 生词本 | `~/.wreader/vocab.json` | `$WREADER_HOME` |
-| 笔记 | `~/.wreader/notes/<book_id>.md`（每本书一个 markdown）+ `index.json`（派生索引）+ `<book_id>.draft.md`（未提交草稿） | `$WREADER_HOME` |
-| 译文缓存 | `~/.wreader/cache/<book_id>/ch0_en.txt`、`ch0_bilingual.txt` | `translator.cache_dir` |
+| 目录缓存 | `~/.wreader/cache/<book_id>_toc.json`（章节提取结果，正文一改就自动重建） | `toc.cache_dir` |
 | 小说正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
 
 Windows 下数据目录是 `%APPDATA%\wreader`。
 
-三个环境变量：
+两个环境变量：
 
 ```bash
 export WREADER_HOME=~/my-wreader-data    # 换掉整个数据目录（测试 / 多套配置很有用）
 export WREADER_NOVELS_DIR=~/my-novels    # 换掉小说正文目录
-export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配置文件里的值
 ```
 
 旧名字 `$NR_HOME` / `$NR_NOVELS_DIR` 依然有效，但只有在没设新名字时才会被读取。
@@ -821,7 +661,26 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
   然后从空状态重新开始；写盘一律"临时文件 + 原子替换"，并且全程持有 `achievements.json.lock`
   文件锁（Windows 没有 `flock`，退化成只有原子替换）。
 
-### `~/.wreader/vocab.json` —— 生词本
+### `~/.wreader/cache/<book_id>_toc.json` —— 目录缓存
+
+章节提取的结果（章节名 + 起始行号）缓存成一个小 JSON。
+
+- 以「书」为单位，删掉不影响别的数据，下次打开会自动重建。
+- **转换后正文的修改时间一变就自动重建**，所以不需要手动清；想立刻重建用 `werd toc <id> --rebuild`。
+- 老版本还可能在这里留下 `cache/<book_id>/` 目录（旧译文缓存）——没有代码再读它，删掉即可。
+
+### 历史遗留文件：`vocab.json` 与 `notes/`
+
+老版本的生词本（`~/.wreader/vocab.json`）和笔记（`~/.wreader/notes/*.md`）**不再由程序写入**，
+但成就引擎仍然会**只读地**数一下它们：
+
+- `vocab.json` 里带 `word` 的条目数 → 成就指标 `vocab_count`（`werd stats --json` 也会照旧输出）；
+- `notes/*.md` 里 `## 笔记 #N` 这样的标题数 → 成就指标 `notes_count`（「笔记达人」就是看它）。
+
+所以你以前记下的生词和笔记**不会白费**：文件在、成就进度就在，手写进 markdown 的小节也算数。
+这两个文件都可以随时删掉（指标立刻归零，成就解锁状态不受影响）。
+
+老格式长这样（下面这份现在只被读取、不会被改写）：
 
 ```json
 [
@@ -836,19 +695,7 @@ export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek 密钥，优先级低于配�
 ]
 ```
 
-同一个词查两次是**刷新**已有条目，不会出现重复行。
-旧版本的 `{"words": [...]}` 包装结构、以及 `book_title` / `created` 这些旧字段名依然能读进来。
-
-### `~/.wreader/cache/<book_id>/` —— 译文缓存
-
-```
-ch0_en.txt          第 1 章的译文（每段一行 + 空行分隔）—— 固定叫 _en，
-                    虽然内容是译到 translator.target_language 的结果
-ch0_bilingual.txt   第 1 章的中英段落对照（喂给阅读器的双语视图）
-```
-
-文件名后缀固定是 `_en` 和 `_bilingual`（`_en` 是历史命名，容器里装的是"目标语言"的译文）。
-缓存以"章"为单位，所以整个目录删掉也不影响别的数据，只是下次要重新翻译。
+计数时两种老写法都认：顶层是数组，或者 `{"words": [...]}` 包装；条目里少了 `word` 就不计数。
 
 ---
 
@@ -878,10 +725,10 @@ Phase 2/3 的 19 个），分五类。
 | `words_10m` | 🎩 千万俱乐部 | 累计阅读 1000 万字 |
 | `words_100m` | 👑 亿万富豪 | 累计阅读 1 亿字 |
 | `words_1b` | 🌌 十亿富豪 | 累计阅读 10 亿字 |
-| `vocab_100` | 📝 词汇积累 | 生词本满 100 个 |
-| `vocab_500` | 🧠 生词狂魔 | 生词本累计记录 500 个单词 |
-| `translator` | 🌍 双语者 | 首次使用翻译功能 |
-| `note_master` | 🖊️ 笔记达人 | 累计写下 50 条笔记（现数 markdown，手写的也算） |
+| `vocab_100` | 📝 词汇积累 | 老生词本 `vocab.json` 满 100 个（**只读**：阅读器不再写它） |
+| `vocab_500` | 🧠 生词狂魔 | 老生词本累计 500 个单词（**只读**） |
+| `translator` | 🌍 双语者 | 老 `library.json` 里 `stats.translations >= 1`（**只读**，看历史记录） |
+| `note_master` | 🖊️ 笔记达人 | 累计写下 50 条笔记（现数 `notes/*.md`，手写的也算） |
 
 ### 阅读习惯（10）
 
@@ -905,7 +752,7 @@ Phase 2/3 的 19 个），分五类。
 | `space_combo` | 👏 手速达人 | `space_combo >= 100` | 一口气连按 100 次**空格**翻页，中间不碰别的键（换键即断） |
 | `page_streak` | 🌀 翻页永动机 | `page_streak >= 500` | 连续翻页 500 次（`j` / 空格 / 回车 / 方向键 / PgUp / PgDn 都算），中间做别的事就断 |
 | `arrow_chapters` | 🕹️ 方向键怀旧 | `arrow_chapters >= 1` | 一整章只用**方向键**翻完（章内至少按 5 下，且不碰 `j`/`k`/空格/回车/`[`/`]`/`Tab`） |
-| `translate_maniac` | 🔤 翻译狂魔 | `translate_hits >= 100` | 累计按 100 次翻译键（`t` 翻当前屏、`T` 翻整章） |
+| `translate_maniac` | 🔤 翻译狂魔 | `translate_hits >= 100` | 累计按下 100 次翻译键（⚠️ 阅读器的 `t` / `T` 已移除，这条只认老版本留下的计数） |
 | `help_fan` | ❓ 帮助迷 | `help_opens >= 1` | 在阅读器里按 `?` 打开帮助页 |
 
 ### 难度挑战（4）
@@ -939,13 +786,13 @@ Phase 2/3 的 19 个），分五类。
 | `books_read` / `finished` | 读过的书数 / 读完的书数 | 书库索引 |
 | `total_time` / `night_time` / `single_session` / `weekend_time` | 累计 / 夜间 / 单次最长 / 周末阅读秒数 | 索引 + 成就状态 |
 | `streak` | 连续天数 | 索引里的每日桶 |
-| `vocab_count` / `translations` | 生词数 / 翻译次数 | 生词本 + 索引 |
+| `vocab_count` / `translations` | 生词数 / 翻译次数（**历史遗留，只读**：数老 `vocab.json` / 老 `library.json`；阅读器不再产生这两个数） | 生词本 + 索引 |
 | `library_books` | 书库里一共几本书 | 书库索引 |
 | `words_read` | 累计读了多少字（**按行号区间去重**） | 成就状态 |
 | `days_opened` / `early_open` | 打开过 werd 的天数 / 是否在清晨打开过 | 成就状态 |
-| `notes_count` | 一共写过多少条笔记（现数 markdown 文件） | 笔记目录 |
+| `notes_count` | 一共写过多少条笔记（现数 `notes/*.md`，**只读**） | 笔记目录 |
 | `space_combo` / `page_streak` | 最长的空格连击 / 最长的一次连续翻页 | 成就状态（阅读器实时上报） |
-| `arrow_chapters` / `translate_hits` | 只用方向键读完的章数 / 按过多少次翻译键 | 成就状态（阅读器实时上报） |
+| `arrow_chapters` / `translate_hits` | 只用方向键读完的章数 / 按过多少次翻译键（后者已无按键可触发，仅保留旧计数） | 成就状态（阅读器实时上报） |
 | `narrow_seconds` / `narrow_chapters` | 窄窗口（≤40 列）里读的秒数 / 窄窗口（≤60 列）里读完的章数 | 成就状态（阅读器实时上报） |
 | `help_opens` | 打开过几次阅读器帮助页 | 成就状态 |
 | `crash_recovers` / `recover_declined` | 意外中断后接着读 / 选择重来的次数 | 成就状态 |
@@ -960,10 +807,12 @@ Phase 2/3 的 19 个），分五类。
 **事件驱动**：各模块调用 `achievements.check_achievements(事件名, 数据)`，事件有
 `daily_open`（每次启动 `werd`）、`session_end`（退出阅读，带时长、读过的行区间，
 以及本次攒下的按键 / 尺寸计数）、`book_add`（`werd import`）、`progress_update`、`book_finish`、
-`word_add`、`note_add`（写完一条笔记）、`key` / `resize`（阅读器里实时按键与终端尺寸）、
+`key` / `resize`（阅读器里实时按键与终端尺寸）、
 `help`、`recover`（意外中断恢复）、`geo_change`（位置探测）、`env`（环境探测）、
 `name_egg`（名字彩蛋）、`achievements_view`（翻开成就页）、
 以及不带任何累加的 `check`（只是"现在重算一遍"，老脚本还在用它）。
+`word_add` / `note_add`（写完一条生词 / 笔记）**仍然留在白名单里**但已没人调用：
+它们是为老脚本准备的兼容入口，删掉名字会打断正在用它们的调用方。
 已解锁的成就不会重复触发；整个「读状态 → 记事件 → 判定 → 写回」在**文件锁**下进行，
 两个终端同时开也不会互相覆盖（Windows 没有 `flock`，退化成原子替换写入）。
 
@@ -989,49 +838,33 @@ wreader/
 ├── README.en.md             English README
 ├── 使用指南.md               小白手把手教程（第一次用看这个）
 ├── install.sh               一键安装：建 venv、装依赖、配好 werd 别名（幂等）
-├── tools/                   开发期校验脚本：文档锚点/数字对拍/折行/绘制/配色（见 tools/README.md）
+├── tools/                   开发期校验脚本：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标/成就（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
-│   ├── __init__.py          __version__ 和模块地图（19 行）
-│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1145 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（1510 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（1008 行）
+│   ├── __init__.py          __version__ 和模块地图（21 行）
+│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1165 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（833 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（966 行）
 │   ├── env.py               环境探测：云主机 / WSL / tmux / 可编辑安装（183 行）
 │   ├── geo.py               地理位置：ip-api 查询 + 一小时缓存，国家→大洲、世仇组合（343 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
-│   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（81 行）
-│   ├── notes.py             笔记：每本书一个 markdown + 派生索引 + 草稿（786 行）
-│   ├── reader.py            curses 分页阅读器：视图、搜索、书签、状态栏、滚轮/触摸、标记与笔记、帮助页与成就通知（4478 行）
-│   ├── translator.py        章节缓存 / 分批 / 段落映射 + 引擎适配层（1199 行）
-│   ├── vocab.py             生词本：增删查、复习、Anki 导出（436 行）
-│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（785 行）
+│   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（80 行）
+│   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、目录浮层、帮助页与成就通知（2799 行）
+│   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（817 行）
 │   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
-│   ├── translate/           可插拔翻译引擎（每个厂商一个模块；行数见 memory-bank）
-│   │   ├── __init__.py      引擎注册表 + 工厂：按名字造引擎
-│   │   ├── base.py          Translator 抽象基类：translate() 契约与凭证检查
-│   │   ├── google.py        Google（deep-translator，免费免密钥，默认引擎）
-│   │   ├── baidu.py         百度通用翻译 API V2（MD5 签名）
-│   │   ├── youdao.py        有道智云 v3（SHA-256 签名）
-│   │   ├── tencent.py       腾讯云 TMT（TC3-HMAC-SHA256 签名）
-│   │   ├── deepseek.py      DeepSeek chat completions（流式 SSE）
-│   │   └── local.py         本地 Argos Translate（离线，可选依赖）
 │   └── data/
 │       └── achievements.json  48 个成就的定义（348 行）
-└── tests/                   832 项测试，全部离线运行（见下方「运行测试」）
-    ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、假翻译后端、epub 构造器
+└── tests/                   559 项测试，全部离线运行（见下方「运行测试」）
+    ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、馆藏样例、epub 构造器
     ├── test_achievements.py 51 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定、实时门槛与地理/环境指标
-    ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
+    ├── test_cli.py          33 项 —— 参数解析、各子命令输出、退出码、成就横幅、名字彩蛋
+    ├── test_config.py       49 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_env.py          14 项 —— 云主机 / WSL / tmux / 可编辑安装探测（全部注入，不看本机）
     ├── test_geo.py          31 项 —— 国家→大洲、世仇组合、ip-api 响应解析、缓存与离线降级
     ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
-    ├── test_notes.py        30 项 —— markdown 追加、解析、派生索引、导出、草稿、并发文件锁
-    ├── test_reader.py       236 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、标记与笔记面板、帮助页、成就通知与恢复流程
+    ├── test_reader.py       174 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、帮助页、成就通知与恢复流程
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
-    ├── test_translator.py   77 项 —— 语言识别、分批、章节缓存、引擎适配、错误映射
-    ├── test_translate.py    49 项 —— 引擎注册表、各厂商签名/请求构造、错误与参数校验
-    ├── test_vocab.py        31 项 —— 生词本读写、刷新不重复、复习、Anki 导出
-    ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
-    └── test_cli.py          55 项 —— 参数解析、各子命令输出、退出码、笔记清单与分页、翻译引擎配置向导、名字彩蛋
+    └── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
@@ -1080,7 +913,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 832 项，约 15 秒
+pytest                      # 559 项，约 15 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -1088,9 +921,9 @@ pytest -k "streak or heatmap" -q          # 按名字筛选
 测试遵循几条约定，改代码时可以顺着走：
 
 - **绝不碰真实数据**：`tests/conftest.py` 里的 autouse fixture 会把 `$WREADER_HOME` / `$WREADER_NOVELS_DIR`
-  指到 `tmp_path`，并清掉 `wreader.config` 的缓存与 `wreader.translator` 的全局后端，所以每个测试都是干净的。
-- **绝不联网**：翻译全部走 conftest 里的 `RecordingBackend`（用 `set_backend` 注入），
-  Google / DeepSeek 只测到构造参数、请求体和 SSE 解析这一层。想确认的话，用假代理跑一遍即可：
+  指到 `tmp_path`，并清掉 `wreader.config` 的缓存，所以每个测试都是干净的。
+- **绝不联网**：唯一会出网的是「地理成就」的位置查询，测试里全部注入假的响应（`wreader.geo` 的请求
+  函数被 monkeypatch），`ip-api` 的真实响应只用在离线解析测试里。想确认自己没有漏网，用假代理跑一遍即可：
   ```bash
   HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 pytest
   ```
@@ -1108,9 +941,7 @@ python tools/check_doc_numbers.py     # README 里的行数、测试项数是否
 python tools/check_comments.py        # 注释覆盖情况（默认只报告；加 --strict 才是门禁）
 python tools/verify_wrap.py           # 折行属性（期望 OK: 40077 checks passed）
 python tools/verify_draw.py           # 绘制不越界（期望 OK: 420 draw checks passed）
-python tools/verify_notes.py          # 真 pty：标记模式 + 笔记面板（期望 RESULT: 全部通过）
 python tools/verify_mouse.py          # 真 pty：滚轮 / 触摸拖动（期望 RESULT: 全部通过）
-python tools/verify_translate.py      # 真 pty：t 的未配置提示 + 配置向导落盘（不联网）
 python tools/verify_achievements.py   # 真 pty：帮助页、屏内 5 秒通知、意外中断恢复、名字彩蛋
 script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
 ```
@@ -1147,13 +978,11 @@ UTF-8 再重新 `werd import` 就能拿到干净正文。
 不会。书号是正文的 SHA-1，第二次会显示为 `skipped 1 duplicate(s)`。
 注意：换书名再导入仍会被认出来（内容没变），但**改过内容**就会被当成新书。
 
-**Q：按了 `t` 却没有译文？**
-`t` 只翻译当前屏幕，且**不缓存**；如果它提示 `当前视图就是原文，无需翻译`，说明你要的正是这本书的原文语言。
-想永久保存译文请按 `T`（整章缓存），或者先在命令行跑一次 `werd translate <book_id>`。
-
-**Q：翻译报错 `翻译不可用: ...`？**
-Google 后端需要联网；DeepSeek 后端需要 API key（`werd config translator.deepseek_api_key sk-xxx`
-或 `export DEEPSEEK_API_KEY=...`）。国内网络下 Google 可能不通，建议换 deepseek。
+**Q：以前按 `t` 能翻译 / 按 `v` 能记生词，现在怎么没有了？**
+翻译、生词本、笔记这三个功能已经**从阅读器和命令行里移除**（代码、快捷键、子命令都没了）。
+以前记下的数据不会被删：`~/.wreader/vocab.json` 与 `~/.wreader/notes/*.md` 仍会被成就引擎
+**只读地**数一遍，所以「词汇积累」「生词狂魔」「双语者」「笔记达人」的进度还在。
+想彻底清干净，删掉这两个文件即可（解锁过的成就不会因此消失）。
 
 **Q：`werd read` 报 `needs an interactive terminal`？**
 阅读器要在真终端里跑，不能 `| less`、不能重定向、也不能在 CI 里跑。
@@ -1171,12 +1000,6 @@ werd config reader.store_history false
 werd config stats.achievement_sound false
 werd config stats.show_heatmap false
 ```
-
-**Q：怎么把生词导进 Anki？**
-```bash
-werd vocab --export anki > deck.txt
-```
-然后 Anki → 文件 → 导入，字段选"制表符分隔"，三列分别是 单词 / 释义 / 例句。
 
 **Q：书删了，索引还在？**
 命令行目前没有删除命令。删掉 `library.json` 里 `books` 下对应的那个 id 即可
@@ -1203,10 +1026,10 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - **Windows 需要额外依赖** `windows-curses`（`pip install -e ".[windows]"`）。
 - **`library.json` 里 `progress` 的数值不做类型强制转换**：手写成字符串（`"current_line": "12"`）
   也能正常读，因为消费方都用 `int(...)` 兜住了，但它不会被自动改回数字。
-- **笔记编辑区以英文 / 拼音为主**：编辑区基于 `curses.textpad.Textbox`，中文输入依赖系统 IME；
-  并且面板里的 `Ctrl+S` 要求终端没开 XON/XOFF 流控（阅读器启动时会尝试自动关掉 `IXON`，关不掉时保存键会到不了程序）。
-  另外 `Textbox.gather()` 会把字符截成 7 位，所以**中文不能被填进编辑区**：草稿里的中文由引擎直接落盘，
-  不会经过那个控件（见 `_restore_draft`）。
+- **翻译 / 生词本 / 笔记已经移除**：`werd translate`、`werd vocab`、`werd notes` 三个子命令和阅读器里的
+  `l` / `c` / `t` / `T` / `v` / `m` / `o` 都不在了，`wreader/translator.py`、`wreader/translate/`、
+  `wreader/vocab.py`、`wreader/notes.py` 也已删除。老数据文件仍在，但只被**只读**地用于成就计数
+  （见上方 FAQ 与[数据格式](#数据格式)）。
 - **地理成就要联网**（一个 HTTP 请求，缓存一小时）：查的是 `ip-api.com`，只取国家 / 城市 / 时区这类粗粒度信息。
   不想联网就设 `stats.geo_lookup = false` —— 那时地理成就保持锁定，其余功能一切照常。
   内网、代理拦截、断网都只会让它安静地跳过（不会拖慢开书以外的任何事）。
@@ -1219,15 +1042,12 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 已经解决、不再属于已知问题的十条（留个记录，免得又被当成待办）：
 
 - ~~没有 LICENSE~~ → 已加 MIT（`LICENSE` + `pyproject.toml` 的 `license = "MIT"`）。
-- ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 已移除该名字，
-  换成真实存在的 `TranslatorCallable`；此前 `from wreader.translator import *` 会直接抛 `AttributeError`。
+- ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 该模块已随翻译功能一起删除，问题不复存在。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
-  `pyright` 现在是 0 errors / 0 warnings。
-- ~~没有自动化测试~~ → 已补 **832 项 pytest**（`tests/`），全程离线、不碰真实数据。
-- ~~中译英时源语言短码会让默认后端直接报错~~ → 已修（补测试时发现的）：
-  `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`，会在发请求前就抛
-  `No support for the provided language`。现在三条翻译入口统一过一遍 `normalize_language()`，
-  手写 `translator.source_language = "zh"` 也不会再踩坑。
+  `pyright` 现在是 0 errors / 0 warnings（`translator.py` / `vocab.py` 已随功能移除）。
+- ~~没有自动化测试~~ → 已补 **559 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~中译英时源语言短码会让默认后端直接报错~~ → 该代码路径已随翻译功能移除（当年补测试时的发现：
+  `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`）。
 - ~~带 BOM 的损坏文件会让整次导入崩掉~~ → 已修：BOM 认 UTF-8/16/32 且宽编码优先（UTF-32 的 BOM 以
   UTF-16 的 BOM 开头），解码失败就降级成 `(replaced)`；单个坏文件只会进 `failed`，不再中止整个 import。
 - ~~下载站的 `《书名》（校对版全本）作者：某人.txt` 解析不出干净书名和作者~~ → 已支持，且尾部
@@ -1257,7 +1077,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 ## 相关文档
 
 - **[使用指南.md](使用指南.md)** —— 完全零基础的手把手教程：装 Python、建环境、导入第一本书、
-  用按键读书、查生词、看统计，附报错急救表。
+  用按键读书、看统计，附报错急救表。
 - **[README.en.md](README.en.md)** —— English version of this file.
 
 

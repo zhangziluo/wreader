@@ -66,9 +66,9 @@
 - `npx pyright` 保持 **0 errors / 0 warnings**（`wreader/`、`tests/`、`tools/` 都纳入）。
 - 每条逻辑语句上方保留一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"），
   同时保留原有 docstring 与英文注释。
-  ⚠️ **实测校正（2026-09-22）**：这条是**目标**，不是既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2279** 条语句上方没有紧邻
-  注释行（`test_reader.py` 447、`reader.py` 399、`translator.py` 189 …）。
+  ⚠️ **实测校正（2026-09-25 复测）**：这条是**目标**，不是既成事实 ——
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2771** 条语句上方没有紧邻
+  注释行（最多的是 `test_reader.py` 591、`reader.py` 480、`achievements.py` 223）。
   早先记录的 "TOTAL: 0" 是脚本 bug 造成的假绿，别再引用它。
   实务上遵循的是"一段逻辑配一段中文注释"的风格，别执行到每条 `return` / `assert` 都单独加。
 
@@ -83,18 +83,29 @@
 - **推送认证方式**：HTTPS + macOS Keychain（系统级 `/usr/local/etc/gitconfig` 里
   `credential.helper=osxkeychain`），`git push` 无需交互。`~/.ssh/id_ed25519` 这把钥匙
   **没有**注册到 GitHub 账号，改用 SSH 会 `Permission denied (publickey)`。
-  全局另有 `http.proxy` / `https.proxy = http://127.0.0.1:7897`，代理没开时 push 会失败，
-  可临时用 `git -c http.proxy= push` 绕过。自动化推送时设 `GIT_TERMINAL_PROMPT=0` 避免卡住。
+  全局另有 `http.proxy` / `https.proxy = http://127.0.0.1:7897`，**代理没开时 push 会失败**；
+  ⚠️ 实测**不要**用 `git -c http.proxy= push` 去"绕过" —— 直连 GitHub 在这台机器上不通，
+  会挂在直连上几分钟没结果（只能 `pkill git-remote-https`）。判据：`curl -x http://127.0.0.1:7897
+  https://github.com` 返回 200 就能推，代理没开就先别推（测试 / `pyright` / `tools/` 全离线可跑）。
+  自动化推送时设 `GIT_TERMINAL_PROMPT=0` 避免卡住。
   ⚠️ **偶发瞬时失败**：实测遇到过 `LibreSSL SSL_connect: SSL_ERROR_SYSCALL ... github.com:443`，
   而同一时刻 `curl -x http://127.0.0.1:7897 https://github.com` 返回 200 —— 是网络抖动，
   **先原样重试一次**（通常立刻成功），别急着当成认证/配置坏了去改 remote 或 helper。
 - **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会变成
   `-qq`，此时只输出 `文件: 数量`、不打印 `N passed`。想看到汇总就少加一个 `-q`。
 - **改动必须先实测验证**：跑 `py_compile`、`pytest tests/`、`npx pyright`；
-  涉及阅读器宽度/绘制时，还应跑 `tools/verify_wrap.py` 与 `tools/verify_draw.py`
-  （2026-09-22 已从 `/tmp` 搬进仓库，见 `tools/README.md`）。
-- **`tools/` 是开发期校验脚本的家**（不参与打包）：`check_docs.py`（文档锚点/围栏）、
-  `check_doc_numbers.py`（README 数字对拍）、`check_comments.py`（注释覆盖，默认只报告）、
-  `verify_wrap.py` / `verify_draw.py` / `verify_colors.py`。改完对应代码顺手跑一下，
-  它们都自己推算仓库根，在哪个目录运行都行，退出码 0 = 通过。
+  涉及阅读器宽度/绘制时，还应跑 `tools/verify_wrap.py` 与 `tools/verify_draw.py`；
+  动了鼠标 / 成就通知 / 帮助页 / 恢复流程 / 配色，跑 `tools/verify_mouse.py`、
+  `tools/verify_achievements.py`、`tools/verify_colors.py`（后三个要真 pty / 真终端，
+  见 `tools/README.md`）。
+- **`tools/` 是开发期校验脚本的家**（不参与打包，共 **8** 个脚本 + `README.md`）：
+  `check_docs.py`（文档锚点/围栏）、`check_doc_numbers.py`（README 数字对拍）、
+  `check_comments.py`（注释覆盖，默认只报告）、`verify_wrap.py` / `verify_draw.py` /
+  `verify_colors.py` / `verify_mouse.py` / `verify_achievements.py`。
+  改完对应代码顺手跑一下，它们都自己推算仓库根，在哪个目录运行都行，退出码 0 = 通过。
+  删功能时**连它的专用脚本一起删**（别留没人维护的死脚本）。
+- ⚠️ **改文件只用 `editor` 工具**：本环境 `cat > file <<EOF` 这类 heredoc 会把 shell 搅乱、
+  **文件一个字节都没写**（看着像成功）。`editor` 单次替换还有 ~6000 字符上限，超长替换会"假成功"
+  （在仓库根留一份野生文件，并让 IDE 一直飘着指向它的幽灵告警）；大改拆小块，改完 `grep` /
+  `head` 确认落地，收尾 `git status` 扫一眼有没有怪文件。
 - 会话结束前务必让 `activeContext.md` 反映真实现状，好让下个会话无缝接手。

@@ -4,7 +4,7 @@
   // (/usr/local/bin/python3, no `rich` installed) and `wreader/cli.py` line 19
   // `from rich.console import Console` was reported as an unresolved import.
   // The project virtualenv has every runtime dependency from pyproject.toml
-  // (rich, chardet, deep-translator, requests).
+  // (rich, chardet).
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
   "python.analysis.autoSearchPaths": true,

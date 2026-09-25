@@ -1,20 +1,25 @@
 # Progress — 已完成 / 待办 / 已知问题
 
-> 项目整体进度与决策演变。最后更新：**2026-09-23**。
+> 项目整体进度与决策演变。最后更新：**2026-09-25**。
+> ⚠️ **2026-09-25 的功能裁剪**：翻译 / 生词本 / 笔记三个功能已**整体删除**（源码、测试、工具、
+> 文档全清），老数据文件改为**只读计数**供成就使用。本文里 2026-09-23 及以前提到这三个功能的段落
+> 属于**历史记录**（解释当时为什么那样做），不代表现状；现状以本节及 `projectbrief.md` 为准。
 
 ## 当前状态
 
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **832 passed**，全离线、不碰真实数据，约 14 秒 |
+| 测试 | **559 passed in 11.76s**，全离线、不碰真实数据 |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **4513** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **2771** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
 | 文档 | `README.md`（中文主文档）、`README.en.md`、`使用指南.md`；数字由 `tools/check_doc_numbers.py` 自动对拍（**ALL OK**） |
-| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`）（提交数每次提交都会变，故不写死） |
+| 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`）（提交数每次提交都会变，故不写死；判据是 `git status` 不显示领先/落后） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 `.py` 通过（wreader 21 + tests 14 + tools 10） |
-| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、折行 40077、绘制 420、鼠标 8 项、笔记 11 项、翻译 4 项、成就 19 项、配色干净退出 |
+| 编译 | `py_compile` 全部 `.py` 通过（wreader **11** + tests **10** + tools **8**） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、注释报告 2771、折行 40077、绘制 140、鼠标 8 项、成就 19 项、配色干净退出 |
+| 包规模 | `wreader/` **11** 个 `.py` / **8,840** 行 + `data/achievements.json`（348 行 / 48 条） |
+
 
 ## 已完成（可用的功能）
 
@@ -40,11 +45,10 @@
 - 跳转仍走 `Pager.move_to(line)`（与 `g` / 搜索 / `[` `]` 同一套行号坐标）。
 
 ### 阅读器（curses）
-- 三种视图：中文 / 英文 / 双语对照（`l` 循环、`c` 直达中文）；切视图时按需翻译，原文语言零成本。
 - 按键：`q Q Ctrl-C` 退出、`j/空格/回车/↓/PageDown` 下翻、`k/↑/PageUp` 上翻、`g` 跳行、
-  `G` 到末尾、`[` `]` 章节跳转、`/` 搜索、`n` 下一个命中、`b` 书签、`l` 视图、`c` 中文、
-  `t` 翻当前屏（不缓存）、`T` 翻整章（写缓存）、`v` 查词入库、`m` 标记、`o` 笔记面板。
-- 状态栏两行：倒数第二行由 `reader.status_bar_format` 拼接（12 个可用 token，未知 token 跳过），
+  `G` 到末尾、`Tab` 目录浮层、`[` `]` 章节跳转、`/` 搜索、`n` 下一个命中、`b` 书签、
+  `?` 帮助页。**没有**视图切换 / 翻译 / 查词 / 笔记键（2026-09-25 删除）。
+- 状态栏两行：倒数第二行由 `reader.status_bar_format` 拼接（**9** 个可用 token，未知 token 跳过），
   最后一行是消息/快捷键提示；屏幕最左一列是书签栏（`★`）。
 - **按终端宽度自动换行**（2026-09 新增），CJK 按 2 列宽计算，英文按词断行。
 - **配色跟随终端主题与透明背景**（2026-09 新增）。
@@ -58,56 +62,22 @@
   手指拖动 1 行 = 1 行（`reader.touch_scroll` 可关）；向上滑往后读、向下滑往前看。
   为此在 `_run` 里开了鼠标上报，并把 `curses.mouseinterval` 设为 0。
   ⚠️ 逐行滚动不经过翻页路径，所以**不受翻页重叠影响**（它本来就是一行一行走，上下文天然连着）。
-- 生词下划线、搜索高亮（当前命中反色、其它命中加粗）、章节超 30 分钟提醒看中文。
+- 搜索高亮（当前命中反色、其它命中加粗）、书签栏 `★`、章节超 30 分钟提醒。
 - 进度落库：`q`/`Ctrl-C` 都保存位置、书签、本次时长；`auto_save_interval` 默认 60 秒兜底。
 
-### 笔记（标记模式 + 笔记面板 + 落盘，2026-09-23 Phase 1+2+3 全部完成）
-- **标记模式** `m`：光标变成反色方块，`h/j/k/l` 或方向键扩展选区（`A_REVERSE` 高亮），
-  `y` 把选中的文字复制进引用缓冲区（超 2000 字截断并提示），`Esc` 取消。
-  **只在一屏内选字、绝不翻页**；坐标是 `(屏幕行, 行内字符下标)`，进 `Pager.viewport`。
-- **笔记面板** `o`：占屏幕下方 25%（正文区相应缩小），两个 `curses.newwin` 子窗口 ——
-  引用区（只读、`A_DIM`、`> ` 前缀）显示 `y` 复制的内容，编辑区是 `curses.textpad.Textbox`
-  （回车换行、退格、左右光标）；`Tab` 切焦点、`Ctrl+S` 保存、`Esc` 关闭（**Esc 会把没提交的内容提交**）。
-  折叠时底部提示行显示 `📝 N条笔记 | 按o展开`。保存成功时状态栏闪现 `✓ 已保存` 1.5 秒。
-- **存储（Phase 3，`wreader/notes.py`）**：一本一个 `~/.wreader/notes/<book_id>.md`
-  （文件头 + `## 笔记 #N — 时间` 小节，**只追加不覆盖**）；`index.json` 是**派生索引**
-  （书名 / 条数 / 最后修改 / 预览，`count` 从 `.md` 数出来、删掉自动重建）；
-  编辑区**每 30 秒自动存一份草稿** `<book_id>.draft.md`（`Esc` 提交后删掉，`Ctrl-C` 只留草稿，
-  打开面板时自动捞回来）。并发写靠 `index.json.lock`（`wreader/lock.py` 的共享实现）。
-- **CLI**：`werd notes`（列清单，按最后修改倒序）/ `werd notes <id>`（逐条翻看，空格翻页、`q` 退出，
-  非 tty 时一次打完）/ `werd notes <id> --export`（导出到 `~/books/notes_<id>.md`）。
-- 实现要点：模态小循环（与目录浮层同款、不另开线程）；**不调用阻塞的 `Textbox.edit()`**，
-  逐键喂 `do_command()`；`_note_validate` 把回车映射成 `NL`（换行）而非 `Ctrl-G`（提交）；
-  `_run` 里 `_disable_flow_control()` 尽力关掉 `IXON`（否则 `Ctrl+S` 被行规程吞掉）。
-- ⚠️ 编辑区中文输入依赖 IME（`do_command` 只认 `curses.ascii.isprint`），实际以英文 / 拼音为主；
-  且 `Textbox.gather()` 会把字符截成 7 位，所以**中文正文不进编辑区**（见坑 #29）。
-
-### 翻译（2026-09-23 重构为可插拔引擎）
-- **引擎层在 `wreader/translate/`**：每个厂商一个模块，共 8 个文件 1317 行 ——
-  `base.py`（`Translator` ABC + 凭证/可选包检查）、`google.py`（默认，免密钥）、`baidu.py`（MD5）、
-  `youdao.py`（SHA-256）、`tencent.py`（TC3-HMAC-SHA256）、`deepseek.py`（chat completions + SSE）、
-  `local.py`（Argos，可选依赖）、`__init__.py`（注册表 + 工厂）。
-  **加一个厂商 = 一个模块 + `ENGINES` 登一行**，连配置向导都会自动适配。
-- **`translator.py` 变成"引擎之上的机器"**：保留 `Backend` 接口与
-  `EngineBackend` 适配器（错误映射：引擎异常 → `TranslationError` / `TranslationUnavailable`），
-  加上章节缓存 / 分批 / 段落映射 / 双语视图 / `werd translate`，以及新的 `engine_ready()` 前置检查。
-- 三个入口不变：单句/单词（`translate_text`）、视口（`translate_viewport`）、整章（`translate_chapter`）；
-  按章缓存 `cache/<book_id>/ch{N}_en.txt` + `ch{N}_bilingual.txt`，二次访问零成本、可断点续翻。
-- `normalize_language()`：`zh` → `zh-CN` 归一化；每个引擎再用自己的 `language_codes`
-  映射成厂商写法（百度 `zh`、有道 `zh-CHS`、Argos `zh`）。
-- 段落（而非行）为翻译单位，双语视图能一段对一段。
-- **配置**：新增 `[translate]` 段（`engine` + 各厂商密钥，11 键）；`werd config translate` 交互式向导
-  （列引擎 → 逐条问密钥 → 落盘 → 当场自查）；旧的 `[translator] backend` 仍作为回退，**零迁移**。
-- **阅读器 `t`**：翻译当前屏段落，译文在底部弹窗显示 3 秒（任意键提前关）；引擎没配好时
-  只提示"运行 `werd config translate`"，不发请求。
-- **依赖**：`argostranslate` 放进 `local` extra（模型动辄几百 MB）；`requests` / `deep-translator`
-  仍是必装（默认引擎就靠后者）。
-
-### 生词本
-- `add_word` 对同词是**刷新**而非重复插入；`book`/`chapter`/`context`/`date_added` 完整记录。
-- 兼容旧 `{"words": [...]}` 包装与 `book_title`/`created` 旧字段名。
-- 模糊搜索（拼写/释义/例句）、分页、`--review` 乱序复习、`--export anki` 制表符导出。
-- 阅读器内 `v` 查词；`auto_add_on_mark=false` 时弹确认小窗。
+### 遗留数据只读兼容（2026-09-25 新增）
+- 老用户的数据目录里可能还留着 `vocab.json` 与 `notes/<book_id>.md`；**新代码不再提供这两个功能**，
+  只对它们**只读计数**，让已经靠它们解锁的成就不会因为删功能而"倒退"：
+  - `stats._vocab_file_size()` → 指标 `vocab_count`（`werd stats` 的「词汇」列）；
+  - `achievements._note_total()` → `notes/*.md` 里 `## 笔记 #N` 的条数。
+- 两个函数都**只读、坏数据返回 0、绝不抛**（见 `systemPatterns.md` 坑 #32）：坏 JSON / 坏编码 /
+  目录不存在一律吞掉 —— 它们挂在**每次统计与每次成就判定**的路径上（`werd read` 也会走到）。
+- `EVENTS` 白名单里的 `word_add` / `note_add` **保留但已无调用方**：老的外部脚本若还在发这两个事件，
+  引擎不会报错（未知事件才被忽略）。同理 `werd stats --json` 里 `vocab_count` / `translations` /
+  `translate_hits` / `notes_count` 四个键仍在，值来自遗留数据的只读统计。
+- 依赖这三组键的**四条**成就因此**事实封存**：`📝 词汇积累`、`🧠 生词狂魔`、`🖊️ 笔记达人`、
+  `🔤 翻译狂魔`（`vocab_count` / `notes_count` / `translate_hits`）只能靠历史数据解锁 ——
+  它们的条件**故意不改**，README 的成就清单里已注明"新版本已无此功能"。
 
 ### 统计与成就
 - 指标：总时长、今日/本周/本月、夜间阅读（含跨午夜重叠计算）、单次最长、连续天数。
@@ -118,7 +88,8 @@
   `指标 比较符 数字` 表达式；解锁记录写在 `~/.wreader/achievements.json`（纯 JSON + 文件锁，
   坏文件自动改名 `.broken` 重建）。事件（白名单，共 16 个）：`daily_open`（每次启动）、
   `session_end`（退出阅读，带时长、读过的行区间**以及本次攒下的按键/尺寸计数**）、
-  `book_add`（`werd import`）、`progress_update`、`book_finish`、`word_add`、`note_add`、
+  `book_add`（`werd import`）、`progress_update`、`book_finish`、`word_add`、`note_add`
+  （这两个已无调用方，见上文「遗留数据只读兼容」）、
   `key` / `resize`（阅读器实时按键与终端尺寸）、`help`、`recover`（意外中断恢复）、
   `geo_change`（位置探测）、`env`（环境探测）、`name_egg`、`achievements_view`、
   以及纯重算、已无调用方的 `check`。
@@ -126,8 +97,9 @@
 - 解锁时播动画横幅（`stats.achievement_sound` 可静音）；`werd achievements` 按分类显示进度条。
 - **Phase 2/3 新增（2026-09-23）**：
   - **实时按键事件**：空格连击（手速达人）、连续翻页（翻页永动机）、只用方向键读完一章
-    （方向键怀旧）、翻译键次数（翻译狂魔）、帮助页次数（帮助迷）；
-    **终端尺寸事件**：≤40 列读满 5 分钟（极限尺寸）、≤60 列读完一章（窄屏挑战）。
+    （方向键怀旧）、帮助页次数（帮助迷）；**终端尺寸事件**：≤40 列读满 5 分钟（极限尺寸）、
+    ≤60 列读完一章（窄屏挑战）。
+    ⚠️ 当时还按 `t`/`T` 次数记过「🔤 翻译狂魔」，随翻译功能一起**封存**（只有历史数据能解锁）。
   - **屏内 5 秒通知**：解锁当时在屏幕右上角闪一块反白牌子，非阻塞、不吞按键；
     窗口太小时退到消息行。
   - **帮助页** `?`：居中的可滚动浮层，列全部按键与设置文件位置（帮助迷的入口）。
@@ -144,8 +116,11 @@
     基线在开书时取一次），其余计数在 `session_end` 一次交账 —— 一次会话通常 0~2 次写盘。
 
 ### 配置
-- `settings.toml`，**7 个 section / 37 个键**，由 `SCHEMA` 单一事实来源驱动（默认值、类型、写序、行尾注释）。
+- `settings.toml`，**4 个 section / 16 个键**，由 `SCHEMA` 单一事实来源驱动（默认值、类型、写序、行尾注释）。
 - `werd config <section.key> [value]`、`--path`、`--reset`；类型不合法会明确报错。
+- **老配置里的死键不报错、不静默**（2026-09-25）：删掉 `[translator]` / `[translate]` / `[vocab]`
+  三段之后，老用户文件里那些键由 `Config.unknown` 收着，`werd config` 列表时逐条打
+  `warning: unknown setting '...' is ignored`；**不报错、不改写用户的文件**（实测见 `techContext.md`）。
 - 旧扁平 `config.json` 自动折叠进 section 并备份为 `config.json.bak`。
 - 旧数据目录 `~/.nr` 首次运行时整体搬迁到 `~/.wreader`。
 
@@ -155,83 +130,60 @@
   全程用 `.venv/bin/python -m pip` 而**不 activate**（守住"不污染 PATH"这条约定），
   并自动往 `~/.bashrc` / `~/.zshrc` 写别名 —— 装完重启终端即可用。
   选项：`--dev`（多装 pytest）/ `--no-alias`（不碰 rc）/ `--help`；用 `sh install.sh` 跑会自动 `exec bash` 转交。
-- **595** 项自动化测试（全离线、每测试独立 `tmp_path`）。
+- **559** 项自动化测试（全离线、每测试独立 `tmp_path`；分文件计数见 `techContext.md`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
-- `wreader/` 8 个 + `tests/` 8 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
-  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **2777** 条语句上方没有紧邻注释行），
+- `wreader/` 11 个 + `tests/` 10 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
+  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **2771** 条语句上方没有紧邻注释行），
   实际遵循的风格是"一段逻辑配一段中文注释"，详见待办 #4。
-- 校验脚本已从 `/tmp` 搬进 **`tools/`**（现共 **8** 个）：`check_docs.py`、`check_doc_numbers.py`、
-  `check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py`、`verify_mouse.py`、
-  `verify_notes.py`（2026-09-23 新增，真 pty 验证笔记流程）+ `tools/README.md`。
+- 校验脚本已从 `/tmp` 搬进 **`tools/`**（现共 **8** 个 `.py` + `README.md`）：`check_docs.py`、
+  `check_doc_numbers.py`、`check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py`、
+  `verify_mouse.py`、`verify_achievements.py`（真 pty 验证成就通知 / 帮助页 / 恢复流程）。
   统一从 `__file__` 推算仓库根（任意目录可跑）、退出码 0/1（可接 CI），并纳入 `[tool.pyright]`。
+  ⚠️ 2026-09-25 删功能时**连专用脚本一起删**（`verify_notes.py` 随笔记面板删除，别留死脚本）。
+- **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
+  `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
+  从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
 - **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
   `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
   从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
 
 ## 待办
 
-### 高优先级
-0. ~~**笔记落盘（Phase 3）**~~ → **已完成（2026-09-23）**：新增 `wreader/notes.py` +
-   `wreader/lock.py`，`Ctrl+S`/`Esc` 落盘成 markdown、30 秒草稿、`werd notes` 三条路径、
-   派生 `index.json`、`--export`；见 activeContext ㉘。
-   ⚠️ 剩下的小尾巴（**不是**当初计划的一部分，属于新发现的限制）：
-   - 编辑区仍打不进中文（`do_command` 只认 ASCII）→ 想支持得自己接管插入与 `gather()`；
-   - 笔记**没有**记录源行号（当初的草案里有 `line` 字段）——现在只有引用原文与批注，
-     所以"从笔记跳回原文"还做不到。要加就在 `save_note` 里补 `line`（与书签同一套坐标）。
-1. ~~更正 `README.md` / `README.en.md` 的过期信息~~ → **已完成（2026-09-22）**：
-   8 个源码文件的行数、测试总数 **494**、`test_reader.py` **115** 全部按实测改对；
-   「已知问题」里补记了自动换行 / 按显示列数 / 配色跟随终端 三项修复；
-   两份 README 都新增了「新开一个终端后怎么用 werd / Using werd in a new terminal」一节。
-   顺手改正一处旧笔误：那份"已解决"清单原文写"六条"，实际列了 7 条
-   （英文版写的是 Seven，是对的），现已扩成 **十条**，中英两版一致。
-   同性质的守卫见 #3（把校验脚本搬进仓库，以后改代码就能自动查出这类数字漂移）。
+> 2026-09-25 删功能时顺带**清掉了一批已完成条目**（笔记落盘、成就 Phase 2/3、README 数字更正、
+> 校验脚本搬家）—— 那些内容已写进上面的「已完成」或 `activeContext.md`，不再占待办位。
 
 ### 高优先级
-0b. ~~**成就引擎 Phase 2 / Phase 3**~~ → **已完成（2026-09-23，见 `activeContext.md` ㉙）**。
-   交付内容与本条规格的对应关系（规格只有这一段的摘要，没有更细的原文）：
-   - **Phase 2**：`EVENTS` 加了 `key` / `resize` / `help` / `recover`；
-     阅读器实时记账（空格连击、连续翻页、方向键怀旧、翻译键次数、窄屏秒数/章数）；
-     **屏内 5 秒通知**（非阻塞，右上角反白块，窗口太小退到消息行）；
-     两个前置功能也做了：**帮助页** `?`（帮助迷）与**意外中断恢复**
-     （`reading_session.json` 现场 + 开书时问一句；恢复大师 / 我反悔）。
-   - **Phase 3**：`wreader/geo.py`（ip-api + 一小时缓存 + 注入式 fetcher + 离线降级）
-     与 `wreader/env.py`（云主机 / WSL / tmux / 可编辑安装，全部可注入）
-     → 环游亚欧非美大洋、世界公民、百年世仇（**英法**为首的组合）、节日读者、
-     名字彩蛋（`werd werd` / `werd word` / `werd --werd`）、成就猎人（`achievement_views > 10`）。
-   - 成就 28 → **48**；`stats.geo_lookup` 是新键（可完全关掉联网）。
-   - ⚠️ 规格里没给细节、由本次实现**自行拍板**的几处（都已写进 README「成就清单」的"怎么触发"列）：
-     手速达人 = 100 次空格、翻页永动机 = 500 次连续翻页、翻译狂魔 = 100 次 `t`/`T`、
-     方向键怀旧要求章内至少 5 下方向键（否则戳一下章界就能解锁）、
-     我反悔 = **拒绝**恢复、恢复大师 = 成功恢复 3 次、节日读者 = 节日当天打开过（≥1 次）。
-     农历节日表只到 2030（需要时得补）。
-
-### 中优先级
+1. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，至今未拍板；2026-09-25 复测 **2771**）：
+   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 还有这么多条不满足
+   （最多的是 `test_reader.py`、`reader.py`、`achievements.py`）。
+   三个选项：
+   (a) 把约定口径正式改成"一段逻辑配一段中文注释"，不再声称 100%
+   —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条），但脚本仍按严格口径报告；
+   (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
+   (c) 全量补齐 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
 2. **实现 `reader.theme`**（当前是预留项，改了没效果）：在 `_init_colors()` 之后
    按主题 `init_pair()`，并把正文/状态栏/书签/高亮的属性改为 `color_pair(N) | A_*`。
-   注意保持 `use_default_colors()` 带来的透明背景能力（正文背景建议用 `-1`）。
-3. ~~把 `/tmp` 里的校验脚本搬进仓库~~ → **已完成（2026-09-22）**：6 个脚本住进 `tools/`
-   （`check_docs.py` / `check_doc_numbers.py` / `check_comments.py` /
-   `verify_wrap.py` / `verify_draw.py` / `verify_colors.py`），外加 `tools/README.md`。
-   全部改成从 `__file__` 推算仓库根（任意目录可运行）、退出码 0/1（可接 CI），
-   并把 `tools` 加进了 `[tool.pyright]` 的 include。
-   ⚠️ 过程中发现一个**旧脚本的 bug**，见 #4。
+   注意保持 `use_default_colors()` 带来的透明背景能力（正文背景建议用 `-1`），
+   改完必须跑 `tools/verify_colors.py` —— 它验的就是"`_init_colors()` 之后 `-1/-1` 默认色对仍可用"。
+
+### 中优先级
+3. **标签的命令行入口**：`books[].tags` 与 `werd search '#tag'` 都已支持，
+   但只能手改 `library.json` 才能加标签。
+4. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
+   因为消费方都用 `int(...)` 兜住），但不会被自动改回数字。可考虑在 `save_library` 时规整。
+5. 给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
 
 ### 低优先级
-4. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，需要拍板）：
-   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 仍有 **3819** 条不满足
-   （2026-09-22 首次测得 2279，数字随代码量自然上涨：`test_reader.py`、`reader.py`、`translator.py` 最多）。
-   三个选项：
-   (a) 把约定口径改成"一段逻辑配一段中文注释"，不再声称 100%
-   —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条）；
-   (b) 用 `tools/check_comments.py --strict <文件>` 做**增量门禁**，碰到哪个文件就让它达标；
-   (c) 全量补齐 3819 处 —— 工作量极大，且大量只是给 `return` / `assert` 补一句废话，不建议。
-5. 给 `library.py` 补 `__all__`（目前唯一没有的模块）。
-6. **标签的命令行入口**：`books[].tags` 与 `werd search '#tag'` 都已支持，
-   但只能手改 `library.json` 才能加标签。
-7. `progress` 数值不做类型强制转换（手写成 `"current_line": "12"` 也能读，
-   因为消费方都用 `int(...)` 兜住），但不会被自动改回数字。可考虑在 `save_library` 时规整。
-8. 译文缓存文件名固定 `_en` 后缀是历史包袱（容器里装的是 `target_language` 的结果），
-   未来若加 `zh-CN` 以外目标语言可考虑改名为 `ch{N}_<lang>.txt`，但需要迁移逻辑。
+6. **遗留数据没有清理入口**：`~/.wreader/` 下的 `vocab.json`、`notes/`、旧译文缓存
+   （`cache/<book_id>/ch*_en.txt`）现在没有任何命令能列出或删掉。
+   要么在 `werd stats` 里标一句"遗留数据，只读"，要么加一个 `werd clean`（删之前必须问一次）。
+7. **封存成就的最终处置**：`📝 词汇积累` / `🧠 生词狂魔` / `🖊️ 笔记达人` / `🔤 翻译狂魔`
+   现在的条件是"只可能被老数据满足"。将来若真要删掉它们，必须同时改
+   `wreader/data/achievements.json`、README 成就清单与 `tests/test_achievements.py` 的条数断言（当前 **48**）。
+8. 老 `settings.toml` 里的死键只在 `werd config` 列表时打警告，**不会从文件里删掉**（这是刻意的）。
+   若要做"清理向导"，建议挂在 `werd config --reset` 上，默认别动用户的文件。
+9. Windows 侧只有单测覆盖（`windows-curses`、`msvcrt` 分支、`lock` 退化成"只有原子替换"），
+   没有真机验证过。
 
 ## 已知问题（当前版本真实限制）
 
@@ -244,15 +196,13 @@
 | `read` 只能真 TTY | 重定向即报错 | 报错文案已测 |
 | Windows 需 `windows-curses` | 多一个可选依赖 | `pip install -e ".[windows]"` |
 | `progress` 数值不强制转型 | 字符串值也能读但不会自动改回数字 | 消费方已用 `int()` 兜底 |
-| 笔记编辑区中文输入受限 | 依赖系统 IME，实际以英文 / 拼音为主 | `curses.textpad.do_command` 只认 `curses.ascii.isprint`，宽字符被跳过；另外 `Textbox.gather()` 会把字符截成 7 位，所以**中文正文根本不进编辑区**（草稿里的中文由引擎直接落盘），见坑 #29 |
+| 翻译 / 生词本 / 笔记已删除，但老数据仍在 | `~/.wreader/vocab.json`、`notes/*.md`、旧译文缓存只是**只读计数**，没有命令能列出或清理 | 4 条相关成就（`📝 词汇积累`/`🧠 生词狂魔`/`🖊️ 笔记达人`/`🔤 翻译狂魔`）因此封存；清理入口见待办 #6 |
 | 地理成就需要联网 | 内网 / 代理 / 断网时地理成就不前进（其余功能照常） | 只问 ip-api 的**国家/城市/时区**，缓存 1 小时；`stats.geo_lookup=false` 可一键完全离线（2026-09-23） |
 | 农历节日表只到 2030 | 2031 起春节 / 中秋不再触发「节日读者」 | `achievements.LUNAR_HOLIDAYS` 是显式日期表，公历节日不受影响（2026-09-23） |
 | 意外中断恢复只认同一本书 | 换书打开时现场被覆盖，不会问恢复 | 现场里记着 `book_id`，拿别人的行号往里跳更糟（2026-09-23） |
-| 翻译引擎没有重试 / 退避 | 一次网络抖动就浪费一整章（Google 免费端点尤其明显） | 失败仍按 `TranslateError`（单章）/ `TranslateUnavailable`（整本中止）处理；要加需做成可配置，见 activeContext 待办 #8 |
-| 只有百度有可复现的外部签名向量 | 腾讯云最终签名只能靠结构断言 + 自洽性验证，改动后无外部对拍 | 官方文档把 SecretId/SecretKey 打码了；有道/腾讯都没找到可复现的公开向量 |
-| 本地引擎需自备语言包 | 选了 `local` 但没装语言包时不可用 | `available()` 会提前拦下并提示装包命令，不让它到第一次翻译才炸 |
+| 老 `settings.toml` 里的死键不会自动清理 | 每次 `werd config` 都会多打几行 `warning:` | 刻意如此（不报错、不改用户文件）；见待办 #8 |
 | 终端自身限制透明 | 若终端在备用屏幕禁用透明度，应用无法绕过 | 属终端设置，非应用缺陷 |
-| IDE 里有指向**仓库根 `cli.py`** 的幽灵告警（该文件不存在） | 会让人照报错去改 `wreader/cli.py`，白改 | 来源是 ㉒ 坑 #1 那份 143 行野生碎片；两次复现见 activeContext ㉔/㉕。**判据：报错路径 `ls` 不到 → 直接忽略，改看 `npx pyright` + `pytest`** |
+| IDE 里有指向**仓库根 `cli.py`** 的幽灵告警（该文件不存在） | 会让人照报错去改 `wreader/cli.py`，白改 | 来源是 `editor` 超长替换"假成功"留下的 143 行野生碎片（坑 #20）；**判据：报错路径 `ls` 不到 → 直接忽略，改看 `npx pyright` + `pytest`** |
 
 ## 决策演变（记录为什么变成现在这样）
 
@@ -291,7 +241,7 @@
 
 | **2026-09-23** | 翻译改成**可插拔引擎层** `wreader/translate/`（base + google/baidu/youdao/tencent/deepseek/local），`translator.py` 保留缓存/分批/段落/视图/CLI 只做委托 | 用户拍板"重构"而非另起一套或整体重写：项目已有完整的章节缓存与双语视图机器，重写等于把这些再赌一次；并行两套则会让"到底谁在翻译"说不清。**`translate/` 刻意不 import `config`/`translator`**（凭证由调用方传进来），既避免循环导入，也让工厂能脱离终端/网络单测 |
 | **2026-09-23** | 新增 `[translate]` 段（engine + 各厂商密钥），`[translator] backend` 降级为"engine 为空时的回退" | 规格要求"新增 `[translate]` 配置段"。**一个键都没删**换来**零迁移**：老 settings.toml 里的 `backend` / `deepseek_*` 照常生效（`credential_values()` 会把没写的键回退到旧字段）。代价是两处能选引擎，所以文档明确写"`engine` 优先" |
-| **2026-09-23** | `requests` 与 `deep-translator` **保持必装**，只把 `argostranslate` 放进 `local` extra | 计划里原本写"deep-translator 移到 google extra"，实现时判定不妥：**google 是默认引擎**，把它的依赖做成可选 = 装完就坏（`pip install wreader` 后按 `t` 直接报"没装包"）。extras 只该装"重且少数人才用"的东西，Argos 的几百 MB 模型正合适 |
+| **2026-09-23** | `requests` 与 `deep-translator` **保持必装**，只把 `argostranslate` 放进 `local` extra | 计划里原本写"deep-translator 移到 google extra"，实现时判定不妥：**google 是默认引擎**，把它的依赖做成可选 = 装完就坏（`pip install wreader` 后按 `t` 直接报"没装包"）。extras 只该装"重且少数人才用"的东西，Argos 的几百 MB 模型正合适（⚠️ 2026-09-25 翻译功能整体删除后 `deep-translator` / `argostranslate` 都已移除，`requests` 保留给地理成就） |
 | **2026-09-23** | `t` 从"只翻当前屏并提示已翻译 N 段"改成"**译文在底部弹窗显示 3 秒**"，并新增"未配置就走向导"的前置检查 | 规格明确要求弹窗；顺带修掉旧行为的反直觉之处——旧 `t` 只把译文塞进内存，用户按完看不到任何译文（得再按 `l`）。前置检查则是把"没配好"和"请求失败"分开：前者给可操作提示，后者才是错误 |
 | **2026-09-23** | 新增 `tools/verify_translate.py`（真 pty，**不联网**） | 弹窗要真建子窗口/真按叠窗顺序刷；但翻译必须联网，而测试纪律不许联网。于是只验"不联网也确定"的两条：引擎不可用时 `t` 的提示、向导的落盘。**用 `local`（没装包）与 `baidu`（没填密钥）各打一次**，两条路都不需要网络 |
 | **2026-09-23** | 成就引擎**独立成模块** `wreader/achievements.py`，解锁状态从 `library.json` 搬到 `~/.wreader/achievements.json`（第一次读状态时**自动迁移一次**） | 用户规格要求"事件驱动"。有些成就的条件根本**无法从索引派生**（打开过几天、周末读了多少秒、按行号去重后的字数），必须随事件记下来。"单一写入路径"避免"到底谁说了算"；一次性迁移保证老用户不丢解锁 |
@@ -313,5 +263,9 @@
 | **2026-09-23** | 地理探测加设置开关 `stats.geo_lookup`（默认开） | 这是本项目**唯一**会主动联网的功能（翻译是用户按键才发）。给"就是不想让它联网"的用户一个一键离线；关掉后地理成就自然停在原地，其它功能不受影响 |
 | **2026-09-23** | 意外中断的"现场"用**独立的小 JSON**（`reading_session.json`），而不是往 `library.json` 里加字段 | 现场是**进程活着才有意义**的临时状态，与书库索引的语义不同；独立文件还能"删掉就当作没崩过"。⚠️ `progress.current_line` 仍是位置的唯一权威（`save_position` 每次自动保存都会写它），所以现场丢了大不了少问一句 |
 | **2026-09-23** | 子命令容器改成 `required=False`，`werd --werd` 才能跑；为此在 `main()` 里用 `parser.error()` 补回原来的报错 | 规格要求 `werd --werd`（选项形式）与 `werd word` 都能用。直接 `required=False` 会让"不带子命令"从"argparse 报错 + 退出码 2"变成"程序自己猜"，所以显式补一句 `parser.error("the following arguments are required: <command>")` —— **用法提示与退出码逐字不变** |
-| **2026-09-23** | 接手上一会话的未提交改动时：**先修语法错误，再跑全量测试，然后一起提交**，而不是回退重做 | 那批改动（标记模式 `t` + 笔记记章节/译文 + 笔记达人）是完整、自洽、能过的功能，只是没写完收尾（有个 docstring 被吞导致 collection error）。回退等于把有用的东西扔掉；先测量（`git diff --stat` + `pytest`）再决定，才是"先按实际代码工作" |
+| **2026-09-25** | **删除翻译 / 生词本 / 笔记三个功能**（`translator.py`、`translate/`（8 文件）、`vocab.py`、`notes.py` 及全部键位、CLI 子命令、配置段、专用校验脚本、测试） | 用户明确要求"去掉翻译、生词本、笔记相关功能"。一次性删净比留死代码好：留下 `notes.py` 却不给入口，下个会话只会以为它还在用。实测规模：**-10,649 / +599 行**（`git diff --stat`，含测试与文档） |
+| **2026-09-25** | 成就**一条都不删**，改走"**遗留数据只读计数**"（`stats._vocab_file_size` / `achievements._note_total`） | 用户的成就是真实攒出来的，删功能不该把已解锁的记录变成"再也不可能达成"。老数据文件（`vocab.json` / `notes/*.md`）因此继续被只读，4 条成就（词汇积累 / 生词狂魔 / 笔记达人 / 翻译狂魔）**封存**但能靠历史数据保持进度 |
+| **2026-09-25** | 老配置里的死键只**警告**、不报错、不改文件（`Config.unknown` → `cli._print_config`） | 用户的 `settings.toml` 里还留着 `[translator]` / `[translate]` / `[vocab]` 三段共 20+ 键。报错等于"升级即打不开"，静默忽略等于"以为还在用"。警告是唯一既诚实又不伤人的做法；`werd config <path> <value>` 写入不存在的键**仍然报错**（打错字必须被发现） |
+| **2026-09-25** | 白名单保留 `word_add` / `note_add`，`werd stats --json` 保留 `vocab_count` / `translations` / `translate_hits` / `notes_count` | 这两类名字已写进 README 与老用户的脚本里。少一个键，别人的解析脚本就 KeyError；少一个事件，引擎会把它当未知事件丢掉。保留的成本是"多两个没人调的常量"，收益是不破坏已文档化的接口 |
+| **2026-09-25** | 词汇/笔记的只读统计函数**吞掉一切异常返回 0**，而不是向上抛 | 它们挂在每次 `werd stats` 与每次成就判定的路径上：老数据文件坏掉、目录没权限、编码不对，都只该让那个数字变成 0，**绝不能让阅读器打不开** |
 

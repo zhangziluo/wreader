@@ -1,12 +1,10 @@
 """Shared fixtures for the wreader test suite.
 
 Every test runs against a throwaway ``$WREADER_HOME``, so the real
-``~/.wreader`` (settings, library, notebook and cache) is never touched.
+``~/.wreader`` (settings, library and cache) is never touched.
 
 The modules are written as plain functions over plain data, and the documented
-seams are used here: ``$WREADER_HOME`` for the data directory,
-:func:`wreader.translator.set_backend` for a network-free back-end,
-``review_order(seed=...)`` for a reproducible shuffle and
+seams are used here: ``$WREADER_HOME`` for the data directory and
 ``load_achievements(path)`` for a custom definition file.
 """
 
@@ -20,15 +18,15 @@ from dataclasses import dataclass
 # 临时目录路径
 from pathlib import Path
 # 类型注解
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, Optional, Sequence, Tuple
 
 # pytest 的 fixture / monkeypatch / raises
 import pytest
 
 # 被测模块
-from wreader import config, library, translator, vocab
+from wreader import config, library
 
-# 一本中文小书：两个章节、三段正文（行号是阅读器/翻译的基准）
+# 一本中文小书：两个章节、三段正文（行号是阅读器与章节表的基准）
 #: A small book with three paragraphs and two detected chapters.
 BOOK_LINES: Tuple[str, ...] = (
     "第一章 科学边界",
@@ -41,7 +39,7 @@ BOOK_LINES: Tuple[str, ...] = (
     "“三体世界就在我们眼前。”丁仪说道。",
 )
 
-# 一本英文小书，用来测"书本身是英文/中文"时视图的区别
+# 一本英文小书；书名与正文都是英文，用来测阅读器显示英文原书时的表现
 ENGLISH_LINES: Tuple[str, ...] = (
     "Chapter One",
     "",
@@ -91,17 +89,12 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[H
     monkeypatch.delenv(config.ENV_NOVELS_DIR_LEGACY, raising=False)
     # API key 同理：不能让本机环境变量影响测试
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    # ``wreader.config`` caches by path+stamp and ``wreader.translator`` holds one global
-    # back-end; clear both so no test can observe another test's state.
-    # 清掉配置缓存与全局后端，保证测试之间互不干扰
+    # ``wreader.config`` 按路径+时间戳缓存配置；清掉它，保证测试之间互不干扰
     monkeypatch.setattr(config, "_CACHE", None)
     monkeypatch.setattr(config, "_CACHE_PATH", None)
     monkeypatch.setattr(config, "_CACHE_STAMP", None)
-    translator.set_backend(None)
     # 把 Home 交给测试用
     yield home
-    # 测试结束后再清一次后端，避免污染下一个测试
-    translator.set_backend(None)
 
 
 # 给需要显式拿到临时目录的测试用的同名 fixture
@@ -113,59 +106,6 @@ def home(isolated_home: Home) -> Home:
     """
     # 就是 isolated_home 那个对象，只是换了个更好记的名字
     return isolated_home
-
-
-# 假的翻译后端：记录调用、可控地"改写"结果，全程不联网
-class RecordingBackend(translator.Backend):
-    """A deterministic back-end that never touches the network.
-
-    ``reflow`` makes the answer split into a different number of pieces than the
-    input, which is what exercises the per-item retry path.
-    """
-
-    name = "recording"
-
-    def __init__(self, prefix: str = "EN:", reflow: bool = False) -> None:
-        # 译文前缀，方便断言"确实是这个后端翻的"
-        self.prefix = prefix
-        # True 时故意不按分隔符切分返回，用来触发逐条重试逻辑
-        self.reflow = reflow
-        # 记录每次调用的 (原文, 源语言, 目标语言)
-        self.calls: List[Tuple[str, str, str]] = []
-        # 记录 pause 被调用了几次（验证批次间限速）
-        self.pauses = 0
-
-    def translate(self, text: str, source: str = "auto", target: str = "en") -> str:
-        # 记下这次调用
-        self.calls.append((text, source, target))
-        # reflow 模式：整批只返回一段，份数永远对不上
-        if self.reflow:
-            # A single piece for the whole batch: never the input's piece count.
-            flat = text.replace(translator.PARAGRAPH_SEPARATOR, " ")
-            return "{} {}".format(self.prefix, flat)
-        # 正常模式：按输入用的分隔符切开，逐段加前缀再拼回去
-        separator = (
-            translator.PARAGRAPH_SEPARATOR
-            if translator.PARAGRAPH_SEPARATOR in text
-            else "\n"
-        )
-        return separator.join(
-            "{}{}".format(self.prefix, piece.strip()) for piece in text.split(separator)
-        )
-
-    def pause(self) -> None:
-        # 计数即可，不真的 sleep
-        self.pauses += 1
-
-
-# 装上假后端的 fixture
-@pytest.fixture
-def backend() -> RecordingBackend:
-    """Install a recording back-end for the duration of one test."""
-    # 造一个并把它设为全局后端
-    fake = RecordingBackend()
-    translator.set_backend(fake)
-    return fake
 
 
 # 造 epub 文件的工厂 fixture
@@ -308,7 +248,7 @@ def achievements_document() -> Dict[str, Any]:
                 },
             },
         },
-        # 全局统计：两本书、7800 秒、两个有记录的日子、翻译 3 次
+        # 全局统计：两本书、7800 秒、两个有记录的日子（translations 是老数据里留下的计数）
         "stats": {
             "total_books": 2,
             "total_read_time": 7800,
@@ -317,14 +257,4 @@ def achievements_document() -> Dict[str, Any]:
         },
         "achievements": {"unlocked": [], "progress": {}},
     }
-
-
-# 预先塞两个生词的笔记本
-@pytest.fixture
-def notebook() -> Path:
-    """Seed a notebook with two words and return its path."""
-    # 两条记录都带例句，方便测上下文搜索与导出
-    vocab.add_word("ephemeral", "短暂的", context="An ephemeral joy.", book="B")
-    vocab.add_word("acknowledged", "公认的", context="A truth acknowledged.", book="B")
-    return vocab.vocab_file()
 

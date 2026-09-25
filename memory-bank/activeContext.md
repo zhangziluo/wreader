@@ -1,35 +1,31 @@
 # Active Context — 当前焦点与最近改动
 
-> 每次会话结束前更新这个文件。最后更新：**2026-09-23**。
+> 每次会话结束前更新这个文件。最后更新：**2026-09-25**。
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：`832 passed`、`pyright 0 errors / 0 warnings`、
-`tools/` 的 **10** 个校验脚本全绿（新增 `verify_achievements.py`，真 pty 19 项）。
-**成就 Phase 2/3 已交付**：实时按键 / 终端尺寸事件 + 屏内 5 秒通知 + 阅读器帮助页 `?` +
-意外中断恢复流程 + `wreader/geo.py` 与 `wreader/env.py`；成就总数 **28 → 48**（见 ㉙）。
-⚠️ 但注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **4513** 条语句上方没有紧邻注释行
-（本次会话把代码从 12.5k 行加到 14.9k 行，缺口自然变大；口径与处置见 ⑪ 与 `progress.md` 待办 #4）。
-⚠️ 本次会话开头**工作区是脏的**：`wreader/{achievements,cli,notes,reader}.py` 与三个测试文件带着
-上一会话未提交的改动（标记模式 `t` 翻译选区 + 笔记记章节/译文 + 「笔记达人」成就），
-其中 `tests/test_notes.py` 有一处**语法错误**（`editor` 工具留的伤：docstring 首行被吞）。
-已修好并在 ㉙ 里记录，全部改动与本会话的工作一起提交（见 ㉙ 的"接手时的状态"）。
-⚠️ IDE 里飘的**幽灵告警已侦破**（同一份 **143 行**野生 `cli.py` 碎片，见 ㉔ / ㉕）：
-`cli.py:24: 未定义"Optional"` 与 `cli.py:143: 所声明的返回类型为"int"的函数必须在所有代码路径上返回值`
-都出自它。⚠️ 且它**会回来**：2026-09-23 本次会话中途（15:20）它被 IDE 写回了仓库根，
-已读完对账并**再次删除**（`wreader/cli.py` **一行未改**）。
-再看到时照 ㉕ 的判据走：**先 `ls` 报错指向的那个路径**，别照报错改代码。
-已完成：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、启动方式文档、
-README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动翻页、翻页保留 3 行上下文（⑭）、
-翻页改按屏幕行精确推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)` 修掉半截段落被跳过（⑯）、
-新增 `werd continue` 列"最近打开阅读的三本书"（⑰）、安装压成三行命令 `./install.sh`（⑱）、
-**CLI 命令改名 `wreader` → `werd`（包名 / 仓库名 / 数据目录仍叫 `wreader`）（⑲）**、
-**目录 / 章节跳转：`Tab` 浮层 + `werd toc` + 新模块 `wreader/toc.py`（⑳）**、
-**笔记功能 Phase 1+2：标记模式 `m` + 笔记面板 `o`（㉑）**、
-**可插拔翻译引擎：`wreader/translate/` 六家引擎 + `werd config translate` 向导 + `t` 译文弹窗（㉒）**、
-**成就引擎 Phase 1：`wreader/achievements.py` 事件驱动 + 28 个成就 + `~/.wreader/achievements.json`（㉖）**、
-**笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` 落盘成 markdown + `werd notes` 三条路径（㉘）**、
-**成就 Phase 2/3：实时按键 / 屏内 5 秒通知 / 帮助页 / 中断恢复 / 地理 / 环境（㉙）**。
+代码库处于**干净、全绿**状态：**559 passed**（本机 12–20 秒）、`npx pyright` **0 errors / 0 warnings**、
+`tools/` 的 **8** 个校验脚本全绿（`check_docs` / `check_doc_numbers` / `check_comments` /
+`verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` / `verify_mouse` 8 项 /
+`verify_achievements` 19 项）、`git status` 干净且与 `origin/main` 同步。
+本会话（2026-09-25）做的是**功能裁剪**：翻译 / 生词本 / 笔记三个功能已从源码、测试、工具、
+文档里**整体删除**，成就靠**遗留数据只读计数**保住（见 ㉚）。
+
+- `wreader/` = **11** 个 `.py` / **8,840** 行；`tests/` = 10 个文件 / **559** 项；`tools/` = 8 个 `.py`。
+- 配置 **4 个 section / 16 个键**；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
+- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **2771** 条语句上方没有紧邻注释行
+  （最多：`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 223；
+  口径与处置见 `progress.md` 待办 #1）。
+- ⚠️ 遗留数据（`vocab.json`、`notes/*.md`、旧译文缓存）**仍被只读**，`werd stats --json`
+  的 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键仍在（脚本兼容）。
+- ⚠️ IDE 里飘的**幽灵告警**（仓库根那份 **143 行**野生 `cli.py`，见 ㉔ / ㉕）：
+  判据是**先 `ls` 报错指向的路径**，路径不存在就直接忽略，改看 `npx pyright` + `pytest`。
+  该文件已再次确认不在仓库里；它若回来，是 `editor` 超长替换"假成功"重演（坑 #20）。
+- 历史已完成（细节见下文各节）：中文注释、自动换行、背景跟随终端、git 化并推 GitHub、
+  README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动（⑫）、翻页保留 3 行（⑭）、
+  翻页按屏幕行推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)`（⑯）、`werd continue`（⑰）、
+  `./install.sh`（⑱）、CLI 改名 `werd`（⑲）、目录浮层 + `werd toc`（⑳）、
+  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -708,6 +704,8 @@ werd read f1ba2379642f
    保证测试**永不**卡在浮层的阻塞读里（否则会挂死）。
 
 ### ㉑ 笔记功能 Phase 1+2：标记模式 + 笔记面板（2026-09-23）
+> ⚠️ **本节描述的功能已于 2026-09-25 整体删除**（`m` / `o` 键位、`_mark_*`、`_note_*` 全部移除）。
+> 保留本节只为解释当时的取舍与踩过的坑（子窗口 / Textbox / `Ctrl+S`）。
 
 **需求**：给阅读器加"标记一段 → 写笔记"。规格给的键位 `v`（标记）与 `n`（笔记面板）
 **与既有功能冲突**（`v` = 查词入库、`n` = 下一个搜索命中），已让用户拍板：
@@ -773,6 +771,8 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
 - 引用区不做滚动（放不下只画前几行）。
 
 ### ㉒ 可插拔翻译引擎：`wreader/translate/` + 配置向导 + `t` 译文弹窗（2026-09-23）
+> ⚠️ **本节描述的功能已于 2026-09-25 整体删除**（`wreader/translate/` 整目录、`translator.py`、
+> `t` / `T` 键、`werd translate`、`[translate]` 段全部移除）。保留本节只为解释当时的取舍。
 
 **需求**：把翻译做成可插拔（`base` + 百度/有道/腾讯/DeepSeek/本地），加 `[translate]` 配置段、
 `werd config translate` 交互式向导、`t` 键译文弹窗、未配置时给可操作提示、把重依赖下沉到 extras。
@@ -875,6 +875,7 @@ Windows 无 `termios`、非 tty 会失败，两者都静默降级；`endwin()` �
   `TranslateUnavailable`（整本中止）处理，没有自动重试。
 
 ### ㉓ 修掉临时脚本 `/tmp/check_translate.py` 的 `Translator.params` 类型报错（2026-09-23）
+> ⚠️ 相关模块（`translate/`、`translator.py`）已于 2026-09-25 删除；本节留作"静态类型用错基类"的案例。
 
 报错是 `无法访问类 Translator 的属性 params`（Pylance）。根因**不是逻辑坏了，是静态类型用错了基类**：
 `params()` 只定义在 `BaiduTranslator` / `YoudaoTranslator` 上，基类 `Translator` 的契约里只有
@@ -1049,6 +1050,8 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 环境探测（`env.py`）、阅读器帮助页、意外中断自动恢复流程。
 
 ### ㉘ 笔记 Phase 3：`wreader/notes.py` + `wreader/lock.py` + `werd notes`（2026-09-23）
+> ⚠️ **本节描述的功能已于 2026-09-25 整体删除**（`notes.py`、`werd notes` 三条路径、`index.json`）。
+> **唯一留下的**是 `wreader/lock.py`（成就状态还在用它）与 `achievements._note_total()` 的只读计数。
 
 **需求**：用户给了 Phase 3 规格（存储逻辑 + CLI）：新增笔记模块、markdown 落盘 + `index.json`、
 30 秒自动保存、`Ctrl+S` 闪现"✓ 已保存"、`werd notes` 三条用法（清单 / 分页 / 导出）、
@@ -1196,98 +1199,157 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 7. 帮助页在 10 行高的假窗口里只画出 8 行 → 断言要挑第一屏就有的文字，
    或断言脚注里的 `还有 N 行`（`_draw_help` 会把剩余行数报出来）。
 
+### ㉚ 删除翻译 / 生词本 / 笔记三个功能，成就改走遗留数据只读（2026-09-25，本会话主任务）
+
+**需求**：用户要求"去掉翻译、生词本、笔记相关功能"，同时**不能丢掉已有成就**。
+
+**做法（按落地顺序）**：
+1. **源码删净**：删 `wreader/translator.py`、`wreader/translate/`（8 文件）、`wreader/vocab.py`、
+   `wreader/notes.py`；`reader.py` 移除 `m` / `o` / `v` / `l` / `c` / `t` / `T` 键与所有标记模式、
+   笔记面板、译文弹窗代码；`cli.py` 移除 `translate` / `vocab` / `notes` 三个子命令与 `_HANDLERS` 条目；
+   `config.SCHEMA` 从 7 段 37 键缩到 **4 段 16 键**（`[translator]` / `[translate]` / `[vocab]` 全删）。
+2. **成就保全**（关键取舍）：**一条成就都不删**。翻译 / 词汇 / 笔记相关的 4 条
+   （`vocab_100` 📝 词汇积累、`vocab_500` 🧠 生词狂魔、`note_master` 🖊️ 笔记达人、
+   `translate_maniac` 🔤 翻译狂魔）保留原条件，靠两个**只读**函数继续供数：
+   `stats._vocab_file_size()`（数 `vocab.json`）与 `achievements._note_total()`（数 `notes/*.md` 的
+   `## 笔记 #N` 小节）。两者都**吞掉一切异常返回 0**（坏 JSON / 坏编码 / 无权限 / 目录不存在）——
+   它们挂在每次统计与每次成就判定的路径上，抛异常等于"老数据一坏就打不开阅读器"。
+3. **接口兼容**：`EVENTS` 白名单保留 `word_add` / `note_add`（共 **16** 个事件，这两个已无调用方）；
+   `werd stats --json` 保留 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键。
+4. **配置兼容**：`Config.unknown` 收集老 `settings.toml` 里的死键，`cli._print_config` 逐条打
+   `warning: unknown setting '...' is ignored` —— **不报错、不改写用户文件**（真机实测见 `techContext.md`）；
+   反过来 `werd config <path> <value>` 写不存在的键**仍然报错**（打错字必须被发现）。
+5. **工具与文档**：删 `tools/verify_notes.py`；README / README.en.md / 使用指南.md / `tools/README.md`
+   的表格、数字、特色列表同步去功能；`pyproject.toml` 去掉 `deep-translator` / `argostranslate`
+   等依赖，运行时依赖仍为 **3** 个（`chardet` / `rich` / `requests`，其中 `requests` 现在只服务
+   地理成就的可选联网）。
+6. **记忆库全量复核**：`projectbrief.md` / `productContext.md` / `techContext.md` /
+   `systemPatterns.md` / `progress.md` / 本文件。
+
+**实测规模**：`git diff --stat` 为 **-10,649 / +599 行**。
+
+**验证证据（2026-09-25，全部通过）**
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| 测试 | `.venv/bin/python -m pytest tests/` | **559 passed**，11.76s |
+| 类型 | `npx pyright` | 0 errors / 0 warnings / 0 informations |
+| 编译 | `python -m py_compile`（wreader 11 + tests 10 + tools 8） | 全部通过 |
+| 折行 | `tools/verify_wrap.py` | 40077 项 |
+| 绘制 | `tools/verify_draw.py` | 140 项 |
+| 成就真 pty | `tools/verify_achievements.py` | 19 项 |
+| 鼠标真 pty | `tools/verify_mouse.py` | 8 项 |
+| 文档 | `tools/check_docs.py` / `check_doc_numbers.py` | 锚点 OK / ALL OK |
+| 配置兼容 | `werd config`（本机老 settings.toml） | 16 键表格 + 20+ 行 `unknown setting` 警告，退出码 0 |
+| 注释 | `tools/check_comments.py` | TOTAL: 2771（报告用，非门禁） |
+| 版本控制 | `git status` | 干净、与 `origin/main` 同步 |
+
+**教训**：删功能时"幽灵引用"比想象的顽固（详见 `systemPatterns.md` 坑 #31）——
+`cli` 的 subparser、`[tool.pyright]` 的 include、README 的表格与数字、`tools/` 的专用脚本、
+`pyproject.toml` 的 extras 各漏一处，都会以"启动即 ImportError"或"文档数字 FAIL"的形式炸出来。
+
+### ㉛ 记忆库 + 协议全量复核（2026-09-25 收尾，无代码改动）
+
+功能裁剪之后，把"项目状态"这几份文件按**实测**重新对了一遍，改的都是文档：
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `systemPatterns.md` | 模块职责表按 11 个 `.py` / 8,840 行重写；模式表补第 **11** 条"遗留数据只读兼容层"；新增「关键实现路径」调用链表；坑清单补到 **#33** |
+| `progress.md` | 当前状态表、已完成清单、待办、已知问题全部去功能；新增「遗留数据只读兼容」一节与 2026-09-25 决策行 |
+| `activeContext.md` | 开头的当前状态、㉑㉒㉓㉘ 加"已删除"标注、㉚ 记录整次裁剪、待办重写、注意事项去重 |
+| `memory-bank/README.md` | 本目录现状改成 **2026-09-25** 基线（559 / 29 个 `.py` / 8,840 行 / 2771 注释缺口 / `tools/` 8 个），旧基线降级为"仅作对照" |
+| `.clinerules/memory-bank.md` | 协议本身的三处过期：注释缺口 2279 → **2771**、`tools/` 脚本清单（去掉 `verify_notes.py`，补 `verify_mouse.py` / `verify_achievements.py`）、**代理没开时不要用 `git -c http.proxy= push` "绕过"**（实测挂在直连上）；另加"改文件只用 `editor`"的坑 |
+
+**顺手抓到的两处写错的事实**（值得记，因为都是"凭记忆写数字"翻车）：
+
+1. `activeContext.md` ㉚ 里把运行时依赖写成 `platformdirs` / `tomli-w` —— 实测 `pyproject.toml`
+   的 `dependencies` 是 **`chardet` / `rich` / `requests`**（`wreader/library.py` 用 chardet、
+   `cli.py` + `reader.py` 用 rich、`geo.py` 才 `import requests`）。已改正。
+2. `memory-bank/README.md` 说 `systemPatterns.md` 有 **12** 个设计模式 —— 实际一节一节数是 **11**。
+
+**再跑一遍全量验证（2026-09-25 收尾，数字与 ㉚ 完全一致）**：
+`pytest tests/` → **559 passed**（19.63s，机器负载不同所以比 ㉚ 记的 11.76s 慢）；
+`npx pyright` → 0 / 0 / 0；`py_compile`（wreader 11 + tests 10 + tools 8）→ 通过；
+`check_docs` → RESULT: OK；`check_doc_numbers` → RESULT: ALL OK；`check_comments` → **TOTAL: 2771**；
+`verify_wrap` → 40077；`verify_draw` → 140；`verify_mouse` → 8 项全过（约 40 秒）；
+`verify_achievements` → 19 项全过（约 50 秒）；`verify_colors` 用
+`script -q /dev/null .venv/bin/python tools/verify_colors.py` 跑（直接跑会报 "需要在真终端 / pty 里运行"），
+`/tmp/wreader_colors.txt` 结论：`has_colors=True`、`COLORS=256`、默认配色对 `(-1/-1)` 可用。
+另有两条**残留 grep** 结论：源码里剩下的 `vocab` / `translate` / `notes` 命中全是
+只读兼容函数与冻结成就的指标名；`README.md` / `README.en.md` 里的命中全是
+「历史遗留文件」「已知问题」两类**说明性**段落。
+
+⚠️ **踩到的一点小坑**：把 `verify_mouse.py` / `verify_achievements.py` 写进
+`for s in ...; do ... | tail -3; done` 这种管道循环里会**假挂**（实测 300 秒无输出、只能 `pkill`），
+单独跑就 40–50 秒正常通过 —— 这两个脚本自己开 pty、要么就单独跑，要么重定向到文件后台观察。
+
 ## 待办 / 下一步
 
-按优先级（本会话已完成的"成就 Phase 2/3"已从清单移除）：
+> 本文件只列"下一步做什么"；每条的理由与实测数字在 `progress.md` 的待办里（不在两处各写一份）。
 
-0. **成就 Phase 2/3 的遗留小尾巴**（都已记进 README「已知问题」）：
-   - 农历节日表（`achievements.LUNAR_HOLIDAYS`）**只到 2030 年**，
-     2031 起春节 / 中秋需要有人按历书补日期（公历节日不受影响）；
-   - `geo.py` 用的是 **HTTP** 免费端点（ip-api 的 HTTPS 要付费），
-     换服务商或加个可选的上游都得同时改 `parse_response` 与测试；
-   - 「方向键怀旧」只认 4 个方向键，`PgUp` / `PgDn` 被算作"别的翻页方式"（刻意，但可以再讨论）；
-   - `EVENTS` 里的 `check` 现在**没有调用方**了（`werd achievements` 改发 `achievements_view`）；
-     保留是为了不打断老脚本，若确定没人用可以在下个大版本删掉。
-1. **笔记的小尾巴**（Phase 3 已交付，这两条是新发现的、当初没计划的）：
-   - 编辑区仍**打不进中文**（`Textbox.do_command` 只认 `curses.ascii.isprint`），
-     且 `gather()` 会把字符截成 7 位 → 要支持得自己接管插入与回读（见坑 #29）；
-   - 笔记**没记源行号**，所以还不能"从笔记跳回原文"。要加就在 `notes.save_note` 补 `line`
-     （与书签同一套坐标：`正文.split("\n")` 的下标）。
-2. **`reader.theme` 仍未实现**（预留项）。若要做，需在 `_init_colors()` 里根据主题值
-   `init_pair()` 出一套配色，并给正文/状态栏/书签分配 color pair。
-3. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
-4. 可选：`werd continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit`
-   走 `SCHEMA`（项目约定：阅读行为不写魔数）。
-5. 可选（产品取舍，先问再做）：`werd continue` 只"列 id"，不做交互选择。
-   若哪天想省掉"抄 id"这一步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+
-   无参时续读最近一本 —— 但那会让程序替用户猜要读哪本，需先确认。
-6. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照
-   README 的手动步骤来（`pip install -e ".[windows]"` + 在 `$PROFILE` 里加函数）。
-   要补的话就写一个 `install.ps1`，做同样六件事（PowerShell 版的别名是 function 而不是 alias）。
-7. 可选：笔记编辑区的**中文输入**目前插不进去（`curses.textpad.do_command` 只认
-   `curses.ascii.isprint`，宽字符直接跳过）。要支持得自己接管插入 + 自己 gather
-   （`Textbox.gather()` 走 `curses.ascii.ascii(inch())`，宽字符会被截成 8 位）。
-   先记着，等用户真的抱怨再说。
-8. 可选：翻译引擎**没有重试 / 退避**。现在一次失败就按 `TranslateError`（单章）/`TranslateUnavailable`（整本中止）走，
-   网络抖动（尤其 Google 免费端点）会直接浪费一次整章。要加就加在 `EngineBackend.translate()` 里，
-   并且**必须可配置**（项目约定：阅读行为不写魔数），默认保持"不重试"以免掩盖真错误。
-9. 可选：`local`（Argos）现在只提示"去装语言包"，没告诉用户**怎么装**。若用户真的选它，
-   可以在 `werd config translate` 里多问一句，然后调用 `argostranslate.package` 装包。
-10. 可选：再加两家引擎（微软 Azure Translator、DeepL）—— 新包的设计就是"写一个模块 + 登一行"，
-    但**两家都需要可复现的外部签名向量**才敢合（见 ㉒ 里的验证结论）。
+0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **2771** 条缺口。
+   要么正式把口径定为"一段逻辑配一段注释"（文档已如此），要么对改到的文件做 `--strict` 增量门禁。
+1. **`reader.theme` 仍未实现**（预留项，改了没效果）：在 `_init_colors()` 里按主题 `init_pair()`，
+   并给正文 / 状态栏 / 书签分配 color pair；务必保住 `use_default_colors()` 的透明背景（背景用 `-1`），
+   改完跑 `tools/verify_colors.py`。
+2. 可选：给 `library.py` 补 `__all__`（目前唯一没有 `__all__` 的模块）。
+3. 可选：`werd continue` 目前**写死 3 本**。若想可配置，应加 `reader.continue_limit` 走 `SCHEMA`
+   （项目约定：阅读行为不写魔数）。
+4. 可选（产品取舍，先问再做）：`werd continue` 只"列 id"，不做交互选择。
+   若想省掉"抄 id"这步，可让 `read` 的 `book_id` 变成可选（`nargs="?"`）+ 无参时续读最近一本 ——
+   但那会让程序替用户猜要读哪本，需先确认。
+5. 可选：**Windows 还没有一键脚本**。`install.sh` 是 bash，Windows 用户目前只能照 README 的手动步骤
+   （`pip install -e ".[windows]"` + 在 `$PROFILE` 里加函数）。要补就写 `install.ps1`，
+   做同样几件事（PowerShell 的别名是 function 而不是 alias）。
+6. 可选：**遗留数据没有清理入口**（`~/.wreader/vocab.json`、`notes/`、旧译文缓存
+   `cache/<book_id>/ch*_en.txt`）。要么在 `werd stats` 里标一句"遗留数据，只读"，
+   要么加 `werd clean`（删之前必须问一次）。
+7. 可选：老 `settings.toml` 里的死键只在 `werd config` 列表时警告，不会从文件里删掉（刻意如此）。
+   若要做清理向导，挂在 `werd config --reset` 上，默认别动用户的文件。
+8. 可选：成就侧两处已无调用方的常量 —— `EVENTS` 里的 `word_add` / `note_add` 与 `check`
+   （`werd achievements` 改发 `achievements_view`）。保留是为了不打断老脚本，可留到下个大版本再删。
+9. 成就的两个已知边界（细节在 README「已知问题」）：
+   - 农历节日表（`achievements.LUNAR_HOLIDAYS`）**只到 2030 年**，2031 起要按历书补；
+   - `geo.py` 用的是 **HTTP** 免费端点（ip-api 的 HTTPS 要付费），换服务商得同时改
+     `parse_response` 与测试。
 
 ## 已知会话级注意事项
 
-- **数字的权威快照在 `memory-bank/README.md`**：「本目录现状」记着最近一次**全量复核**的实测值
-  （**832** 项测试 / **47** 个 `.py` / 注释缺口 **4513** / `tools/` **10** 个脚本）。
-  写任何数字前先看那里，或直接重跑 `tools/check_doc_numbers.py` 与 `tools/check_comments.py` ——
-  别凭记忆写"大概"。
+- **数字的权威快照在本文件开头与 `memory-bank/README.md`**：写任何数字前先看那里，或直接重跑
+  `tools/check_doc_numbers.py` 与 `tools/check_comments.py` —— 别凭记忆写"大概"。
 - **维护协议在 `.clinerules/memory-bank.md`**（对每次会话自动生效）：读取顺序、何时更新哪个
   文件、写作纪律、项目硬性约束都在那里。要调整协议只改那一个文件，别在 `memory-bank/` 里重复。
-- **不要用 `read_files` 读刚改过的同一段**：本会话中该工具多次返回
-  `[outdated - see the latest file content]`；改用 `sed -n 'A,Bp' file` 更可靠。
-- **`editor` 单次替换有 ~6000 字符上限**，大改要拆成多次小改。
-- **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q`
-  变成 `-qq`，只输出 `文件: 数量`。想看到 `N passed` 就别再加 `-q`。
-- **macOS 终端透明背景**：如果 `use_default_colors()` 之后背景依旧纯黑、透不出壁纸，
+- ⚠️ **改文件只用 `editor` 工具**：本环境 `cat > file <<EOF` 这类 heredoc 会把 shell 搅乱、
+  **文件一个字节都没写**（看着像成功）。`editor` 单次替换还有 ~6000 字符上限，超长替换会
+  "假成功"（在仓库根留一份野生文件）；大改拆小块，改完 `grep` / `head` 确认落地，
+  收尾 `git status` 扫一眼有没有怪文件。
+- **`read_files` 读刚改过的同一段可能返回 `[outdated ...]`**：复核刚改的内容改用 `sed -n 'A,Bp' file`。
+- **pytest 汇总行会消失**：`pyproject.toml` 的 `addopts` 已含 `-q`，命令行再加 `-q` 变成 `-qq`，
+  只输出 `文件: 数量`。想看到 `N passed` 就别再加 `-q`。
+- **macOS 终端透明背景**：若 `use_default_colors()` 之后背景依旧纯黑、透不出壁纸，
   那是终端模拟器自己的设置（如 iTerm2「在备用屏幕里禁用透明度」），应用层无法绕过。
 - **git 提交要连 memory-bank 一起**：协议要求"每完成一段工作就更新 `activeContext.md`"，
   所以收尾时 `git status` 应当干净；文档改动和代码改动一起 commit + push，别攒着。
   推之前留意别把 `book/`（已忽略）或临时脚本加进去。
-- **改 UI 一定要跑真 pty 验证**：`tools/verify_notes.py` 是新增的，它抓出了
-  `stdscr.newwin` 不存在（假窗口把它掩盖了）。**`FakeStdscr` 实现得越像真 curses，
-  越可能掩盖真 API 的差异** —— 只要动了子窗口 / Textbox / 鼠标 / 颜色，就跑一遍
-  `verify_notes.py` / `verify_mouse.py`（都要真 pty；非交互运行时记得给子进程显式设 `TERM`）。
-- **curses 子窗口的刷新顺序**：`stdscr.erase()` 会连带把子窗口覆盖的行标脏，
-  所以画叠窗时必须**先 `refresh()` 主窗口、再 `refresh()` 子窗口**，否则子窗口内容被擦掉。
-- **`Ctrl+S` 依赖 `_disable_flow_control()`**：面板的保存键走 `\x13`，终端 `IXON` 没关的话
-  会被行规程吞掉。改笔记面板的按键时，别把它当成"永远能收到"的普通键。
-- ⚠️ **`editor` 工具超长替换会"假成功"**：实测一次 ~5900 字符的替换返回"File created successfully"，
-  却在**仓库根**留下一个野生 `cli.py`（目标文件只改了一半）。**收尾时务必 `git status` 扫一眼有没有
-  莫名其妙的新文件**，大改动要拆小块并 `grep` 确认落地。
-  （㉔ 补充：野文件删了之后，**IDE 里它的告警还在飘** —— `cli.py:24 未定义 Optional` 就是这么来的，
-  代码没坏，别照它改代码。）
-- **子包的文件行数不进 `check_doc_numbers.py`**：名字会跟包根撞车（都有 `__init__.py`）。
-  所以 README 的子包条目只写职责、不写行数；行数记在 `techContext.md`。
-- **测试替身必须复刻真函数的语义**：`cli._prompt_line` 的"空输入 = 用默认值"被替身漏掉后，
-  "回车保留当前引擎"这条路径静默失去覆盖。
-- ⚠️ **`editor` 工具会静默吞掉锚点行**（2026-09-23 已是第四次）：把 `def xxx(...):` 当锚点做插入时，
-  如果 `new_text` 结尾忘了把这一行补回去，那个函数的 docstring 与函数体会**挂到上一个函数后面**，
-  `py_compile` 甚至可能还是过的。**对策**：插入类改动做完，立刻
-  `npx pyright` + `pytest` 各跑一次；改完 `grep -c '^def ' 文件` 对一下函数个数也很快。
+- **改 UI 一定要跑真 pty 验证**：`verify_mouse.py`（鼠标）、`verify_achievements.py`
+  （成就通知 / 帮助页 / 恢复流程）、`verify_colors.py`（配色）。
+  **`FakeStdscr` 实现得越像真 curses，越可能掩盖真 API 的差异** ——
+  历史上 `stdscr.newwin` 不存在这个错误就是靠真 pty 才抓出来的。
+  非交互运行时记得给子进程显式设 `TERM`（鼠标那项要 `TERM=xterm-1006`）。
+- **`Ctrl-S` 依赖 `_disable_flow_control()`**：终端 `IXON` 没关就会被行规程吞掉。
+  现在没有 `Ctrl-S` 键了，但这个函数仍在；以后任何 Ctrl-Q/Ctrl-S 绑定都要先确认它被调用过。
+- **只读兼容函数不许抛异常**：`stats._vocab_file_size()` / `achievements._note_total()` 挂在
+  每次统计与每次成就判定的路径上，坏 JSON / 坏编码 / 无权限一律吞掉返回 `0`。
 - **`importlib.metadata` 在仓库根会被 `wreader.egg-info` 遮蔽**：`distribution("wreader")` 先命中
   源码树里那份（没有 `direct_url.json`），于是"可编辑安装"探测在仓库根误判。
-  `env.direct_url_text()` 改成遍历 `distributions(name=...)` 逐个尝试；以后凡是要读安装元数据，
-  都按这个写法。
-- **给 `daily_open` 钉时间的测试要避开节日**：现在有「节日读者」成就，`2026-01-01` 这种"看起来中立"
-  的日期会让它意外解锁。固定时刻用 `2026-01-15 12:00` 这类既不在 05:00-07:00、也不在
-  `achievements.HOLIDAYS` / `LUNAR_HOLIDAYS` 里的时间。
-- ⚠️ **推送依赖那台代理（`http://127.0.0.1:7897`）**（2026-09-23 会话末尾实测）：
-  代理没开时 `git push` 立刻报 `Failed to connect to 127.0.0.1 port 7897`，
-  而"绕过代理"的 `git -c http.proxy= push` **会挂在直连上**（实测挂了几分钟没结果，
-  只能 `pkill git-remote-https`）—— 直连 GitHub 在这台机器上是不通的，
-  所以**别把"绕过代理"当成万能解**。判据：先
-  `curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x http://127.0.0.1:7897 https://github.com`，
-  返回 200 就能推（代理一开，`git push` 立刻成功）。
-  反过来，**代理没开也不会挡住任何验证工作**：测试、`pyright`、`tools/` 全部离线可跑，
-  提交先留在本地、等代理起来再推即可。
+  `env.direct_url_text()` 遍历 `distributions(name=...)` 逐个尝试；以后读安装元数据都按这个写法。
+- **给 `daily_open` 钉时间的测试要避开节日**：固定时刻用 `2026-01-15 12:00` 这类既不在 05:00-07:00、
+  也不在 `achievements.HOLIDAYS` / `LUNAR_HOLIDAYS` 里的时间。
+- ⚠️ **推送依赖代理 `http://127.0.0.1:7897`**（实测）：代理没开时 `git push` 立刻报
+  `Failed to connect to 127.0.0.1 port 7897`，而"绕过代理"的 `git -c http.proxy= push` **会挂在直连上**
+  （实测挂几分钟无结果，只能 `pkill git-remote-https`）—— 直连 GitHub 在这台机器上不通，
+  别把"绕过代理"当万能解。判据：
+  `curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x http://127.0.0.1:7897 https://github.com`
+  返回 200 就能推。**偶发 `SSL_ERROR_SYSCALL` 是网络抖动，原样重试一次通常就好**。
+  代理没开也不挡任何验证工作：测试、`pyright`、`tools/` 全离线可跑，提交先留在本地等代理起来。
+- **在旧终端里验证 CLI 用 `.venv/bin/python -m wreader.cli ...` 最稳**：`install.sh` 往
+  `~/.zshrc` / `~/.bashrc` 写的别名只在**新开的** shell 里生效。

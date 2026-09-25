@@ -1,10 +1,11 @@
 # wreader · a terminal novel reader
 
-> Read txt / epub novels in your terminal: bilingual Chinese–English text, a vocabulary notebook, reading statistics and achievements.
-> A pure Python CLI. Your books stay on your machine, and your progress, words and stats are remembered.
+> Read txt / epub novels in your terminal: a fitted pager, a table of contents, search, bookmarks,
+> reading statistics and 48 achievements.
+> A pure Python CLI. Your books stay on your machine, and your progress and stats are remembered.
 
 No mouse, no GUI. Drop your novels into a folder, type one command, and page through them in the terminal;
-press a single key to look up a word you do not know and file it into your notebook; close the terminal and
+press `Tab` for the table of contents, `/` to search, `b` to bookmark a line; close the terminal and
 the next launch resumes exactly where you stopped.
 
 🌐 **中文**: [README.md](README.md) · **中文手把手教程**: [使用指南.md](使用指南.md) (Chinese only)
@@ -42,10 +43,6 @@ the next launch resumes exactly where you stopped.
 | 🔖 Chapters | Chapter headings (`第一章`, `Chapter 1`, …) are detected at import time; press `Tab` while reading for a **table-of-contents overlay** (filter with `/`, jump with `Enter`), or list them with `werd toc <id>`; for epubs the book's own `nav` / `toc` titles win |
 | 🔍 Search | Fuzzy library search over title, author and tags, with subsequence matching too (`hptr` finds *Harry Potter*) |
 | 📖 Reader | A curses pager: line jumps, chapter jumps, highlighted search, bookmarks, a status bar and automatic progress saving; wraps to the terminal width (CJK counted as two columns) and follows the terminal theme / transparency |
-| 🌍 Three views | `中文` / `英文` / `双语对照` (bilingual), cycled with `l`; a Chinese book read in the Chinese view needs no translation and works offline |
-| 🈶 Translation | **Pluggable engines**: Google (keyless, the default) / Baidu / Youdao / Tencent Cloud / DeepSeek / local Argos; configure with the `werd config translate` wizard. Chapter-level translation with an on-disk cache — translate once, reuse forever |
-| 📝 Vocabulary | Press `v` while reading to look a word up and keep it; notebook words are underlined in the reader. List, search, review, remove and export to Anki |
-| 🗒️ Notes | Press `m` to select text **on the current screen** with `h/j/k/l` (or the arrow keys), shown in reverse video, then `y` to copy it. Press `o` for the **note panel** (bottom 25%): the top half quotes the selection read-only, the bottom half is an editor; `Tab` swaps focus, `Ctrl+S` saves. Notes are **written to markdown** (`~/.wreader/notes/<book_id>.md`) and read back with `werd notes`; the editor keeps a crash draft every 30 seconds |
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
 | 🏆 Achievements | **48** achievements (first book, night owl, hundred-day streak, weekend warrior, …) unlocked by **events**, with per-category progress bars, an unlock animation and a bell; press `?` inside the reader for the help page |
 | ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
@@ -58,11 +55,11 @@ the next launch resumes exactly where you stopped.
 - **macOS / Linux**: `curses` ships with Python, so nothing extra is needed
 - **Windows**: install `windows-curses` as well (see Installation)
 - A UTF-8 capable terminal (required for Chinese books; the macOS Terminal, iTerm2 and Windows Terminal all qualify)
-- Network access only for Google translation and `werd translate`; reading locally works entirely offline
+- **Fully offline by default**: nothing is sent anywhere, and the only optional network call is the
+  geo lookup for the travel achievements (`stats.geo_lookup = false` turns even that off)
 
 These third-party libraries are installed automatically:
-`rich` (tables and progress bars), `chardet` (encoding detection), `deep-translator` (Google translation)
-and `requests` (DeepSeek translation).
+`rich` (tables and progress bars), `chardet` (encoding detection) and `requests` (the optional geo lookup).
 
 ---
 
@@ -79,7 +76,7 @@ cd wreader
 ```
 
 `./install.sh` takes care of everything else: it creates the `.venv` virtual environment,
-installs the four dependencies, **sets up the `werd` alias** (appended to `~/.bashrc` or
+installs the dependencies, **sets up the `werd` alias** (appended to `~/.bashrc` or
 `~/.zshrc` — running it twice will not add a second line) and finally checks the version:
 
 ```bash
@@ -174,8 +171,8 @@ same name in `$PROFILE`.
 
 The tool used to be called `nr`. Nobody has to move anything by hand: the first
 time `werd` runs, if `~/.wreader` does not exist yet and `~/.nr` does, the whole
-old directory is moved into place — settings, library index, notebook and
-translation cache included — and the old directory disappears.
+old directory is moved into place — settings, library index and achievements state
+included — and the old directory disappears.
 
 | Old name | Now | Compatibility |
 | --- | --- | --- |
@@ -232,13 +229,13 @@ Real `werd list` output:
 └───┴──────────────┴──────────┴─────────┴──────────┴───────┘
 ```
 
-What you see after quitting the reader with `q`:
+What you see after quitting the reader with `q` (a dim summary line is printed in the ordinary terminal):
 
 ```
-[双语对照 · 停在 120/281 行 (42.7%) · 本次 12:30 · 书签 2 个]
+《三体》 · 停在 120/281 行 (42.7%) · 本次 12:30 · 书签 2 个
 ```
 
-(Reader strings are Chinese: "bilingual view · stopped at line 120/281 (42.7%) · this session 12:30 · 2 bookmarks".)
+(Reader strings are Chinese: "title · stopped at line 120/281 (42.7%) · this session 12:30 · 2 bookmarks".)
 
 ---
 
@@ -253,17 +250,14 @@ At a glance:
 | `werd search <keyword>` | Fuzzy search over title / author / tags |
 | `werd read <book_id>` | Open the paged reader |
 | `werd continue` | The three books you opened most recently (with their ids) |
-| `werd translate <book_id>` | Translate and cache a whole book, chapter by chapter |
-| `werd vocab` | Vocabulary notebook: list / review / search / remove / export |
 | `werd stats` | Reading statistics and a heatmap (`--json` for scripts) |
 | `werd achievements` | Achievement list and unlock progress |
 | `werd werd` / `werd word` / `werd --werd` | The name easter egg (and the 名字彩蛋 achievement) |
 | `werd toc <book_id>` | Show a book's table of contents (chapters + progress %); `--rebuild` re-parses it |
-| `werd notes [book_id]` | Notes: no id lists the books that have notes; with an id it pages through them (space / `q`); `--export` writes the markdown out |
 | `werd config` | View or edit settings |
 
-Exit codes: `0` on success; `1` for a bad argument, nothing found (`no book matches ...`) or a translation
-with failed chapters (`Ctrl-C` gives `130`). Errors are always printed as `error: ...` — never as a raw traceback.
+Exit codes: `0` on success; `1` for a bad argument or nothing found (`no book matches ...`)
+(`Ctrl-C` gives `130`). Errors are always printed as `error: ...` — never as a raw traceback.
 
 ### `werd import <path>`
 
@@ -314,7 +308,7 @@ The heart of the tool; see [Reader key bindings](#reader-key-bindings) for every
   `session_end` event goes to the achievements engine (the line ranges walked this session are
   folded into the word count with per-range deduplication, so re-reading a page adds nothing).
 - Every `werd` start records a `daily_open` event (that is what "hundred-day streak" and "early
-  bird" look at), `werd import` records `book_add`, and `werd translate` re-checks afterwards.
+  bird" look at), and `werd import` records `book_add`.
 - It **needs a real interactive terminal**; in a pipe or with redirected output you get:
   `error: werd read needs an interactive terminal (a tty on stdin and stdout)`
 
@@ -344,42 +338,6 @@ you to pick a book with `werd list` (or import one) and still exits `0`.
 > With the alias from [Using werd in a new terminal](#using-werd-in-a-new-terminal) in place,
 > resuming after a reboot is two lines: `werd continue` for the shortlist, `werd read <id>` to open.
 
-### `werd translate <book_id>`
-
-```bash
-werd translate 3e027c4de949
-```
-
-For "translate the whole book once, then flip between views freely". Real output:
-
-```
-translating 《三体》 · 41 chapter(s) · backend google · batch 3000 chars
-translated 41, skipped 0 (already cached), 0 failed
-cache: /Users/you/.wreader/cache/3e027c4de949
-```
-
-- Cache is **per chapter**, and already translated chapters are skipped — so re-running after a `Ctrl-C`
-  simply resumes where it stopped.
-- A single failing chapter does not abort the run; the chapter numbers are listed and the next run picks them up.
-- A connectivity failure does abort, because retrying every remaining chapter would only waste time.
-
-### `werd vocab`
-
-With no flags it lists the notebook (20 words per page, newest first):
-
-```bash
-werd vocab                          # view (page 1)
-werd vocab --page 2 --per-page 50    # turn the page, change the page size
-werd vocab --search 公认             # reverse lookup by meaning (word / translation / context)
-werd vocab --review                  # review mode: shuffled, see the word then press Enter to check
-werd vocab --remove ephemeral        # delete a word
-werd vocab --export anki > deck.txt  # export Anki's tab separated format
-```
-
-`--review` is interactive in a real terminal (Enter reveals the meaning, `q` stops). If the output is
-redirected it degrades to printing every word with its meaning in one go.
-`--export anki` deliberately bypasses rich and writes to plain `stdout`, so the tabs survive redirection.
-
 ### `werd stats`
 
 ```bash
@@ -393,7 +351,7 @@ Real output:
 总阅读时长 12小时34分钟
 今日 45分钟 · 本周 5小时12分钟 · 本月 12小时34分钟
 每日目标 1小时 · 今日 75% ✓
-连续 3 天（每天 ≥30 分钟） · 读完 2 本 · 生词 128 个 · 用过翻译 46 次
+连续 3 天（每天 ≥30 分钟） · 读完 2 本
 最近 30 天（2026-08-23 → 2026-09-21，每列一周，周一开始）
 一   ░ · · ▒ ▓
 二   · ▒ ░ · █
@@ -407,8 +365,10 @@ then the 30-day heatmap with its legend.)
 - Each heatmap **column** is one week (Monday on top, Sunday at the bottom); days outside the window are blank.
 - `werd stats --json` top-level keys: `generated_at`, `today`, `total_seconds`, `total`, `today_seconds`,
   `week_seconds`, `month_seconds`, `daily_goal_seconds`, `goal_met`, `streak_days`, `streak_min_seconds`,
-  `books_read`, `finished_books`, `vocab_count`, `translations`, `night_seconds`,
-  `longest_session_seconds`, `achievements`, `books`, `daily`, `heatmap`, `heatmap_grid`.
+  `books_read`, `finished_books`, `night_seconds`, `longest_session_seconds`, `achievements`, `books`,
+  `daily`, `heatmap`, `heatmap_grid`, plus two **legacy** keys — `vocab_count` (entries in an old
+  `vocab.json`) and `translations` (the counter an old `library.json` kept). The reader no longer produces
+  those two numbers, but they are still read and printed so existing dashboards keep working.
 - The table and the JSON are rendered from the same dict, so the two can never disagree.
 
 ### `werd achievements`
@@ -420,7 +380,7 @@ werd achievements
 Real output:
 
 ```
-已解锁 1/28
+已解锁 1/48
   🏆 🗄️ 书库初成 书库里添加第 1 本书  解锁于 2026-09-21T16:13:43
 
 进行中
@@ -433,41 +393,8 @@ Real output:
     ...
 ```
 
-(`1/28 unlocked` and the unlocked entries with their timestamps, then `进行中` = "in progress": the
+(`1/48 unlocked` and the unlocked entries with their timestamps, then `进行中` = "in progress": the
 remaining ones grouped by category, one progress bar each.)
-
-### `werd notes`
-
-```bash
-werd notes                          # list the books that have notes (count / last modified / preview, newest first)
-werd notes 3e027c4de949             # page through one book's notes (space = next, q = quit)
-werd notes 3e027c4de949 --export    # write it out to ~/books/notes_3e027c4de949.md
-```
-
-The notes themselves are plain markdown under `~/.wreader/notes/`:
-
-```markdown
-# 三体
-
-书籍ID: 3e027c4de949
-创建时间: 2026-09-23T15:10:00
-
-## 笔记 #1 — 2026-09-23 15:10
-
-汪淼看到了一串数字在眼前跳动。
-我的想法：
-
-这段和《球状闪电》呼应。
-```
-
-- One file per book (`<book_id>.md`); the directory and the file header are created on the first
-  write, and every later note is **appended, never overwritten**.
-- `index.json` is a **derived index** (title / count / last modified / preview): delete it and it is
-  rebuilt, and editing the markdown by hand cannot make it lie.
-- Two writers at once (two terminals, or two machines over ssh) are serialised by the
-  `index.json.lock` file lock, so no note is lost.
-- When the output is redirected or piped, `werd notes <id>` does **not** wait for keypresses -- it
-  prints everything (otherwise `| less` would hang forever).
 
 ### `werd config`
 
@@ -476,7 +403,6 @@ werd config                            # print every setting (value / default / 
 werd config --path                     # print just the settings file path
 werd config reader.page_height         # read one setting
 werd config reader.page_height 30      # write one setting (saved immediately)
-werd config translate                  # interactive wizard: pick a translation engine and enter its keys
 werd config --reset                    # restore every default
 ```
 
@@ -525,7 +451,7 @@ The hint bar **at the bottom of the reader shows this list by default** (a trans
 replaces it), so there is nothing to memorise:
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 m标记 o笔记 l语言 t翻屏 T翻章 c中文 ?帮助
+q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助
 ```
 
 | Key | Action |
@@ -543,14 +469,7 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v�
 | `/` | Search (Chinese input works); jumps to the first hit and highlights all of them |
 | `n` | Next hit (wraps around) |
 | `b` | Toggle a bookmark on the current line; the status bar shows how many you have |
-| `l` | Cycle the view: `中文` → `英文` → `双语对照` → `中文` … |
-| `c` | Switch straight to the Chinese view (the usual key when reading an English book) |
-| `t` | Translate **the current screen only**; the result pops up at the bottom for **3 seconds** (any key closes it early), **without caching** (for a quick peek). If no engine is configured it tells you to run `werd config translate` first |
-| `T` | Translate and cache **the whole chapter**, with a progress bar; revisiting it later is instant and free |
-| `v` | Look a word up and file it in the vocabulary notebook (the prompt pre-fills the longest English word on the line) |
-| `m` | Enter **mark mode**: the cursor becomes a reverse-video block; extend the selection with `h` / `j` / `k` / `l` (or the arrow keys), `y` copies it and `Esc` cancels. Mark mode **does not page** — a selection is confined to the screen it started on |
-| `o` | Expand / fold the **note panel** (bottom 25% of the screen; the text area shrinks accordingly): the top half is the **quote area** (read-only, dim, showing what `y` copied as `> …`) and the bottom half is the **editor** (a `curses` text box with Enter for newlines, backspace and left/right cursor keys); `Tab` swaps the focus, `Ctrl+S` saves and `Esc` closes the panel. In mark mode, `t` also translates the selection and stages it as part of the next note |
-| `?` | Open the **help page** (a centred overlay; `↑↓` / `j` / `k` scroll, `q` / `Esc` / `Enter` close): every key binding plus where the settings file lives |
+| `?` | Open the **help page** (a centred overlay; `↑↓` / `j` / `k` scroll, `q` / `Esc` / `Enter` close): every key binding — paging, chapters, search, bookmarks — plus where the settings file lives |
 
 Useful details:
 
@@ -563,7 +482,7 @@ Useful details:
   Use the arrow keys or dragging instead; nothing else is affected.
 - **The bottom two rows are the status area**: the second-to-last row is assembled from
   `reader.status_bar_format` (drawn in reverse video); the last row is the hint bar — the key list normally,
-  or a transient message such as `已加入生词本：xxx = 承认` ("added to notebook") when there is one.
+  or a transient message such as `已加书签：第 42 行` ("bookmarked line 42") when there is one.
 - **An unlock while reading flashes a plate in the top right corner** (`🏆 成就解锁 · <name>` plus a dim
   line), stays for **five seconds** and then disappears on its own: no key press is swallowed and nothing
   blocks the loop. ⚠️ On a terminal too small for it (narrower than 24 columns or shorter than 6 rows) the
@@ -575,31 +494,15 @@ Useful details:
   costs you that one resume offer, never the position stored in the library index.
 - **The leftmost column of every text row is the bookmark gutter**: bookmarked lines show `★`, other rows are blank.
 - **Search highlighting**: the hit you jumped to is in reverse video, the other hits in the same set are bold.
-- **Notebook words are underlined** while `vocab.highlight_in_reader = true`; turn it off if the underlines distract you.
-- **After pressing `v`**: with `vocab.auto_add_on_mark = true` the word is stored immediately; set it to `false`
-  and a small popup asks `[y] 加入生词本　其他键 取消` ("press y to add, any other key cancels").
-- **Taking notes**: `m` starts mark mode → select with `h/j/k/l` (or the arrow keys) → `y` copies it
-  (truncated at 2000 characters, with a message when it bites) → `o` opens the panel, the quote area shows the
-  selection and you write in the editor → `Ctrl+S` saves. While folded, the hint bar shows
-  `📝 N条笔记 | 按o展开` ("N notes, press o to expand"). Four things worth knowing:
-  1. the editor is a `curses.textpad.Textbox`, so **typing Chinese depends on your IME** — in practice
-     it is an English / pinyin editor;
-  2. the panel's `Ctrl+S` needs XON/XOFF flow control to be off (the reader tries to clear `IXON` on startup);
-  3. **notes do hit the disk**: `Ctrl+S` appends to `~/.wreader/notes/<book_id>.md` (plain markdown, editable
-     by hand), and closing the panel with `Esc` commits whatever is still uncommitted;
-  4. the editor keeps a **crash draft every 30 seconds** (`<book_id>.draft.md`), so a crash, a power cut or a
-     `Ctrl-C` loses nothing: the next time you open the panel the text is back. `Ctrl-C` only leaves a draft;
-     `Esc` commits a real note.
-- **Slow chapters** (more than 30 minutes spent in one chapter) make the hint bar suggest pressing `c` for Chinese.
 - **`Ctrl-C` mid-session loses nothing**: the position and the session duration are still saved on the way out.
 
 ---
 
 ## Settings
 
-Everything lives in `~/.wreader/settings.toml`, split into 6 sections. Edit the file directly, or use
-`werd config <section.key> <value>`. **Deleting any line falls back to that setting's default**, so you cannot
-really break it.
+Everything lives in `~/.wreader/settings.toml`, split into 4 sections (`reader` / `stats` / `library` / `toc`,
+16 entries). Edit the file directly, or use `werd config <section.key> <value>`.
+**Deleting any line falls back to that setting's default**, so you cannot really break it.
 
 ### `[reader]`
 
@@ -615,7 +518,7 @@ really break it.
 | `theme` | `"default"` | Colour theme name (reserved, not implemented yet) |
 | `store_history` | `true` | Record this session's duration into the statistics; `false` reads without counting time |
 
-`status_bar_format` understands 12 segments, joined into `segment1 · segment2 · segment3`:
+`status_bar_format` understands 9 segments, joined into `segment1 · segment2 · segment3`:
 
 | Token | Shows |
 | --- | --- |
@@ -624,82 +527,14 @@ really break it.
 | `chapter` | Current chapter title (`无章节` when the book has no chapters) |
 | `position` | `行 120/281` (line 120 of 281) |
 | `percent` | `42.7%` |
-| `mode` | Current view: `中文` / `英文` / `双语对照` |
 | `duration` | `本章 05:20` (time in this chapter) |
 | `elapsed` | `本次 12:30` (time this session) |
 | `streak` | `连续 3 天` (3-day streak) |
 | `bookmarks` | `书签 2` (2 bookmarks) |
-| `vocab` | `生词 128` (128 notebook words) |
-| `translations` | `翻译 46` (46 translation actions) |
 
 An unknown token is silently skipped rather than printed raw; if no segment resolves at all, the bar falls
-back to showing just the clock.
-
-### `[translator]`
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `backend` | `"google"` | **Legacy**: the engine selector used when `[translate] engine` is blank (`google` / `deepseek`) |
-| `batch_size` | `3000` | Character limit per request |
-| `cache_dir` | `"~/.wreader/cache"` | Translation cache directory; the default follows the data directory, so `$WREADER_HOME` applies too |
-| `deepseek_api_key` | `""` | Empty falls back to the `DEEPSEEK_API_KEY` environment variable |
-| `auto_translate_chapter` | `false` | Translate each chapter as it is entered (the lazy mode) |
-| `source_language` | `"auto"` | Source language; `auto` detects it |
-| `target_language` | `"zh-CN"` | Target language |
-| `deepseek_model` | `"deepseek-chat"` | DeepSeek model name |
-| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | Endpoint (any OpenAI-compatible service works here) |
-
-The engine choice and its keys are **not in this section** -- see `[translate]` below.
-
-### `[translate]`
-
-Translation engines are **pluggable**: one module per provider under `wreader/translate/`, and
-`[translate] engine` picks which one runs. **The quickest way is the wizard**, which lists every engine,
-asks for its keys and re-checks the result before it exits:
-
-```bash
-werd config translate
-```
-
-Configuring by hand means editing this section:
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `engine` | `""` | `google` / `baidu` / `youdao` / `tencent` / `deepseek` / `local`; **blank = fall back to `[translator] backend`** |
-| `baidu_appid` / `baidu_secret` | `""` | Baidu APPID and secret (MD5 signature) |
-| `youdao_appid` / `youdao_secret` | `""` | Youdao app id and app secret (SHA-256 signature) |
-| `tencent_secret_id` / `tencent_secret_key` | `""` | Tencent Cloud SecretId and SecretKey (TC3-HMAC-SHA256 signature) |
-| `tencent_region` | `"ap-beijing"` | Tencent region; it **takes part in the signature**, and a wrong one is rejected |
-| `deepseek_api_key` | `""` | Blank falls back to `$DEEPSEEK_API_KEY` |
-| `deepseek_model` | `"deepseek-chat"` | DeepSeek model name |
-| `deepseek_url` | `"https://api.deepseek.com/v1/chat/completions"` | Endpoint (any OpenAI-compatible service works here) |
-
-How the six engines differ:
-
-| Engine | Needs a key | Notes |
-| --- | --- | --- |
-| `google` | no | **The default.** `deep-translator` underneath, works out of the box; throttled one second per batch, so whole-book runs are slow |
-| `baidu` | yes (APPID + secret) | General translation API V2; fast in China, has a free tier |
-| `youdao` | yes (app id + secret) | Youdao Zhiyun v3; good Chinese/English quality |
-| `tencent` | yes (SecretId + SecretKey) | Tencent Cloud TMT; the most involved signature (TC3), best if you already use Tencent Cloud |
-| `deepseek` | yes (API key) | LLM translation; the most coherent paragraph-level output; `temperature` 0.3, streamed |
-| `local` | no, but **needs a package** | Local Argos Translate, **fully offline**; install `pip install 'wreader[local]'` plus a language pack, otherwise it stays unavailable |
-
-A few examples:
-
-```bash
-werd config translate.engine deepseek
-werd config translate.deepseek_api_key sk-your-key
-# or, without writing the key into a file:
-export DEEPSEEK_API_KEY=sk-your-key
-
-werd config translate.engine baidu
-werd config translate.baidu_appid YOUR-APPID
-werd config translate.baidu_secret YOUR-SECRET
-```
-
-⚠️ With no usable engine configured, pressing `t` in the reader sends no request at all -- it just
-tells you to run `werd config translate`.
+back to showing just the clock. Segments are dropped **whole from the tail** when the line is too narrow,
+never cut in half.
 
 ### `[stats]`
 
@@ -709,13 +544,6 @@ tells you to run `werd config translate`.
 | `show_heatmap` | `true` | Show the 30-day heatmap in `werd stats` |
 | `achievement_sound` | `true` | Ring the bell (`\a`) when an achievement unlocks; set `false` if your terminal is loud |
 | `geo_lookup` | `true` | Look this machine's location up online (for the geography achievements). Set it to `false` to stay **fully offline**: the cache is not refreshed either, so those achievements simply stop moving |
-
-### `[vocab]`
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `highlight_in_reader` | `true` | Underline notebook words in the reader |
-| `auto_add_on_mark` | `true` | File a looked up word immediately, without the confirmation popup |
 
 ### `[library]`
 
@@ -728,6 +556,7 @@ tells you to run `werd config translate`.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `patterns` | `""` | **Extra** chapter-heading regexes; separate several with `\|` (the built-ins always apply), for styles like `### 楔子` |
+| `cache_dir` | `""` | Directory for the chapter cache; empty means `cache/` under the data directory (the cache file is `<book_id>_toc.json`) |
 
 ---
 
@@ -740,19 +569,16 @@ tells you to run `werd config translate`.
 | Achievements state | `~/.wreader/achievements.json` | `$WREADER_HOME` |
 | Reading session marker | `~/.wreader/reading_session.json` ("I am reading this book"; deleted on a clean exit, kept after a crash so the next start can ask whether to resume) | `$WREADER_HOME` |
 | Location cache | `~/.wreader/geo.json` (the ip-api answer, cached for an hour; deleting it just means one more lookup) | `$WREADER_HOME` |
-| Vocabulary notebook | `~/.wreader/vocab.json` | `$WREADER_HOME` |
-| Notes | `~/.wreader/notes/<book_id>.md` (one markdown per book) + `index.json` (derived index) + `<book_id>.draft.md` (uncommitted draft) | `$WREADER_HOME` |
-| Translation cache | `~/.wreader/cache/<book_id>/ch0_en.txt`, `ch0_bilingual.txt` | `translator.cache_dir` |
+| Chapter cache | `~/.wreader/cache/<book_id>_toc.json` (the extracted chapters; rebuilt automatically as soon as the text changes) | `toc.cache_dir` |
 | Book text (UTF-8) | `~/novels/<title>_utf8.txt` | `$WREADER_NOVELS_DIR`, `library.novels_dir` |
 
 On Windows the data directory is `%APPDATA%\wreader`.
 
-The three environment variables:
+Two environment variables:
 
 ```bash
 export WREADER_HOME=~/my-wreader-data    # move the whole data directory (tests / several profiles)
 export WREADER_NOVELS_DIR=~/my-novels    # move the novels directory
-export DEEPSEEK_API_KEY=sk-xxx           # DeepSeek key; the settings file wins over this
 ```
 
 The pre-rename `$NR_HOME` / `$NR_NOVELS_DIR` still work, but only when the new name is unset.
@@ -816,7 +642,30 @@ Worth knowing:
   `current_line` and a bookmark's `line` use that same coordinate system, so they can never drift apart.
 - `tags` is consumed by `werd search '#tag'`, but there is no CLI command to add tags yet — edit the index by hand.
 
-### `~/.wreader/vocab.json` — the vocabulary notebook
+### `~/.wreader/cache/<book_id>_toc.json` — the chapter cache
+
+The extracted chapters (title + starting line) cached as one small JSON file.
+
+- It is per book, deleting it affects nothing else, and it is rebuilt automatically the next time.
+- **It is rebuilt as soon as the converted text's mtime changes**, so there is nothing to clean by hand;
+  `werd toc <id> --rebuild` forces it now.
+- Older versions may also have left a `cache/<book_id>/` directory behind (the old translation cache) —
+  no code reads it any more, feel free to delete it.
+
+### Legacy files: `vocab.json` and `notes/`
+
+The vocabulary notebook (`~/.wreader/vocab.json`) and the notes (`~/.wreader/notes/*.md`) of older
+versions are **no longer written by the program**, but the achievement engine still counts them
+**read-only**:
+
+- entries with a `word` in `vocab.json` → the `vocab_count` metric (`werd stats --json` still prints it);
+- headings like `## 笔记 #N` in `notes/*.md` → the `notes_count` metric (that is what 「笔记达人」 watches).
+
+So the words and notes you recorded earlier are **not wasted**: the files are there, the progress is
+there, and sections you typed into the markdown by hand count too.
+Both files can be deleted at any time (the metric drops to zero immediately; unlocked achievements stay unlocked).
+
+The old format looked like this (this file is now only read, never rewritten):
 
 ```json
 [
@@ -831,19 +680,8 @@ Worth knowing:
 ]
 ```
 
-Looking the same word up twice **refreshes** the existing entry instead of adding a duplicate.
-A notebook written by an older version (the `{"words": [...]}` wrapper with `book_title` / `created`) still loads.
-
-### `~/.wreader/cache/<book_id>/` — the translation cache
-
-```
-ch0_en.txt          chapter 1's translation (one paragraph per line + blank lines) — always named _en,
-                    even though it holds the text in translator.target_language
-ch0_bilingual.txt   chapter 1 paired 中/英, which feeds the reader's bilingual view
-```
-
-The suffixes are fixed at `_en` and `_bilingual` (`_en` is a historical name for the "target language" file).
-The cache is per chapter, so deleting the whole directory affects nothing else — it just means re-translating.
+Both old shapes are accepted when counting: a top-level array, or the `{"words": [...]}` wrapper; an
+entry without a `word` does not count.
 
 ---
 
@@ -873,10 +711,10 @@ own. The **unlock records** live in `~/.wreader/achievements.json` (plain JSON, 
 | `words_10m` | 🎩 千万俱乐部 | Ten million words read |
 | `words_100m` | 👑 亿万富豪 | 100 million words read |
 | `words_1b` | 🌌 十亿富豪 | A billion words read |
-| `vocab_100` | 📝 词汇积累 | 100 words in the notebook |
-| `vocab_500` | 🧠 生词狂魔 | 500 words in the notebook |
-| `translator` | 🌍 双语者 | Use translation for the first time |
-| `note_master` | 🖊️ 笔记达人 | 50 notes on disk (counted from the markdown files) |
+| `vocab_100` | 📝 词汇积累 | 100 entries in the old `vocab.json` (**read-only**: the reader no longer writes it) |
+| `vocab_500` | 🧠 生词狂魔 | 500 entries in the old notebook (**read-only**) |
+| `translator` | 🌍 双语者 | `stats.translations >= 1` in the old `library.json` (**read-only**, a historical record) |
+| `note_master` | 🖊️ 笔记达人 | 50 notes in total (counted from `notes/*.md`, hand written ones included) |
 
 ### Reading habits (10)
 
@@ -900,7 +738,7 @@ own. The **unlock records** live in `~/.wreader/achievements.json` (plain JSON, 
 | `space_combo` | 👏 手速达人 | `space_combo >= 100` | 100 consecutive **spaces** in a row (any other key breaks the run) |
 | `page_streak` | 🌀 翻页永动机 | `page_streak >= 500` | 500 consecutive page turns (`j` / space / Enter / arrow keys / PgUp / PgDn) |
 | `arrow_chapters` | 🕹️ 方向键怀旧 | `arrow_chapters >= 1` | A whole chapter paged with **arrow keys only** (at least five presses, no `j`/`k`/space/Enter/`[`/`]`/`Tab`) |
-| `translate_maniac` | 🔤 翻译狂魔 | `translate_hits >= 100` | 100 presses of the translation keys (`t` and `T`) |
+| `translate_maniac` | 🔤 翻译狂魔 | `translate_hits >= 100` | 100 presses of the translation keys in total (⚠️ the reader's `t` / `T` are gone, so this only counts what an older version left behind) |
 | `help_fan` | ❓ 帮助迷 | `help_opens >= 1` | Open the help page with `?` |
 
 ### Tough ones (4)
@@ -934,13 +772,13 @@ Available metrics:
 | `books_read` / `finished` | books read / books finished | the library index |
 | `total_time` / `night_time` / `single_session` / `weekend_time` | total / night / longest session / weekend seconds | index + achievements state |
 | `streak` | consecutive days | the daily buckets in the index |
-| `vocab_count` / `translations` | notebook words / translation uses | notebook + index |
+| `vocab_count` / `translations` | notebook words / translation uses (**historical, read-only**: counted from the old `vocab.json` / `library.json`; the reader produces neither number any more) | notebook + index |
 | `library_books` | books in the library | the library index |
 | `words_read` | words read, **deduplicated by line range** | achievements state |
 | `days_opened` / `early_open` | days werd was opened / whether it was opened at dawn | achievements state |
-| `notes_count` | notes on disk (counted from the markdown files) | notes directory |
+| `notes_count` | how many notes were written in total (counted from `notes/*.md`, **read-only**) | notes directory |
 | `space_combo` / `page_streak` | longest run of spaces / longest run of page turns | achievements state (reported live by the reader) |
-| `arrow_chapters` / `translate_hits` | chapters read with arrow keys only / translation key presses | achievements state (reader) |
+| `arrow_chapters` / `translate_hits` | chapters read with arrow keys only / translation key presses (no key can fire the latter any more, only the old count is kept) | achievements state (reported live by the reader) |
 | `narrow_seconds` / `narrow_chapters` | seconds read in a ≤40 column window / chapters finished in a ≤60 column one | achievements state (reader) |
 | `help_opens` | how often the help page was opened | achievements state |
 | `crash_recovers` / `recover_declined` | times an interrupted session was resumed / restarted | achievements state |
@@ -957,10 +795,13 @@ Unlocking is **event driven**: every module calls
 `achievements.check_achievements(event, data)` with one of `daily_open` (every `werd` start),
 `session_end` (leaving the reader: duration, the line ranges walked and the key/size counters
 collected during the session), `book_add` (`werd import`), `progress_update`, `book_finish`,
-`word_add`, `note_add` (a note was saved), `key` / `resize` (live key presses and terminal resizes),
+`key` / `resize` (live key presses and terminal resizes in the reader),
 `help`, `recover` (the crash recovery prompt), `geo_change` (location probe), `env` (environment
 probe), `name_egg`, `achievements_view`, or a plain `check` (just re-evaluate now — old scripts still
-use it). An achievement never fires twice, and the whole
+use it). `word_add` / `note_add` (a vocabulary word / note was written) **stay on the whitelist** but
+nothing calls them any more: they exist as a compatibility entry point for older scripts, and dropping
+the names would break callers still using them.
+An achievement never fires twice, and the whole
 read-record-check-write cycle runs under a **file lock**, so two terminals cannot clobber each
 other (Windows has no `flock`; there the write stays atomic but unlocked).
 
@@ -991,47 +832,31 @@ wreader/
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
-│   ├── __init__.py          __version__ and the module map (19 lines)
-│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1145 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (1510 lines)
-│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (1008 lines)
+│   ├── __init__.py          __version__ and the module map (21 lines)
+│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1165 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (833 lines)
+│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (966 lines)
 │   ├── env.py               environment probe: cloud host / WSL / tmux / editable install (183 lines)
 │   ├── geo.py               location: ip-api lookup + a one hour cache, country → continent, feud pairs (343 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
-│   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (81 lines)
-│   ├── notes.py             notes: one markdown per book + a derived index + crash drafts (786 lines)
-│   ├── reader.py            the curses pager: views, search, bookmarks, status bar, wheel/touch, mark & notes, help page and notices (4478 lines)
-│   ├── translator.py        chapter cache / batching / paragraph mapping + the engine adapter (1199 lines)
-│   ├── vocab.py             the notebook: add, remove, search, review, Anki export (436 lines)
-│   ├── stats.py             metrics, heatmap, achievement definitions, celebration (785 lines)
+│   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (80 lines)
+│   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, toc overlay, help page and notices (2799 lines)
+│   ├── stats.py             metrics, heatmap, achievement definitions, celebration (817 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
-│   ├── translate/           pluggable translation engines (one module per provider; line counts live in the memory-bank)
-│   │   ├── __init__.py      engine registry + factory: build an engine by name
-│   │   ├── base.py          the Translator ABC: the translate() contract, credential checks
-│   │   ├── google.py        Google via deep-translator (free, no key, the default)
-│   │   ├── baidu.py         Baidu general translation API V2 (MD5 signature)
-│   │   ├── youdao.py        Youdao Zhiyun v3 (SHA-256 signature)
-│   │   ├── tencent.py       Tencent Cloud TMT (TC3-HMAC-SHA256 signature)
-│   │   ├── deepseek.py      DeepSeek chat completions (streamed SSE)
-│   │   └── local.py         local Argos Translate (offline, optional dependency)
 │   └── data/
 │       └── achievements.json  the 48 achievement definitions (348 lines)
-└── tests/                   832 tests, all offline (see "Running the tests" below)
-    ├── conftest.py          shared fixtures: isolated $WREADER_HOME, recording back-end, epub builder
+└── tests/                   559 tests, all offline (see "Running the tests" below)
+    ├── conftest.py          shared fixtures: isolated $WREADER_HOME, library samples, epub builder
     ├── test_achievements.py 51 tests — word counting, range dedup, event accounting, state file, locking, unlock checks, live thresholds, geo/env metrics
-    ├── test_config.py       51 tests — defaults, type checks, legacy migration, data dir adoption
+    ├── test_cli.py          33 tests — argument parsing, every sub-command's output, exit codes, the achievement banner, the name egg
+    ├── test_config.py       49 tests — defaults, type checks, legacy migration, data dir adoption, directory resolution
     ├── test_env.py          14 tests — cloud host / WSL / tmux / editable install probing (all injected)
     ├── test_geo.py          31 tests — country → continent, feud pairs, ip-api parsing, caching, offline fallback
     ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
-    ├── test_notes.py        30 tests — markdown appends, parsing, the derived index, export, drafts, the file lock
-    ├── test_reader.py       236 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay, mark mode & note panel,
+    ├── test_reader.py       174 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay,
     │                          help page, achievement notice, recovery flow
     ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
-    ├── test_translator.py   77 tests — language detection, batching, cache, engine adapter, error mapping
-    ├── test_translate.py    49 tests — engine registry, each provider's signature/request building, errors
-    ├── test_vocab.py        31 tests — notebook I/O, refresh-not-duplicate, review, Anki export
-    ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
-    └── test_cli.py          55 tests — argument parsing, every sub-command's output, exit codes, the notes list/pager, the engine wizard, the name egg
+    └── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
 ```
 
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,
@@ -1081,7 +906,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 832 tests, about 15 seconds
+pytest                      # 559 tests, about 15 seconds
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -1089,11 +914,12 @@ pytest -k "streak or heatmap" -q          # by name
 A few conventions the suite follows, which are worth knowing before you change code:
 
 - **It never touches your real data.** The autouse fixture in `tests/conftest.py` points
-  `$WREADER_HOME` / `$WREADER_NOVELS_DIR` at a `tmp_path` and clears both the `wreader.config` cache and the
-  `wreader.translator` global back-end, so every test starts clean.
-- **It never reaches the network.** Translation goes through the `RecordingBackend` in conftest
-  (installed with `set_backend`); Google and DeepSeek are only exercised down to their constructor
-  arguments, request payload and SSE parsing. To prove it, run the suite behind a dead proxy:
+  `$WREADER_HOME` / `$WREADER_NOVELS_DIR` at a `tmp_path` and clears the `wreader.config` cache,
+  so every test starts clean.
+- **It never reaches the network.** The only thing that would go out is the location lookup behind the
+  geography achievements, and every test injects a fake response (the request function in `wreader.geo`
+  is monkeypatched); the real `ip-api` payload is only used for the offline parsing tests. To prove
+  nothing slipped through, run the suite behind a dead proxy:
   ```bash
   HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 pytest
   ```
@@ -1112,10 +938,8 @@ python tools/check_docs.py            # doc anchors and code fences (after editi
 python tools/check_doc_numbers.py     # are the line/test counts in the READMEs still true?
 python tools/check_comments.py        # comment coverage (report only; add --strict to gate)
 python tools/verify_wrap.py           # wrapping invariants (expects OK: 40077 checks passed)
-python tools/verify_draw.py           # nothing drawn past the edge (expects OK: 420 draw checks passed)
-python tools/verify_notes.py          # real pty: mark mode + the note panel (expects RESULT: 全部通过)
+python tools/verify_draw.py           # nothing drawn past the edge (expects OK: 140 draw checks passed)
 python tools/verify_mouse.py          # real pty: wheel / touch dragging (expects RESULT: 全部通过)
-python tools/verify_translate.py      # real pty: the unconfigured hint and the wizard (no network)
 python tools/verify_achievements.py   # real pty: help page, the 5 second notice, crash recovery, the name egg
 script -q /dev/null python tools/verify_colors.py   # colours (needs a pty)
 ```
@@ -1155,15 +979,12 @@ UTF-8 and import it again for clean text.
 You cannot. The id is the SHA-1 of the text, so the second one reports `skipped 1 duplicate(s)`.
 Renaming the file does not help (the content is unchanged), but **editing** the content makes it a new book.
 
-**Q: I pressed `t` and got no translation.**
-`t` translates the current screen and deliberately does not cache. If it says `当前视图就是原文，无需翻译`
-("this view is already the source text"), the language you asked for is the book's own. To keep a translation
-permanently press `T` (caches the chapter) or run `werd translate <book_id>` once from the shell.
-
-**Q: Translation fails with `翻译不可用: ...`.**
-The Google backend needs connectivity; the DeepSeek backend needs an API key
-(`werd config translator.deepseek_api_key sk-xxx` or `export DEEPSEEK_API_KEY=...`). Google is often unreachable
-from mainland China — switch to DeepSeek there.
+**Q: `t` used to translate and `v` used to save a word — where did they go?**
+Translation, the vocabulary notebook and the notes panel have been **removed** from both the reader and
+the command line (code, key bindings and sub-commands are gone). Data you recorded earlier is not
+deleted: `~/.wreader/vocab.json` and `~/.wreader/notes/*.md` are still counted **read-only** by the
+achievement engine, so the progress of 词汇积累 / 生词狂魔 / 双语者 / 笔记达人 survives. Delete those
+two files to clear them out completely (already unlocked achievements stay unlocked).
 
 **Q: `werd read` says `needs an interactive terminal`.**
 The reader must run in a real terminal: no `| less`, no redirection, no CI.
@@ -1182,12 +1003,6 @@ werd config reader.store_history false
 werd config stats.achievement_sound false
 werd config stats.show_heatmap false
 ```
-
-**Q: How do I get my words into Anki?**
-```bash
-werd vocab --export anki > deck.txt
-```
-Then Anki → File → Import, choose "tab" as the field separator; the three columns are word / meaning / example.
 
 **Q: I deleted a book file but the index still lists it.**
 There is no CLI command for that yet. Delete the key under `books` in `library.json` (`werd list` stops showing
@@ -1216,11 +1031,11 @@ These are the limitations that genuinely exist today; better to write them down 
 - **Numeric values under `progress` in `library.json` are not coerced**: a hand written string
   (`"current_line": "12"`) still works because every consumer wraps it in `int(...)`, but it is not
   turned back into a number for you.
-- **The note editor is essentially English / pinyin**: it is built on `curses.textpad.Textbox`, so typing
-  Chinese depends on your IME; and its `Ctrl+S` requires XON/XOFF flow control to be off (the reader tries
-  to clear `IXON` on startup, but the save key never arrives when it cannot).  Note also that
-  `Textbox.gather()` masks every character to 7 bits, so **Chinese is never fed into the editor**: a
-  Chinese draft body is written to the note by the engine directly (see `_restore_draft`).
+- **Translation / the notebook / notes have been removed**: the `werd translate`, `werd vocab` and
+  `werd notes` sub-commands are gone, as are the reader's `l` / `c` / `t` / `T` / `v` / `m` / `o` keys,
+  and so are `wreader/translator.py`, `wreader/translate/`, `wreader/vocab.py` and `wreader/notes.py`.
+  The old data files are still there, but only counted **read-only** for achievements (see the FAQ above
+  and [Data formats](#data-formats)).
 - **The geography achievements need the network** (one HTTP request, cached for an hour): they ask
   `ip-api.com` for the country / city / timezone only. Setting `stats.geo_lookup = false` keeps everything
   offline — those achievements simply stay locked, and nothing else changes. Being behind a captive portal,
@@ -1236,16 +1051,14 @@ These are the limitations that genuinely exist today; better to write them down 
 Ten former issues that are now fixed, kept here so they are not mistaken for pending work:
 
 - ~~No LICENSE~~ → MIT added (`LICENSE` plus `license = "MIT"` in `pyproject.toml`).
-- ~~`translator.__all__` listed a non-existent `chapter_paragraphs`~~ → the name was removed and replaced by
-  the real `TranslatorCallable`; before the fix `from wreader.translator import *` raised `AttributeError`.
+- ~~`translator.__all__` listed a non-existent `chapter_paragraphs`~~ → that module was deleted along with
+  the translation feature, so the problem no longer exists.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
-  `pyright` now reports 0 errors / 0 warnings.
-- ~~No automated tests~~ → 832 pytest tests in `tests/`, all offline, none of them touching your data.
-- ~~A short source-language code made the default back-end refuse to translate~~ → fixed (found while
-  writing the tests): `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN` and
-  fails with `No support for the provided language` *before* sending anything. All three translation entry
-  points now pass the code through `normalize_language()`, so a hand written
-  `translator.source_language = "zh"` works too.
+  `pyright` now reports 0 errors / 0 warnings (`translator.py` / `vocab.py` went away with the feature).
+- ~~No automated tests~~ → 559 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~A short source-language code made the default back-end refuse to translate~~ → that code path was
+  removed together with the translation feature (the discovery back then, while writing the tests:
+  `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN`).
 - ~~A damaged file with a BOM aborted the whole import~~ → fixed: a BOM is read as UTF-8/16/32 with the
   wider encoding first (a UTF-32 BOM opens with the UTF-16 BOM bytes), and a family that fails to decode
   degrades to `(replaced)`; one bad file now lands in `failed` instead of killing the run.
@@ -1279,7 +1092,7 @@ your personal project, change that one line in `LICENSE` to your name or organis
 ## Related documents
 
 - **[使用指南.md](使用指南.md)** — a from-zero, step-by-step walkthrough in Chinese: install Python, create the
-  environment, import your first book, read with the keyboard, look up words, check the statistics, plus a
+  environment, import your first book, read with the keyboard, check the statistics, plus a
   troubleshooting table.
 - **[README.md](README.md)** — the Chinese version of this file.
 

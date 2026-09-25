@@ -1,9 +1,8 @@
 """A tiny cross-process file lock, shared by the plain-text stores.
 
-Two modules keep mutable JSON next to the user's data (:mod:`wreader.achievements`
-and :mod:`wreader.notes`).  Both do a read-modify-write cycle, so both need to
-serialise it: two terminals writing at the same moment would otherwise lose one
-of the updates.
+State files that need a read-modify-write cycle use this to serialise it
+(:mod:`wreader.achievements` today): two terminals writing at the same moment
+would otherwise lose one of the updates.
 
 The lock is a sibling ``<file>.lock`` taken with POSIX ``flock``.  Windows has no
 ``fcntl``, so there the lock degrades to a no-op and correctness rests on the

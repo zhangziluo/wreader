@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 37 项（2026-09-23：新增 [translate] 段的 11 个键与 stats.geo_lookup）
-    assert len(paths) == 37
+    # 当前 schema 共 16 项（reader 9 + stats 4 + library 1 + toc 2）
+    assert len(paths) == 16
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:
@@ -69,8 +69,6 @@ def test_settings_paths_follow_nr_home(isolated_home) -> None:
         ("store_history", "reader.store_history"),
         ("novels_dir", "library.novels_dir"),
         ("library_path", "library.novels_dir"),
-        ("translator", "translator.backend"),
-        ("target_language", "translator.target_language"),
         ("achievement_sound", "stats.achievement_sound"),
     ],
 )
@@ -153,7 +151,7 @@ def test_load_config_creates_the_file_with_the_defaults(isolated_home) -> None:
     assert settings.path.is_file()
     text = settings.path.read_text(encoding="utf-8")
     assert text.startswith("# wreader settings")
-    assert "[reader]" in text and "[translator]" in text and "[library]" in text
+    assert "[reader]" in text and "[stats]" in text and "[library]" in text
     assert settings.get("reader.page_height") == 24
     assert settings.get("reader.page_scroll_step") == 1.0
 
@@ -224,18 +222,18 @@ def test_config_sections_and_flat_view(isolated_home) -> None:
 
 
 def test_raw_section_only_holds_what_the_file_stored(isolated_home) -> None:
-    # 文件里只写了 backend 一项
+    # 文件里只写了 daily_goal_minutes 一项
     isolated_home.data.mkdir(parents=True, exist_ok=True)
     (isolated_home.data / "settings.toml").write_text(
-        '[translator]\nbackend = "deepseek"\n', encoding="utf-8"
+        "[stats]\ndaily_goal_minutes = 30\n", encoding="utf-8"
     )
     settings = config.load_config()
     # raw_section 只反映文件里真正写过的内容
-    assert settings.raw_section("translator") == {"backend": "deepseek"}
+    assert settings.raw_section("stats") == {"daily_goal_minutes": 30}
     # The coerced view still fills in every documented default.
     # 而常规视图会把默认值补齐
-    assert settings.section("translator")["batch_size"] == 3000
-    assert settings.get("translator.batch_size") == 3000
+    assert settings.section("stats")["show_heatmap"] is True
+    assert settings.get("stats.show_heatmap") is True
 
 
 def test_config_stored_keeps_the_raw_value(isolated_home) -> None:
@@ -281,8 +279,6 @@ def test_legacy_config_json_is_migrated_and_kept_as_a_backup(isolated_home) -> N
         json.dumps(
             {
                 "page_height": 30,
-                "target_language": "en",
-                "translator": "deepseek",
                 "novels_dir": "/tmp/old-novels",
                 "unknown_old_key": 1,
             }
@@ -295,8 +291,6 @@ def test_legacy_config_json_is_migrated_and_kept_as_a_backup(isolated_home) -> N
     assert settings.migrated_from == legacy
     # 扁平键都被映射到了正确的段
     assert settings.get("reader.page_height") == 30
-    assert settings.get("translator.target_language") == "en"
-    assert settings.get("translator.backend") == "deepseek"
     assert settings.get("library.novels_dir") == "/tmp/old-novels"
     # 映射表里没有的老键直接丢掉，不算"未知键"
     assert "unknown_old_key" not in settings.unknown
@@ -340,8 +334,8 @@ def test_resolve_cache_dir_follows_the_data_directory(isolated_home) -> None:
 
 def test_cache_dir_uses_the_setting(isolated_home) -> None:
     # cache_dir() 走配置：设了就返回设的值
-    chosen = isolated_home.root / "translations"
-    config.set("translator.cache_dir", str(chosen))
+    chosen = isolated_home.root / "toc-cache"
+    config.set("toc.cache_dir", str(chosen))
     assert config.cache_dir() == chosen
 
 
@@ -349,7 +343,7 @@ def test_effective_values_resolves_the_two_directory_paths(isolated_home) -> Non
     # effective_values 会把两个"目录类"设置替换成真实路径
     values = config.effective_values()
     assert values["library.novels_dir"] == str(isolated_home.novels)
-    assert values["translator.cache_dir"] == str(isolated_home.data / "cache")
+    assert values["toc.cache_dir"] == str(isolated_home.data / "cache")
 
 
 # ------------------------------------------------- the rename from nr to wreader
@@ -423,7 +417,9 @@ def test_migrate_legacy_data_dir_moves_everything(tmp_path: Path) -> None:
     (legacy / "cache" / "abc").mkdir(parents=True)
     (legacy / "settings.toml").write_text("[reader]\npage_height = 30\n", encoding="utf-8")
     (legacy / "library.json").write_text('{"books": {}}', encoding="utf-8")
-    (legacy / "cache" / "abc" / "ch0_en.txt").write_text("译文", encoding="utf-8")
+    (legacy / "cache" / "abc" / "abc123_toc.json").write_text(
+        '{"chapters": []}', encoding="utf-8"
+    )
     target = tmp_path / ".wreader"
 
     # 迁移成功并返回新路径
@@ -435,7 +431,9 @@ def test_migrate_legacy_data_dir_moves_everything(tmp_path: Path) -> None:
         "[reader]\npage_height = 30\n"
     )
     assert (target / "library.json").is_file()
-    assert (target / "cache" / "abc" / "ch0_en.txt").read_text("utf-8") == "译文"
+    assert (
+        target / "cache" / "abc" / "abc123_toc.json"
+    ).read_text("utf-8") == '{"chapters": []}'
 
 
 def test_the_adopted_settings_are_what_wreader_then_reads(
@@ -445,7 +443,7 @@ def test_the_adopted_settings_are_what_wreader_then_reads(
     legacy = tmp_path / ".nr"
     legacy.mkdir()
     (legacy / "settings.toml").write_text(
-        '[reader]\npage_height = 30\n\n[translator]\ncache_dir = "~/.nr/cache"\n',
+        '[reader]\npage_height = 30\n\n[toc]\ncache_dir = "~/.nr/cache"\n',
         encoding="utf-8",
     )
     target = tmp_path / ".wreader"

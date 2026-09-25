@@ -5,44 +5,31 @@ produced at import time.  The pager works in **source lines**: the stored file i
 split on ``\\n`` exactly the way the importer split it, so
 ``progress["current_line"]``, ``progress["bookmarks"][].line`` and every
 ``chapters[].line_start`` are indexes into the same list.  One source line may
-occupy more than one screen row (long paragraphs wrap, and the bilingual view adds
-a row per translation), so pagination is measured in **screen rows**: the next
-screen starts at the first row that did not fit, kept as a ``(source line, offset)``
-pair.  ``line_offset`` is the offset inside that line, and it is display state only
--- never written to disk, so ``progress["current_line"]`` stays a plain line index.
+occupy more than one screen row (a long paragraph wraps), so pagination is measured
+in **screen rows**: the next screen starts at the first row that did not fit, kept
+as a ``(source line, offset)`` pair.  ``line_offset`` is the offset inside that line,
+and it is display state only -- never written to disk, so
+``progress["current_line"]`` stays a plain line index.
 
-Views
------
-``l`` cycles the language view.  Each view first works out whether a translation
-is needed at all, so asking for the language the book is already written in is
-free and works offline:
-
-============  ========================================================
-view          what is drawn
-============  ========================================================
-中文 ``zh``     the text in Chinese (the original when the book is Chinese)
-英文 ``en``     the text in English (the original when the book is English)
-双语 ``both``   the original line, then its translation on the next row
-============  ========================================================
-
-``t`` translates only what is on screen and deliberately never caches it; ``T``
-translates the whole chapter and caches it in ``~/.wreader/cache/<book>/``; ``v`` looks
-up a single word and offers to file it in :mod:`wreader.vocab`.  ``Tab`` opens the
-table of contents overlay (see :mod:`wreader.toc`) and jumps to the chapter picked there.
+Keys
+----
+``j``/``k``/space and the arrow keys page the text, ``g`` jumps to a line,
+``[``/``]`` hop between chapters, ``Tab`` opens the table of contents overlay (see
+:mod:`wreader.toc`) and jumps to the chapter picked there, ``/`` searches and ``n``
+walks to the next hit, ``b`` toggles a bookmark, ``?`` shows the key map and
+``q``/``Q``/Ctrl-C leaves and saves the position.
 
 Settings
 --------
-The ``[reader]``, ``[translator]``, ``[stats]`` and ``[vocab]`` tables of
-``~/.wreader/settings.toml`` drive the front end (see :mod:`wreader.config`):
-``page_scroll_step`` sets how much the page keys move (``1`` = one screen) and
-``page_overlap`` how many lines of the previous screen stay visible after a page
-turn, ``status_bar_format`` picks the status segments, ``auto_save_interval`` writes the
-position while reading, ``auto_translate_chapter`` translates each chapter as it
-is entered, ``highlight_in_reader`` underlines notebook words and
-``auto_add_on_mark`` files a looked up word without asking.
+The ``[reader]`` and ``[stats]`` tables of ``~/.wreader/settings.toml`` drive the
+front end (see :mod:`wreader.config`): ``page_scroll_step`` sets how much the page
+keys move (``1`` = one screen) and ``page_overlap`` how many lines of the previous
+screen stay visible after a page turn, ``status_bar_format`` picks the status
+segments, ``auto_save_interval`` writes the position while reading and
+``store_history`` (``[reader]``) decides whether the session lands in the stats.
 
 Everything outside the curses front end is a plain function over plain data, so
-the paging, chapter, streak and view maths are testable without a terminal.
+the paging, chapter and streak maths are testable without a terminal.
 """
 
 # 延迟求值类型注解
@@ -50,18 +37,12 @@ from __future__ import annotations
 
 # 全屏终端界面（Unix 自带，Windows 需额外包）
 import curses
-# curses 的文本编辑控件：笔记面板的编辑区复用它现成的 Emacs 键绑定
-import curses.textpad
-# curses.ascii：判断可打印字符、取 NL 等控制码（自定义 validator 要用）
-import curses.ascii
 # 读会话现场（JSON）与写会话现场
 import json
 # 设置 locale，让 curses 正确显示中文宽字符
 import locale
 # 写会话现场时记下进程号，方便排查谁留下的
 import os
-# 高亮生词、句子边界识别要用正则
-import re
 # 判断 stdin/stdout 是不是真实终端
 import sys
 # 计时（monotonic 不受系统时间调整影响）
@@ -73,23 +54,20 @@ from datetime import date, datetime, timedelta
 # 正文文件路径
 from pathlib import Path
 # 类型注解
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、环境探测、地理、书库、统计成就、成就事件、目录、翻译、生词本、笔记
+# 同包引用：配置、环境探测、地理、书库、统计成就、成就事件、目录
 from . import (
     achievements,
     config,
     env,
     geo,
     library,
-    notes,
     stats,
     toc,
-    translator,
-    vocab,
 )
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
@@ -142,19 +120,6 @@ _DRAG_PRESSED = (
 # 纯位置报告位：有些终端拖到一半就不再报按键位，只发这个；此时只要还在拖动就继续算位移
 _MOUSE_MOTION = int(getattr(curses, "REPORT_MOUSE_POSITION", 0))
 
-# 三种阅读视图
-MODE_ZH = "zh"
-MODE_EN = "en"
-MODE_BOTH = "both"
-# 按 l 循环的顺序
-MODE_ORDER: Tuple[str, ...] = (MODE_ZH, MODE_EN, MODE_BOTH)
-# 视图的中文名，用于状态栏显示
-MODE_LABELS = {MODE_ZH: "中文", MODE_EN: "英文", MODE_BOTH: "双语对照"}
-
-# 打开一本书时的默认视图，按书的语言决定
-#: The view a newly opened book starts in, keyed by the book's own language.
-LANGUAGE_MODES = {"zh": MODE_ZH, "en": MODE_EN}
-
 # 状态栏支持的片段名，在配置里用 | 连接；不认识的会被跳过而不是原样打印
 #: The segments ``reader.status_bar_format`` understands, joined by ``|`` in the
 #: format string.  An unknown segment is skipped rather than printed raw.
@@ -164,13 +129,10 @@ STATUS_TOKENS: Tuple[str, ...] = (
     "chapter",
     "position",
     "percent",
-    "mode",
     "duration",
     "elapsed",
     "streak",
     "bookmarks",
-    "vocab",
-    "translations",
 )
 
 # 默认状态栏：时间 | 章节 | 本章时长
@@ -181,65 +143,19 @@ DEFAULT_STATUS_FORMAT = "time|chapter|duration"
 #: Lines of the previous screen kept on a page turn (``reader.page_overlap``).
 DEFAULT_PAGE_OVERLAP = 3
 
-# 在同一章里待多久后，建议去看一眼中文原文
-#: Time inside one chapter before the pager suggests peeking at Chinese.
-SLOW_CHAPTER_SECONDS = 30 * 60
-
 # 两个输入提示的前缀
 _SEARCH_PROMPT = "搜索: "
-_WORD_PROMPT = "生词: "
 
 # 底部常驻的快捷键提示
-_HINT = (
-    "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 v生词 "
-    "m标记 o笔记 l语言 t翻屏 T翻章 c中文 ?帮助"
-)
+_HINT = "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助"
 
 # 目录浮层占屏幕宽度的比例（靠右显示），其余留给正文
 _TOC_WIDTH_RATIO = 0.4
 # 目录浮层底部的快捷键提示
 _TOC_HINT = "↑↓ 选择  Enter 跳转  / 过滤  q/Esc 关闭"
-# 笔记面板底部的快捷键提示
-_NOTE_HINT = "笔记  Tab 切换焦点  Ctrl+S 保存  Esc 关闭"
-# 笔记面板展开时占屏幕高度的比例（贴在下方），其余留给正文
-_NOTE_PANEL_RATIO = 0.25
-# 编辑区每隔多久自动存一份草稿（秒）：只防"没提交就崩了"，不产生正式笔记
-#: Seconds between two automatic draft saves while the note panel is open.
-NOTE_AUTOSAVE_SECONDS = 30.0
-# 面板里轮询按键的间隔（毫秒）：既要即时回显按键，又要能按 30 秒节拍自动保存
-_NOTE_TICK_MS = 200
-# 手动保存后状态栏上那行提示显示多久（秒）
-_NOTE_SAVED_SECONDS = 1.5
-#: One selection may copy at most this many characters (``y`` truncates past it).
-# 一次标记最多复制多少字符，超出就截断并提示（别把整章塞进引用区）
-NOTE_MAX_CHARS = 2000
-# 引用区的引导符，跟 Markdown 引用一样
-_NOTE_QUOTE_PREFIX = "> "
-# 引用区还没有内容时显示的引导语
-_NOTE_QUOTE_EMPTY = "还没有引用：在正文里按 m 标记、y 复制"
-# 引用区里译文那一小块的引导语（与落盘 markdown 里的词完全一致）
-_NOTE_TRANSLATION_MARK = "译文："
+
 # Tab 键：get_wch 多数情况返回 "\t"，个别终端上报 KEY_TAB
 _TAB_KEYS = ("\t", int(getattr(curses, "KEY_TAB", 9)))
-# Esc：get_wch 一般返回 "\x1b"（字符串），个别终端上报 int 27，两种都认
-_ESCAPE_KEYS = ("\x1b", 27)
-# Ctrl+S：同样是"字符串 / 整数"两种上报；注意 IXON 流控会吞掉它，_run 里会先关流控
-_SAVE_KEYS = ("\x13", 19)
-
-# 翻译弹窗：显示多久、占屏幕多高、底部提示语
-#: Seconds the ``t`` translation popup stays on screen.
-TRANSLATION_POPUP_SECONDS = 3.0
-# 面板高度占屏幕的比例（贴底显示）
-_TRANSLATION_POPUP_RATIO = 0.4
-# 弹窗里轮询按键的间隔（毫秒）：既能立刻响应按键，又能按时自动消失
-_TRANSLATION_POPUP_TICK_MS = 100
-# 弹窗最后一行的说明文字
-_TRANSLATION_POPUP_HINT = "翻译（临时，不缓存）· 任意键关闭"
-# 标记模式 t 之后弹窗的说明文字：译文属于下一条笔记，按 o 才会落盘
-_MARK_TRANSLATION_HINT = "引用与译文已备好 · 按 o 打开笔记面板写想法 · 任意键关闭"
-# 抓拉丁单词（长度至少 3）用于"查词时默认选中的词"
-_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]{2,}")
-
 # -- 成就的屏内通知 ---------------------------------------------------------
 # 解锁成就时在屏幕右上角闪的那块提示停留多久（秒）——规格要求 5 秒
 #: Seconds the in-screen achievement notice stays on top of the text.
@@ -276,25 +192,13 @@ _HELP_LINES: Tuple[str, ...] = (
     "  g                            跳到指定行（输入行号）",
     "  G                            跳到全书末尾",
     "",
-    "【章节】",
+    "【本章】",
     "  [ / ]                        上一章 / 下一章",
     "  Tab                          目录浮层（/ 过滤，回车跳转）",
     "",
-    "【查找与标记】",
+    "【查找与书签】",
     "  /关键词                      搜索，n 跳到下一个命中",
     "  b                            加 / 删书签（行首的 ★）",
-    "  v                            查词并收进生词本",
-    "  m                            标记模式：h/j/k/l 选字、y 复制、t 翻译、Esc 取消",
-    "",
-    "【翻译与视图】",
-    "  l                            循环切换 中文 / 英文 / 双语对照",
-    "  c                            直接切回中文",
-    "  t                            翻译当前屏（弹窗几秒，不缓存）",
-    "  T                            翻译整章并缓存到磁盘",
-    "",
-    "【笔记】",
-    "  o                            笔记面板：Tab 切焦点、Ctrl+S 保存、Esc 关闭",
-    "  标记后按 o                   把引用（与译文）写进一条笔记",
     "",
     "【其它】",
     "  ?                            本帮助页",
@@ -338,11 +242,6 @@ _ARROW_BREAKERS = (
 )
 # 一章里至少按了几下方向键才算"用方向键读完"（否则在章界上戳一下 ↓ 就能解锁）
 _ARROW_CHAPTER_MIN_KEYS = 5
-
-# 关掉生词高亮时传给渲染器的空集合（避免每次新建）
-#: Passed to the renderer when ``vocab.highlight_in_reader`` is off.
-_EMPTY_WORDS: Set[str] = set()
-
 
 # 退出 curses 后用于打印摘要的 rich 控制台
 console = Console()
@@ -505,116 +404,9 @@ def find_matches(lines: Sequence[str], needle: str) -> List[int]:
     return [index for index, line in enumerate(lines) if lowered in line.lower()]
 
 
-def mode_language(mode: str, book_language: str) -> Optional[str]:
-    """Return the language *mode* needs, or ``None`` when it shows the original.
-
-    Asking for the language the book is already written in needs no translation
-    at all, and the bilingual view translates into whichever language the book is
-    *not* in.
-    """
-    # 双语对照：翻成"书不是的那种语言"
-    if mode == MODE_BOTH:
-        return "en" if book_language == "zh" else "zh-CN"
-    # 中文视图：书本来就是中文就不用翻
-    if mode == MODE_ZH:
-        return None if book_language == "zh" else "zh-CN"
-    # 英文视图：书本来就是英文就不用翻
-    if mode == MODE_EN:
-        return None if book_language == "en" else "en"
-    # 未知视图：按无需翻译处理
-    return None
-
-
-def detect_book_language(lines: Sequence[str], sample_lines: int = 60) -> str:
-    """Detect the book's language from its opening lines."""
-    # 取开头若干行拼接后交给 translator 的探测器（够代表整本书）
-    return translator.detect_language("\n".join(lines[:sample_lines]))
-
-
-def pick_word(line: str) -> str:
-    """Return the best default word to look up on *line*.
-
-    The longest Latin token wins, which is what a word lookup usually wants when
-    the line is English prose.
-    """
-    # 抓出所有拉丁词
-    tokens = _WORD_RE.findall(line or "")
-    # 取最长的那个当默认查询词；没有就返回空串
-    return max(tokens, key=len) if tokens else ""
-
-
-# 句子结束标点（中英文混用）
-_SENTENCE_END = "。！？!?."
-# 英文单词（含撇号和连字符）
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
-
-
-def sentence_around(line: str, word: str) -> str:
-    """Return the sentence of *line* that contains *word*.
-
-    Falls back to the whole line when the word is missing or the line carries no
-    sentence punctuation at all.
-    """
-    text = str(line or "").strip()
-    # 空行直接返回空
-    if not text:
-        return ""
-    # 统一小写做定位
-    needle = str(word or "").strip().lower()
-    # 没给单词：整行就是"上下文"
-    if not needle:
-        return text
-    # 找到单词在行内的位置
-    position = text.lower().find(needle)
-    # 找不到：退回整行
-    if position < 0:
-        return text
-    # 往前扫，找本句的起点（上一个句号之后）
-    start = 0
-    for index in range(position - 1, -1, -1):
-        if text[index] in _SENTENCE_END:
-            start = index + 1
-            break
-    # 往后扫，找本句的终点（下一个句号含在内）
-    end = len(text)
-    for index in range(position + len(needle), len(text)):
-        if text[index] in _SENTENCE_END:
-            end = index + 1
-            break
-    # 去空白返回；万一算出空串就退回整行
-    return text[start:end].strip() or text
-
-
-def split_highlight(text: str, vocab_words: Set[str]) -> List[Tuple[str, bool]]:
-    """Split *text* into ``(piece, highlighted)`` runs for the notebook words."""
-    # 没有文本或没有生词：整段不处理
-    if not text or not vocab_words:
-        return [(text, False)]
-    # 结果片段：(文本, 是否需要下划线)
-    pieces: List[Tuple[str, bool]] = []
-    # 已处理到的位置
-    position = 0
-    # 逐个扫英文单词
-    for match in _TOKEN_RE.finditer(text):
-        # 不在生词本里：跳过（它会被当作普通片段的一部分）
-        if match.group(0).lower() not in vocab_words:
-            continue
-        # 生词前面的普通文本
-        if match.start() > position:
-            pieces.append((text[position : match.start()], False))
-        # 生词本身
-        pieces.append((match.group(0), True))
-        position = match.end()
-    # 最后一个生词后面的尾巴
-    if position < len(text):
-        pieces.append((text[position:], False))
-    # 一个都没切出来时保证至少返回一段
-    return pieces or [(text, False)]
-
-
-# 一本书的阅读状态机：位置、视图、搜索、书签、计时
+# 一本书的阅读状态机：位置、搜索、书签、计时
 class Pager:
-    """Position, view, search state, bookmarks and stopwatches for one book."""
+    """Position, search state, bookmarks and stopwatches for one book."""
 
     def __init__(
         # 正文按 \n 切好的全部行
@@ -629,14 +421,8 @@ class Pager:
         book_id: str = "",
         title: str = "untitled",
         author: str = "unknown",
-        # 初始视图
-        mode: str = MODE_ZH,
-        # 书本身的语言
-        book_language: str = "zh",
         # 已有书签
         bookmarks: Sequence[Dict[str, Any]] = (),
-        target_language: str = "zh-CN",
-        source_language: str = "auto",
         # 连续阅读天数（状态栏显示用）
         streak: int = 0,
         # 翻页键一次走几屏
@@ -651,16 +437,8 @@ class Pager:
         status_bar_format: str = DEFAULT_STATUS_FORMAT,
         # 自动保存间隔（秒），0 = 关闭
         auto_save_interval: int = 60,
-        # 进入章节时自动翻译
-        auto_translate_chapter: bool = False,
-        # 是否高亮生词
-        highlight_vocab: bool = True,
-        # 查词后是否自动入库
-        auto_add_on_mark: bool = True,
         # 目录条目（章节表 + 百分比），供 Tab 浮层使用
         toc_entries: Sequence[Dict[str, Any]] = (),
-        # 这本书**已经在磁盘上**的笔记（打开阅读器时从 notes.py 读出来）
-        notes: Sequence[Dict[str, Any]] = (),
     ) -> None:
         # 拷贝成列表，避免外部改动影响内部状态
         self.lines = list(lines)
@@ -670,11 +448,6 @@ class Pager:
         self.book_id = book_id
         self.title = title
         self.author = author
-        # 视图必须是已知的三种之一，否则退回中文视图
-        self.mode = mode if mode in MODE_ORDER else MODE_ZH
-        self.language = book_language
-        self.target_language = target_language
-        self.source_language = source_language
         self.streak = int(streak)
         # -- runtime behaviour copied out of settings.toml -------------------
         #: how many pages the page keys move (``reader.page_scroll_step``)
@@ -705,27 +478,9 @@ class Pager:
         #: seconds between position saves, 0 disables (``reader.auto_save_interval``)
         # 自动保存间隔，0 表示关闭
         self.auto_save_interval = max(0, int(auto_save_interval))
-        #: translate each chapter as it is entered (``translator.auto_translate_chapter``)
-        # 是否进章即自动翻译
-        self.auto_translate_chapter = bool(auto_translate_chapter)
-        #: underline notebook words (``vocab.highlight_in_reader``)
-        # 是否在正文里给生词加下划线
-        self.highlight_vocab = bool(highlight_vocab)
-        #: file a looked up word without asking (``vocab.auto_add_on_mark``)
-        # 查词后是否免确认直接入库
-        self.auto_add_on_mark = bool(auto_add_on_mark)
         #: the table of contents: ``[{"title", "line", "percentage"}, ...]``
         # 目录条目（由 toc.load_toc 备好），Tab 浮层直接读它
         self.toc = [dict(entry) for entry in toc_entries]
-        #: chapters already translated or cached on demand this session
-        # 本次会话已尝试过自动翻译的章节（每章最多一次）
-        self.auto_translated: Set[int] = set()
-        #: lowercased notebook words, underlined while drawing
-        # 生词本里的小写词集合
-        self.vocab_words: Set[str] = set()
-        #: translation actions this session, folded into stats when it is saved
-        # 本次会话用了几次翻译，退出时并入统计
-        self.translations_used = 0
         # 起始位置夹到合法范围
         self.position = clamp(position, self.total)
         #: forward lines scrolled this session: the reading work actually done
@@ -736,42 +491,12 @@ class Pager:
         self.read_ranges: List[Tuple[int, int]] = []
         # 书签拷贝一份（深拷贝每个字典）
         self.bookmarks = [dict(mark) for mark in bookmarks]
-        # 行号 -> 译文（临时翻译与缓存翻译都放这里）
-        self.translations: Dict[int, str] = {}
         # 搜索命中的行号列表
         self.matches: List[int] = []
         # 当前看到第几个命中，-1 表示还没开始
         self.match_cursor = -1
         # 每章累计耗时（秒）
         self.chapter_seconds: Dict[int, float] = {}
-        # -- mark mode and the note panel (Phase 1+2: UI state only) ----------
-        #: mark mode is on: the cursor turns into a reverse video block
-        # 是否处于标记模式（m 进入；此模式只在一屏内选字，不翻页）
-        self.mark_mode = False
-        #: ``(screen row, column inside that row)`` where the selection starts
-        # 选区起点：屏幕行下标 + 该行内的字符下标（进入标记时落在当前屏首行行首）
-        self.mark_start: Optional[Tuple[int, int]] = None
-        #: ``(screen row, column)`` the selection currently reaches
-        # 选区终点；与 mark_start 一起决定高亮区间（尚未扩展时两者相同）
-        self.mark_end: Optional[Tuple[int, int]] = None
-        #: the text copied out of the last selection with ``y``
-        # 最近一次选中并复制的文字（y 写入），面板的引用区显示它
-        self.note_buffer = ""
-        #: translation staged for the next note (mark mode ``t``); ``""`` for none
-        # 已经备好的译文（标记模式 t 翻译选区后暂存），保存笔记时一起写入
-        self.note_translation = ""
-        #: notes saved this session: ``[{"quote", "text", "created"}, ...]``
-        # 这本书的笔记（打开时从磁盘读入，保存后追加）：与 notes.load_notes 同一形状
-        self.notes: List[Dict[str, Any]] = [dict(entry) for entry in notes]
-        #: the note panel is expanded (``o`` toggles it)
-        # 笔记面板是否展开（o 切换）；展开期间阅读区缩到上方
-        self.note_panel_open = False
-        #: which half of the open panel has the keyboard: ``"quote"`` or ``"edit"``
-        # 面板焦点：引用区还是编辑区（Tab 切换）
-        self.note_focus = "quote"
-        #: the rows ``_draw`` actually put on screen last frame
-        # 上一帧真正画出的可见行 ``[(源行号, 文本), ...]``；标记模式靠它定位与取词
-        self.viewport: List[Tuple[int, str]] = []
         # -- achievements: the reader's half of the bookkeeping (Phase 2) -----
         #: metrics as they stood when the book was opened (``{}`` = engine unreadable)
         # 开书那一刻的指标快照：判断"刚刚越过门槛了吗"要以它为基线
@@ -783,7 +508,7 @@ class Pager:
         # 本次会话已经报过的门槛：同一条线不重复触发（也就不会重复写状态文件）
         self.fired: List[Tuple[str, int]] = []
         #: session counters reported to the engine as *deltas*
-        # 本次会话累计的增量指标（方向键读完的章数、翻译次数、窄屏秒数……）
+        # 本次会话累计的增量指标（方向键读完的章数、窄屏读完的章数、窄屏秒数）
         # 类型是 float：窄屏秒数要按小数累积，报给引擎时才截断成整数
         self.key_counters: Dict[str, float] = {
             name: 0.0 for name in achievements.COUNTER_METRICS
@@ -872,59 +597,19 @@ class Pager:
         # 当前章节的行号区间
         return chapter_bounds(self.chapters, self.position, self.total)
 
-    def needs_translation(self) -> bool:
-        """Whether the current view needs a translation at all."""
-        # 视图要求的语言为 None 说明显示的就是原文
-        return mode_language(self.mode, self.language) is not None
-
-    def rows_for(self, index: int) -> List[str]:
-        """The screen rows one source line occupies in the current view.
-
-        A stored empty string means the line is already covered by a paragraph
-        translation above it, so it contributes no row of its own.
-        """
-        # 原始行
-        original = self.lines[index]
-        # 不需要翻译：一行就是一屏一行
-        if not self.needs_translation():
-            return [original]
-        # 这一行有译文（可能在 translations 里）
-        if index in self.translations:
-            translated = self.translations[index]
-            if not translated:
-                # Already covered by the paragraph translated above it.  In the
-                # bilingual view the source line still belongs on screen; in a
-                # translated-only view it would just be a duplicate, so it is
-                # dropped.
-                # 空串 = 已被上一行的整段译文覆盖
-                return [original] if self.mode == MODE_BOTH else []
-            # 双语：原文 + 译文两行
-            if self.mode == MODE_BOTH:
-                return [original, translated]
-            # 纯译文视图：只显示译文
-            return [translated]
-        # 还没有译文：先显示原文
-        return [original]
-
     def _row_texts(self, index: int, width: Optional[int]) -> List[str]:
         """Every screen row one source line owns, from its top downwards.
 
-        A source line can produce several rows: the bilingual view adds the
-        translation, and a long paragraph is wrapped by :func:`_wrap_line`, which
-        knows a CJK character is two columns wide.  An empty list means the line
-        contributes nothing -- the translated-only view drops a line whose
-        paragraph was already translated above it.
+        One source line is one piece of text; a long paragraph is wrapped by
+        :func:`_wrap_line`, which knows a CJK character is two columns wide.
         """
-        # 一个源行在当前视图下可能拆成多段显示文本（双语是原文 + 译文）
-        texts = self.rows_for(index)
+        # 一个源行就是一段显示文本
+        text = self.lines[index]
         # 没有宽度信息（纯数据场景）：一段文本就是一屏行
         if width is None:
-            return list(texts)
-        # 有宽度：每段各自按显示宽度折行，再依次拼起来
-        chunks: List[str] = []
-        for text in texts:
-            chunks.extend(_wrap_line(text, int(width)))
-        return chunks
+            return [text]
+        # 有宽度：按显示宽度折行后返回
+        return _wrap_line(text, int(width))
 
     def visible_rows(
         self, height: int, width: Optional[int] = None, offset: Optional[int] = None
@@ -1188,64 +873,6 @@ class Pager:
         return True
 
     # -- translation -----------------------------------------------------
-    def translate_screen(
-        self, first: int, last: int, progress=None, target: Optional[str] = None
-    ) -> int:
-        """Translate every paragraph touched by ``[first, last]`` into memory.
-
-        Paragraphs, not lines, are the unit: the back-end then sees whole sentences
-        instead of a pile of fragments, and the bilingual view can pair one Chinese
-        paragraph with one English paragraph.  Returns how many paragraphs landed.
-
-        *target* overrides the language the current view would ask for, which is
-        what lets ``t`` pop up a translation without switching the view first.
-        """
-        # 没显式指定就用当前视图该翻成的语言；None 表示这个视图不需要翻译
-        resolved = mode_language(self.mode, self.language) if target is None else target
-        if resolved is None:
-            return 0
-        # 划出与屏幕相交的段落区间
-        spans = translator.paragraph_spans(self.lines, first, last)
-        if not spans:
-            return 0
-        # 逐段翻译（只进内存，不缓存）
-        english = translator.translate_paragraphs(
-            translator.paragraph_texts(self.lines, spans),
-            target=resolved,
-            source=self.source_language,
-            progress=progress,
-        )
-        # 把结果挂到对应行号上
-        self.translations.update(translator.map_paragraphs(spans, english))
-        # 返回翻译了几段
-        return len(spans)
-
-    def load_chapter(self, chapter_index: int) -> int:
-        """Merge a cached chapter translation into the view.
-
-        Returns how many source lines the cached chapter covers.
-        """
-        # 从磁盘上的章节缓存读出"行号 -> 译文"
-        mapping = translator.load_chapter_map(self.book_id, int(chapter_index))
-        if not mapping:
-            return 0
-        # 合并进当前译文字典
-        self.translations.update(mapping)
-        return len(mapping)
-
-    def word_target(self) -> str:
-        """The language a single word lookup should aim for."""
-        # 当前视图要翻成什么语言；若视图就是原文则用配置的目标语言
-        return mode_language(self.mode, self.language) or self.target_language
-
-    def set_vocab_words(self, words: Iterable[str]) -> None:
-        """Replace the set of notebook words that get underlined while drawing."""
-        # 统一小写并存成集合，绘制时查得快
-        self.vocab_words = {
-            str(word).strip().lower() for word in words if str(word).strip()
-        }
-
-    # -- chapter stopwatch ------------------------------------------------
     def _sync_chapter(self) -> None:
         """Roll the per-chapter stopwatch over when the chapter changes."""
         # 现在在第几章
@@ -1286,18 +913,6 @@ class Pager:
         # 本次会话总时长
         return time.monotonic() - self._session_entered
 
-    def slow_chapter_hint(self) -> str:
-        """The nudge shown after a long stretch inside a single chapter."""
-        # 已经是中文视图：不用提醒
-        if self.mode == MODE_ZH:
-            return ""
-        # 还没待够久：不提醒
-        if self.chapter_elapsed() < SLOW_CHAPTER_SECONDS:
-            return ""
-        # 提醒用户切回中文看看
-        return "这一章读了很久，要不要看一眼中文？按 c 切换"
-
-    # -- transient messages ----------------------------------------------
     def say(self, text: str, seconds: float = 5.0) -> None:
         """Show *text* on the message row for a while."""
         self.message = str(text)
@@ -1607,231 +1222,14 @@ def _wrap_line(text: str, width: int) -> List[str]:
     return [line.rstrip() for line in lines]
 
 
-def _mark_clamp(
-    rows: Sequence[Tuple[int, str]], row: int, col: int
-) -> Tuple[int, int]:
-    """Clamp a mark cursor ``(row, col)`` into the rows actually on screen.
-
-    *col* is a **character** index inside the row's text, not a display column, so
-    a CJK character and a Latin letter both count as one step -- the reverse video
-    highlight then covers the right cells because ``addstr`` knows the real width.
-    """
-    # 一屏都没有（空书或空屏）：光标钉在左上角
-    if not rows:
-        return 0, 0
-    # 行夹进 [0, 可见行数 - 1]
-    row = max(0, min(int(row), len(rows) - 1))
-    # 列夹进这一行 [0, 字符数 - 1]（空行只有第 0 列可选）
-    col = max(0, min(int(col), max(0, len(rows[row][1]) - 1)))
-    return row, col
-
-
-def _mark_move(
-    rows: Sequence[Tuple[int, str]], row: int, col: int, key: Any
-) -> Tuple[int, int]:
-    """Move the mark cursor one step for *key*, clamped to what is on screen.
-
-    Only h/j/k/l and the arrow keys move; every other key leaves the cursor where
-    it is.  Page keys are deliberately absent: mark mode never scrolls, so a
-    selection can only ever span the screen it started on.
-    """
-    # 先把起点夹合法，免得后面越界
-    row, col = _mark_clamp(rows, row, col)
-    # 左：h 或 ←
-    if key in ("h", curses.KEY_LEFT):
-        col -= 1
-    # 右：l 或 →
-    elif key in ("l", curses.KEY_RIGHT):
-        col += 1
-    # 上：k 或 ↑
-    elif key in ("k", curses.KEY_UP):
-        row -= 1
-    # 下：j 或 ↓
-    elif key in ("j", curses.KEY_DOWN):
-        row += 1
-    # 移完再夹一次：上下跨行时列可能落到新行长之外
-    return _mark_clamp(rows, row, col)
-
-
-def _mark_normalize(
-    start: Tuple[int, int], end: Tuple[int, int]
-) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    """Order two mark corners into ``(top, bottom)`` reading order.
-
-    Marking works in both directions, so every consumer normalises first: the
-    highlight, the extraction and the truncation then only deal with one order.
-    """
-    # 先比行号，行号相同再比列号；小的那个算"左上"
-    if (start[0], start[1]) <= (end[0], end[1]):
-        return start, end
-    return end, start
-
-
-def _mark_selection(
-    rows: Sequence[Tuple[int, str]],
-    start: Tuple[int, int],
-    end: Tuple[int, int],
-    limit: int = NOTE_MAX_CHARS,
-) -> Tuple[str, bool]:
-    """Return ``(text, truncated)`` for the screen range *start* .. *end*.
-
-    The rows are **screen** rows, so a wrapped paragraph arrives as several chunks.
-    Chunks that belong to the same source line are glued back together and a
-    newline is only inserted where the source line actually changes, which is what
-    makes the copied text read like the book rather than like the terminal.
-    *limit* caps the result (``0`` means no cap) and *truncated* says whether it bit.
-    """
-    # 没有可见行：没有可复制的内容
-    if not rows:
-        return "", False
-    # 排成左上 -> 右下，方向无关
-    (first_row, first_col), (last_row, last_col) = _mark_normalize(start, end)
-    # 行号夹进真实范围，防止越界切片
-    first_row = max(0, min(first_row, len(rows) - 1))
-    last_row = max(0, min(last_row, len(rows) - 1))
-    # 收集 (源行号, 片段)：同一源行的折行片段要接着拼，不能插换行
-    pieces: List[Tuple[int, str]] = []
-    for row in range(first_row, last_row + 1):
-        source_line, text = rows[row]
-        # 首尾同一行：只取中间那段（末列包含在内）
-        if row == first_row == last_row:
-            fragment = text[first_col : last_col + 1]
-        # 选区的第一行：从起点列取到行尾
-        elif row == first_row:
-            fragment = text[first_col:]
-        # 选区的最后一行：从行首取到终点列
-        elif row == last_row:
-            fragment = text[: last_col + 1]
-        # 中间行：整行都要
-        else:
-            fragment = text
-        # 上一段就是同一源行：直接接上（说明这是同一个段落的折行）
-        if pieces and pieces[-1][0] == source_line:
-            pieces[-1] = (source_line, pieces[-1][1] + fragment)
-        else:
-            pieces.append((source_line, fragment))
-    # 源行之间用换行连接（同源行的折行片段前面已经拼好）
-    text = "\n".join(fragment for _line, fragment in pieces)
-    # 超长就截断，并告诉调用方"截过了"
-    if limit and len(text) > limit:
-        return text[:limit], True
-    return text, False
-
-
-def _mark_row_span(
-    row: int, text: str, start: Tuple[int, int], end: Tuple[int, int]
-) -> Optional[Tuple[int, int]]:
-    """The ``(first, last)`` character indices to reverse on *row*, or ``None``.
-
-    ``None`` means this screen row is not part of the selection at all, so the
-    caller can fall back to the ordinary drawing path.  Indices are inclusive and
-    clamped to the row, so a selection that starts on a longer line still covers
-    the whole of a shorter one.
-    """
-    # 排好序
-    (first_row, first_col), (last_row, last_col) = _mark_normalize(start, end)
-    # 这一行完全在选区之外
-    if row < first_row or row > last_row:
-        return None
-    # 单行选区：只反色这一段
-    if first_row == last_row:
-        return first_col, last_col
-    # 选区的第一行：从起点列反色到行尾
-    if row == first_row:
-        return first_col, max(0, len(text) - 1)
-    # 选区的最后一行：从行首反色到终点列
-    if row == last_row:
-        return 0, last_col
-    # 中间行：整行反色
-    return 0, max(0, len(text) - 1)
-
-
-def _draw_text(
-    stdscr: Any, row: int, column: int, text: str, attr: int, vocab_words: Set[str]
-) -> None:
-    """Write one line, underlining every word already in the vocabulary notebook.
-
-    The pieces are written from a moved cursor rather than fixed columns, so the
-    alignment stays right when the line also holds double width CJK characters.
-    """
-    # 按生词切成若干片段
-    pieces = split_highlight(text, vocab_words)
-    # 没有生词（一段）：整行一次写完
-    if len(pieces) <= 1:
-        _addstr(stdscr, row, column, text, attr)
-        return
-    try:
-        # 把光标移动到行首，后面按片段连续写
-        stdscr.move(row, column)
-    except curses.error:
-        return
-    for piece, highlighted in pieces:
-        try:
-            # 生词片段加下划线属性
-            stdscr.addstr(
-                piece, (attr | curses.A_UNDERLINE) if highlighted else attr
-            )
-        except curses.error:
-            # 某段写失败就放弃这一行剩下的内容
-            return
-
-
-def _draw_marked_row(
-    stdscr: Any,
-    row: int,
-    column: int,
-    text: str,
-    attr: int,
-    span: Optional[Tuple[int, int]],
-    vocab_words: Set[str],
-) -> None:
-    """Draw one screen row, reversing the characters covered by *span*.
-
-    The row is written as up to three pieces (before / selected / after) so only
-    the marked part is reversed.  Offsets are counted in **terminal columns** with
-    :func:`_text_width`, which is what keeps the pieces lined up when the selection
-    starts after a run of double width CJK characters.
-    """
-    # 这一行不在选区里：走普通绘制
-    if span is None:
-        _draw_text(stdscr, row, column, text, attr, vocab_words)
-        return
-    # 按字符下标切三段（末列包含在选中段里）
-    first, last = span
-    before = text[:first]
-    selected = text[first : last + 1]
-    after = text[last + 1 :]
-    # 前段：正常属性（生词下划线照旧）
-    if before:
-        _draw_text(stdscr, row, column, before, attr, vocab_words)
-    # 选中段：反色。反色块本身就是那条"光标"，所以不用再去动真实光标
-    selected_column = column + _text_width(before)
-    if selected:
-        _addstr(stdscr, row, selected_column, selected, attr | curses.A_REVERSE)
-    # 后段：正常属性（从选中段之后接着写）
-    if after:
-        _draw_text(
-            stdscr,
-            row,
-            selected_column + _text_width(selected),
-            after,
-            attr,
-            vocab_words,
-        )
-
-
-def _note_status(pager: Pager) -> str:
-    """The folded note indicator: how many notes there are and how to open the panel.
-
-    Shown on the message row while the panel is closed, so the note count stays
-    visible without spending a third status row on it.
-    """
-    # 折叠状态：几条笔记 + 展开键（_HINT 里也还有一遍 o笔记）
-    return "📝 {}条笔记 | 按o展开".format(len(pager.notes))
+def _draw_text(stdscr: Any, row: int, column: int, text: str, attr: int) -> None:
+    """Write one line of the text area with the given attribute."""
+    # 一句话：交给 _addstr（它负责裁剪与吞掉 curses 的边界错误）
+    _addstr(stdscr, row, column, text, attr)
 
 
 def _message_row(pager: Pager, room: int, notice: str = "") -> str:
-    """The bottom row: a transient message, else hints plus the long chapter nudge.
+    """The bottom row: a transient message, else the key hints.
 
     *room* counts terminal columns, not characters, so the row is measured the
     same way the terminal draws it.  *notice* carries the achievement notice when the
@@ -1846,16 +1244,8 @@ def _message_row(pager: Pager, room: int, notice: str = "") -> str:
     if message:
         # 按显示宽度裁到整行再右填充（填充用来盖掉上一帧的残留）
         return _pad_line(message, room)
-    # 否则显示"快捷键提示 [+ 长时间没换章的提醒]"
-    nudge = pager.slow_chapter_hint()
-    if not nudge:
-        # 折叠的笔记面板：把"几条笔记 + 怎么展开"并进提示行（面板展开时另画自己的提示）
-        return _pad_line(_note_status(pager) + " · " + _HINT, room)
-    # 空间够就两个都显示（按显示列数算：一个汉字占两列）
-    if _text_width(_HINT) + _text_width(nudge) + 3 <= room:
-        return _pad_line(_HINT + "   " + nudge, room)
-    # 空间不够就只显示提醒（本身太长时按列裁）
-    return _pad_line(nudge, room)
+    # 否则显示常驻的快捷键提示
+    return _pad_line(_HINT, room)
 
 
 def status_segment(token: str, pager: Pager, moment: datetime) -> str:
@@ -1876,8 +1266,6 @@ def status_segment(token: str, pager: Pager, moment: datetime) -> str:
         return "行 {}/{}".format(pager.position + 1, max(1, pager.total))
     if token == "percent":
         return "{:.1f}%".format(pager.percentage)
-    if token == "mode":
-        return MODE_LABELS.get(pager.mode, pager.mode)
     if token == "duration":
         return "本章 {}".format(format_duration(pager.chapter_elapsed()))
     if token == "elapsed":
@@ -1886,10 +1274,6 @@ def status_segment(token: str, pager: Pager, moment: datetime) -> str:
         return "连续 {} 天".format(pager.streak)
     if token == "bookmarks":
         return "书签 {}".format(len(pager.bookmarks))
-    if token == "vocab":
-        return "生词 {}".format(len(pager.vocab_words))
-    if token == "translations":
-        return "翻译 {}".format(pager.translations_used)
     return ""
 
 
@@ -1972,15 +1356,12 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
     # （每帧都刷新，所以窗口大小变了下一帧就生效）
     pager.viewport_rows = text_rows
     pager.viewport_width = text_width
-    # 关掉高亮时传空集合，_draw_text 就不做生词切分了
-    words = pager.vocab_words if pager.highlight_vocab else _EMPTY_WORDS
     # 清屏，接着重画整帧
     stdscr.erase()
     # 上一条屏幕行属于哪个源行，用来判断"这是不是某个源行的第一屏行"
     previous_index: Optional[int] = None
-    # 这一帧真正要画出来的可见行，顺手记下来给标记模式定位光标与取词用
+    # 这一帧真正要画出来的可见行
     rows = pager.visible_rows(text_rows, text_width)
-    pager.viewport = list(rows)
     for screen_row, (index, text) in enumerate(rows):
         # 换行就算"某源行自己的第一屏行"
         line_start = index != previous_index
@@ -2004,12 +1385,7 @@ def _draw(stdscr: Any, pager: Pager, moment: datetime) -> None:
         elif index in pager.matches:
             attr = curses.A_BOLD
         # 第 1 列开始写正文（文本已在 visible_rows 里按宽度折好、Tab 也展开过）
-        # 标记模式：把选中的那段反色画出来（反色块本身就是那条"光标"）
-        if pager.mark_mode and pager.mark_start and pager.mark_end:
-            span = _mark_row_span(screen_row, text, pager.mark_start, pager.mark_end)
-            _draw_marked_row(stdscr, screen_row, 1, text, attr, span, words)
-        else:
-            _draw_text(stdscr, screen_row, 1, text, attr, words)
+        _draw_text(stdscr, screen_row, 1, text, attr)
         # 记下这条屏幕行属于哪个源行，供下一轮判断
         previous_index = index
     # 最后画状态栏两行
@@ -2147,12 +1523,12 @@ def _confirm(
     stdscr: Any,
     title: str,
     body: Sequence[str],
-    hint: str = "[y] 加入生词本    其他键 取消",
+    hint: str = "[y] 确认    其他键 取消",
 ) -> bool:
     """Show a small centred popup and return whether the user said yes.
 
-    *hint* is the last line of the box (what ``y`` and the other keys do), because the
-    same popup serves the vocabulary lookup and the crash-recovery question.
+    *hint* is the last line of the box (what ``y`` and the other keys do), so the
+    caller can spell out the exact wording of the question being asked.
     """
     height, width = stdscr.getmaxyx()
     # 弹窗内每行最多的显示列数
@@ -2200,65 +1576,6 @@ def _confirm(
     return key in (ord("y"), ord("Y"))
 
 
-def _screen_range(stdscr: Any, pager: Pager) -> Tuple[int, int]:
-    """The half open range of source lines currently on screen.
-
-    The end comes from the rows that actually fit, so a wrapped paragraph counts
-    for as many source lines as it takes up on the terminal rather than one.
-    """
-    height, width = stdscr.getmaxyx()
-    # 正文区屏幕行数（减去状态栏两行）
-    rows = max(1, height - _STATUS_ROWS)
-    # 正文区列数（第 0 列留给书签位）
-    text_width = max(1, width - 1)
-    # 这一屏真实画到的源行（长段会折成多屏行）
-    visible = pager.visible_rows(rows, text_width)
-    # 一屏都填不满（空书 / 已在书末）：退化成空区间
-    if not visible:
-        return pager.position, pager.position
-    # 返回 [当前位置, 最后一个已显示源行 + 1) 的半开区间
-    return pager.position, min(max(index for index, _ in visible) + 1, pager.total)
-
-
-def _progress_text(done: int, total: int, width: int = 16) -> str:
-    """Render a compact progress bar, e.g. ``[####----]  3/8``."""
-    if total <= 0:
-        return ""
-    # 按比例算出实心格数
-    filled = int(round(width * min(max(done, 0), total) / float(total)))
-    return "[{}{}]  {}/{}".format("#" * filled, "-" * (width - filled), done, total)
-
-
-def _draw_progress(stdscr: Any, chapter_index: int, done: int, total: int) -> None:
-    """Paint the translation progress bar on the message row."""
-    height, width = stdscr.getmaxyx()
-    text = "正在翻译第 {} 章  {} ".format(
-        chapter_index + 1, _progress_text(done, total)
-    )
-    # 画在最后一行，反白显示
-    _addstr(stdscr, height - 1, 0, text[: max(0, width - 1)], curses.A_REVERSE)
-    stdscr.refresh()
-
-
-def _wrap_text(text: str, width: int, limit: int) -> List[str]:
-    """Wrap *text* to *width* columns, keeping at most *limit* lines.
-
-    Blank lines between paragraphs are preserved, which is what makes the popup
-    read like prose instead of one wall of text.  Wrapping itself goes through
-    :func:`_wrap_line`, so double width CJK characters are counted correctly.
-    """
-    # 攒出来的屏幕行
-    lines: List[str] = []
-    # 空行也要保留：段落之间那一行空白正是可读性的来源
-    for paragraph in str(text or "").split("\n"):
-        for line in _wrap_line(paragraph, max(1, int(width))):
-            # 到上限就停，超出部分不画（弹窗不做滚动）
-            if len(lines) >= max(1, int(limit)):
-                return lines
-            lines.append(line)
-    return lines
-
-
 def _first_line(text: str) -> str:
     """Return the first non-blank line of *text* (used by the tiny-screen fallback)."""
     # 逐行找第一个有内容的
@@ -2267,132 +1584,6 @@ def _first_line(text: str) -> str:
             return line.strip()
     # 全是空白：返回空串
     return ""
-
-
-def _screen_translation_text(pager: Pager, first: int, last: int) -> str:
-    """Join the translations of the on-screen paragraphs, blank line between them.
-
-    A paragraph's translation is stored on its **first** line while the rest of
-    the paragraph maps to an empty string ("already covered by the paragraph
-    above"), so dropping the empties both dedupes and restores the paragraphs.
-    """
-    # 收集 [first, last) 里真正带译文的那几行
-    pieces = [
-        str(pager.translations.get(index) or "")
-        for index in range(max(0, first), min(int(last), pager.total))
-    ]
-    # 段落之间空一行再拼，末尾空白去掉
-    return "\n\n".join(piece for piece in pieces if piece).strip()
-
-
-def _translation_popup_layout(height: int, width: int) -> Optional[Tuple[int, int, int]]:
-    """Return ``(top, rows, room)`` for the translation popup, or ``None``.
-
-    The panel sticks to the bottom of the screen, keeps one row for its own hint
-    and leaves at least three rows of reading text visible above it, so it never
-    covers the whole page.  *room* is the usable column count -- the very last
-    column is left alone because curses cannot write to the bottom right cell.
-    """
-    # 太矮 / 太窄就放下面板（调用方会退化成一行短消息）
-    if height < 8 or width < 8:
-        return None
-    # 面板高度 = 屏幕的 40%，再夹一层：正文至少留 3 行
-    rows = max(3, int(round(height * _TRANSLATION_POPUP_RATIO)))
-    rows = min(rows, max(3, height - 3))
-    # 贴着屏幕底部
-    top = height - rows
-    # 可用列数：留出最后一列，避开 curses 右下角限制
-    room = max(1, width - 1)
-    return top, rows, room
-
-
-def _show_translation_popup(
-    stdscr: Any,
-    pager: Pager,
-    text: str,
-    seconds: float = TRANSLATION_POPUP_SECONDS,
-    hint: str = _TRANSLATION_POPUP_HINT,
-) -> None:
-    """Show *text* in a panel at the bottom of the screen for a few seconds.
-
-    Any key dismisses it early, and it disappears on its own after *seconds*, so
-    the reading loop is never stuck behind it.  A screen too small for the panel
-    degrades to the usual one-line message instead of drawing a squashed box.
-    *hint* is the dim line at the bottom, so the mark-mode translation can say
-    what happens to the result.
-    """
-    # 终端尺寸
-    height, width = stdscr.getmaxyx()
-    layout = _translation_popup_layout(height, width)
-    # 屏幕太小：退回一行短消息
-    if layout is None:
-        pager.say(_first_line(text))
-        return
-    # 拆出位置、高度与可用列数
-    top, rows, room = layout
-    try:
-        # 走 _sub_window：真终端是 curses.newwin，测试换成假窗口
-        window = _sub_window(stdscr, rows, width, top, 0)
-    except curses.error:
-        pager.say(_first_line(text))
-        return
-    # 先把正文那一帧画出来（主窗口先刷），面板随后叠上去（子窗口后刷）
-    _draw(stdscr, pager, _now())
-    # 画译文；最后一行留给提示
-    lines = _wrap_text(text, room, rows - 1)
-    window.erase()
-    for offset, line in enumerate(lines):
-        _addstr(window, offset, 0, line, curses.A_NORMAL)
-    _addstr(
-        window, rows - 1, 0, _pad_line(hint, room), curses.A_DIM
-    )
-    window.refresh()
-    # 展示期间改成短轮询：按键能立刻关掉，时间到也能自己消失
-    stdscr.timeout(_TRANSLATION_POPUP_TICK_MS)
-    deadline = time.monotonic() + max(0.0, float(seconds))
-    try:
-        while time.monotonic() < deadline:
-            try:
-                # 等一个键（超时抛 curses.error，回到 while 再看时间）
-                stdscr.get_wch()
-            except curses.error:
-                continue
-            except KeyboardInterrupt:
-                # Ctrl-C：关掉面板，把"退出阅读"留给主循环
-                break
-            # 任意键都立刻关掉面板
-            break
-    finally:
-        # 恢复主循环的轮询间隔
-        stdscr.timeout(_TICK_MS)
-        # 交回子窗口
-        del window
-        # 面板盖住的正文要让主窗口重画
-        try:
-            stdscr.touchwin()
-        except curses.error:
-            pass
-
-
-def _translate_screen_range(pager: Pager, first: int, last: int) -> str:
-    """Translate the paragraphs on screen into memory; returns a status sentence."""
-    # 当前视图就是原文：没什么可翻的
-    if not pager.needs_translation():
-        return "当前视图就是原文，无需翻译"
-    try:
-        count = pager.translate_screen(first, last)
-    except translator.TranslationUnavailable as exc:
-        # 后端不可达
-        return "翻译不可用：{}".format(exc)
-    except translator.TranslationError as exc:
-        # 其它翻译错误
-        return "翻译失败：{}".format(exc)
-    # 一段都没翻出来
-    if not count:
-        return "这些段落还没有译文"
-    # 记一次翻译使用
-    pager.translations_used += 1
-    return "已翻译 {} 段（临时，不缓存）".format(count)
 
 
 def _goto(stdscr: Any, pager: Pager) -> None:
@@ -2767,742 +1958,6 @@ def _help_overlay(stdscr: Any, pager: Pager) -> None:
         # 恢复主循环的轮询间隔，否则界面会卡在阻塞读上
         stdscr.timeout(_TICK_MS)
 
-
-def _enter_mark(pager: Pager) -> None:
-    """``m``: start marking from the top left of the screen.
-
-    Marking is deliberately screen bound: the selection can never scroll past the
-    screen it started on, which keeps the coordinates plain ``(row, col)`` pairs
-    into :attr:`Pager.viewport` and the extraction a pure function over them.
-    """
-    # 一屏都没有可选中的文字（空书）：没法标
-    if not pager.viewport:
-        pager.say("这一屏没有可选中的文字")
-        return
-    # 进入标记模式，光标落在当前屏首行行首（反色方块就是它）
-    pager.mark_mode = True
-    pager.mark_start = (0, 0)
-    pager.mark_end = (0, 0)
-    pager.say("标记：h/j/k/l 或方向键选字 · y 复制 · t 翻译 · Esc 取消")
-
-
-def _handle_mark_key(stdscr: Any, pager: Pager, key: Any) -> None:
-    """Act on one key while marking: move, copy, translate or cancel -- never scroll."""
-    # Esc：取消标记，回阅读
-    if key in _ESCAPE_KEYS:
-        pager.mark_mode = False
-        pager.mark_start = None
-        pager.mark_end = None
-        pager.say("已取消标记")
-        return
-    # y：把选中的文字收进引用缓冲区，然后回阅读
-    if key == "y":
-        _copy_selection(pager)
-        return
-    # t：翻译选中的这一段，并把"引用 + 译文"备好（回阅读，接着按 o）
-    if key == "t":
-        _translate_mark_selection(stdscr, pager)
-        return
-    # h/j/k/l 或方向键：移动光标扩展选区
-    if key in (
-        "h",
-        "j",
-        "k",
-        "l",
-        curses.KEY_LEFT,
-        curses.KEY_RIGHT,
-        curses.KEY_UP,
-        curses.KEY_DOWN,
-    ):
-        # 起点还没设（理论上不会发生）：先补一个再动
-        if pager.mark_end is None:
-            pager.mark_end = pager.mark_start or (0, 0)
-        pager.mark_end = _mark_move(pager.viewport, *pager.mark_end, key)
-
-
-def _copy_selection(pager: Pager) -> None:
-    """``y``: put the marked text into the quote buffer and leave mark mode."""
-    # 起点或终点缺失（理论上不会发生）：直接退出标记
-    if pager.mark_start is None or pager.mark_end is None:
-        pager.mark_mode = False
-        return
-    # 提取选区文字（超过上限会自动截断）
-    text, truncated = _mark_selection(
-        pager.viewport, pager.mark_start, pager.mark_end
-    )
-    # 去掉尾部换行与空白（选到下一行行首时会带出一个换行，引用里不需要它）
-    text = text.rstrip()
-    # 选区里全是空白：提示一句，留在标记模式等用户换一段
-    if not text:
-        pager.say("选中的是空白，换一段再按 y")
-        return
-    # 存进引用缓冲区并退出标记模式
-    pager.note_buffer = text
-    # 手动复制的选区没有译文：把上一段留下的译文清掉，免得错配到这一条笔记
-    pager.note_translation = ""
-    pager.mark_mode = False
-    pager.mark_start = None
-    pager.mark_end = None
-    # 明确告诉用户复制了多少字（被截断时也要说清楚）
-    if truncated:
-        pager.say(
-            "已复制 {} 字（超过 {} 已截断）· 按 o 打开笔记面板".format(
-                len(text), NOTE_MAX_CHARS
-            )
-        )
-    else:
-        pager.say("已复制 {} 字 · 按 o 打开笔记面板".format(len(text)))
-
-
-def _translate_mark_selection(stdscr: Any, pager: Pager) -> None:
-    """``t`` while marking: translate the selection and stage a note template.
-
-    This is the seam between the reader and the translation engine
-    (:mod:`wreader.translate`): the marked text becomes the quote, its machine
-    translation is kept beside it, and the editor is deliberately left blank so
-    the note ends up as 引用 + 译文 + 你自己的想法 (:func:`notes.save_note_with_translation`).
-
-    Nothing is written to disk here -- ``o`` opens the panel and ``Ctrl+S``
-    commits.  Like the screen translation (``t`` in the reading view) this is a
-    single, uncached request, so it happens on the main thread and the status row
-    says so while it runs.
-    """
-    # 引擎没配好：给可操作的提示，别让请求先失败
-    ready, reason = _translation_ready()
-    if not ready:
-        pager.say("未配置翻译引擎：运行 werd config translate（{}）".format(reason))
-        return
-    # 起点或终点缺失（理论上不会发生）：退出标记，别把用户卡在选区里
-    if pager.mark_start is None or pager.mark_end is None:
-        pager.mark_mode = False
-        return
-    # 选区文字：与 y 用的是同一套提取（超长自动截断）
-    text, truncated = _mark_selection(pager.viewport, pager.mark_start, pager.mark_end)
-    text = text.rstrip()
-    # 选中的是空白：留在标记模式等用户换一段
-    if not text:
-        pager.say("选中的是空白，换一段再按 t")
-        return
-    # 翻成"书不是的那种语言"（中文书 -> 英文，英文书 -> 中文）
-    target = mode_language(MODE_BOTH, pager.language) or pager.target_language
-    # 网络请求可能慢：先把消息亮出来，用户才知道程序没死
-    pager.say("正在翻译选中的 {} 字…".format(len(text)))
-    try:
-        # 单次翻译，不写缓存（与 t 翻屏同一口径）
-        translation = translator.translate_text(
-            text, target=target, source=pager.source_language
-        )
-    except translator.TranslationUnavailable as exc:
-        # 后端不可达：留在标记模式，选区还在，用户可以重试或者改按 y
-        pager.say("翻译不可用：{}".format(exc))
-        return
-    except translator.TranslationError as exc:
-        pager.say("翻译失败：{}".format(exc))
-        return
-    # 后端返回空串：当作没翻出来
-    if not translation.strip():
-        pager.say("这一段没有译文，仍可按 y 只存引用")
-        return
-    # 记一次翻译使用（与 t / T / v 共用一个计数器）
-    pager.translations_used += 1
-    # 把"引用 + 译文"备好：保存时会一起落盘，编辑区留给用户自己的想法
-    pager.note_buffer = text
-    pager.note_translation = translation.strip()
-    # 退出标记模式（与 y 一致：模板已经就绪，接着按 o）
-    pager.mark_mode = False
-    pager.mark_start = None
-    pager.mark_end = None
-    # 先把译文弹出来看一眼（弹窗底部换成"已备好"的提示）
-    _show_translation_popup(
-        stdscr, pager, pager.note_translation, hint=_MARK_TRANSLATION_HINT
-    )
-    # 弹窗关掉后把下一步说清楚（被截断时也要说）
-    pager.say(
-        "已备好引用与译文{} · 按 o 打开笔记面板".format(
-            "（超过 {} 已截断）".format(NOTE_MAX_CHARS) if truncated else ""
-        )
-    )
-
-
-def _note_panel_layout(height: int, width: int) -> Optional[Tuple[int, int, int]]:
-    """Return ``(text_rows, quote_rows, edit_rows)`` for the note panel, or ``None``.
-
-    The panel takes the bottom quarter of the screen (never fewer than four rows),
-    keeps one row for its own hint, and splits what is left between the read only
-    quote area and the editor.  ``None`` means the screen cannot hold a usable panel
-    at all, so the caller just says so instead of drawing a mess.
-    """
-    # 太矮 / 太窄：连"引用 1 行 + 编辑 1 行 + 提示 1 行"都摆不下
-    if height < 8 or width < 8:
-        return None
-    # 面板高度 = 屏幕的 25%，再夹一层：正文至少留 3 行
-    panel_rows = max(4, int(round(height * _NOTE_PANEL_RATIO)))
-    panel_rows = min(panel_rows, max(4, height - 3))
-    # 正文区 = 总高 - 面板高度
-    text_rows = height - panel_rows
-    # 面板内容区：扣掉它自己那一行提示
-    inner = panel_rows - 1
-    # 引用区占一半（向下取整），编辑区拿剩下的（多一行，写起来舒服些）
-    quote_rows = max(1, inner // 2)
-    edit_rows = max(1, inner - quote_rows)
-    return text_rows, quote_rows, edit_rows
-
-
-def _sub_window(
-    stdscr: Any, nlines: int, ncols: int, begin_y: int, begin_x: int
-) -> Any:
-    """Create one of the note panel's sub windows.
-
-    ``curses.newwin`` is the real API -- a ``curses.window`` object has **no**
-    ``newwin`` method (only ``derwin``), which is why this indirection exists:
-    it is the module level call in production and a seam the tests can replace
-    with a fake window.
-    """
-    # 真终端上就是 curses 的模块级 newwin
-    return curses.newwin(nlines, ncols, begin_y, begin_x)
-
-
-def _note_panel(stdscr: Any, pager: Pager) -> None:
-    """``o``: write a note beside the text, quoting the copied selection.
-
-    A modal mini loop in the same style as the table of contents overlay: the screen
-    is repainted from the main thread, nothing is spawned and every key is read
-    here.  The bottom quarter holds a read only quote area and a
-    :class:`curses.textpad.Textbox`; ``Tab`` swaps the focus, ``Ctrl-S`` stores the
-    note and ``Esc`` closes the panel.
-    """
-    # 终端尺寸
-    height, width = stdscr.getmaxyx()
-    # 算面板布局；屏幕太小就干脆不弹
-    layout = _note_panel_layout(height, width)
-    if layout is None:
-        pager.say("屏幕太小，放不下笔记面板（至少 8 行 8 列）")
-        return
-    # 拆出三块高度
-    text_rows, quote_rows, edit_rows = layout
-    # 两个子窗口：上引用、下编辑（编辑区必须是真窗口，Textbox 要读写它的格子）
-    # 走 _sub_window 而不是直接 curses.newwin：留一个测试能替换的接缝
-    try:
-        quote_win = _sub_window(stdscr, quote_rows, width, text_rows, 0)
-        edit_win = _sub_window(stdscr, edit_rows, width, text_rows + quote_rows, 0)
-    except curses.error:
-        pager.say("屏幕太小，放不下笔记面板")
-        return
-    # 只借 Textbox 的"按键 -> 窗口内容"编辑动作，绝不调用它那个阻塞的 edit()
-    editor = curses.textpad.Textbox(edit_win)
-    # 面板展开期间，折叠提示让位给面板自己的提示
-    pager.note_panel_open = True
-    # 打开时焦点默认在编辑区（引用区只是只读展示）
-    pager.note_focus = "edit"
-    # 上次自动存草稿的时刻（草稿只防崩溃/断电，不产生正式笔记）
-    last_draft = time.monotonic()
-    # 万一上次是"写了没提交"（崩溃 / Ctrl-C）：把草稿捞回面板
-    pending_body = _restore_draft(pager, editor)
-    # 模态：短超时轮询按键，既能即时回显，又能按 30 秒节拍自动存草稿
-    stdscr.timeout(_NOTE_TICK_MS)
-    # Esc 才是"提交并关闭"；Ctrl-C 只关面板（内容留成草稿）
-    commit = False
-    try:
-        while True:
-            # 重画面板这一帧
-            _draw_note_panel(stdscr, pager, quote_win, edit_win, text_rows)
-            try:
-                # 等一个按键（最多等一帧）
-                key = stdscr.get_wch()
-            except curses.error:
-                # 这一帧超时了：到点就把编辑区存成草稿，然后继续等
-                last_draft = _autosave_draft(pager, editor, last_draft)
-                continue
-            except KeyboardInterrupt:
-                # Ctrl-C：关面板回阅读（内容留成草稿，下次打开还在）
-                return
-            # Esc：把这一条提交成笔记再关面板
-            if key in _ESCAPE_KEYS:
-                commit = True
-                return
-            # Ctrl+S：把"引用 + 编辑区内容"存成一条笔记
-            if key in _SAVE_KEYS:
-                _save_note(pager, editor)
-                continue
-            # Tab：在引用区 / 编辑区之间切换焦点
-            if key in _TAB_KEYS:
-                pager.note_focus = "quote" if pager.note_focus == "edit" else "edit"
-                continue
-            # 焦点不在编辑区：只读的引用区不接受文字输入
-            if pager.note_focus != "edit":
-                continue
-            # 交给 Textbox：退格、左右光标、回车换行都由它的键绑定负责
-            code = _note_validate(key)
-            if code is None:
-                continue
-            editor.do_command(code)
-    finally:
-        # 关面板时收尾：Esc 提交成笔记，其他情况留成草稿（一个字都不丢）
-        _finish_note_panel(pager, editor, commit, pending_body)
-        # 恢复主循环的轮询间隔，否则关面板后界面会卡在阻塞读上
-        stdscr.timeout(_TICK_MS)
-        # 面板已折叠
-        pager.note_panel_open = False
-        # 交回两个子窗口（与 _confirm 里 del window 同款写法）
-        del quote_win, edit_win
-        # 子窗口盖住的正文要主窗口重画
-        try:
-            stdscr.touchwin()
-        except curses.error:
-            pass
-
-
-def _note_validate(key: Any) -> Optional[int]:
-    """Turn one ``get_wch`` result into the code :meth:`Textbox.do_command` expects.
-
-    This is the text box's *validator*: the stock widget maps ``Enter`` onto Ctrl-G,
-    which ends the edit and hands the text back, whereas here ``Enter`` becomes the
-    ``NL`` command so it starts a **new line** instead of submitting.  Saving is an
-    explicit key (``Ctrl-S``), so no editor keystroke can close the panel by
-    accident.  ``None`` means "a key the editor does not understand".
-    """
-    # 特殊键（方向键、Home 等）本来就是 int：直接用
-    if isinstance(key, int):
-        # 回车（终端可能报 KEY_ENTER / 10 / 13）：统一走 NL 分支，实现"回车换行"
-        if key in (curses.KEY_ENTER, 10, 13):
-            return curses.ascii.NL
-        return int(key)
-    # 单字符：换成码点（do_command 只认 int）
-    if isinstance(key, str) and len(key) == 1:
-        code = ord(key)
-        # \r（13）也算回车，落进同一个 NL 分支
-        if code == 13:
-            return curses.ascii.NL
-        return code
-    # 其它情况（不该出现的组合键字符串）：忽略
-    return None
-
-
-def _editor_text(editor: Any) -> str:
-    """Return what the text box currently holds; ``""`` when it cannot be read."""
-    try:
-        # Textbox 自己按行拼好内容，并剥掉行尾空白
-        return str(editor.gather()).strip("\n").strip()
-    except curses.error:
-        # 窗口已失效（比如正在 resize）：当作空
-        return ""
-
-
-def _commit_note(pager: Pager, text: str, editor: Any = None) -> bool:
-    """Append one note (quote + *text*) to disk, then clear the buffer.
-
-    Returns whether something was stored.  The note goes to
-    ``<data dir>/notes/<book_id>.md`` via :mod:`wreader.notes`; ``pager.notes`` is
-    only a mirror for the "📝 N 条笔记" indicator.  A write failure keeps the text
-    (and the editor) untouched, so nothing typed is ever lost to a permission
-    problem.  *editor* is optional so the draft-recovery path can commit a body
-    that never went through the text box.
-    """
-    # 既没有引用也没写正文：没什么可存的，提醒一句就好
-    if not text and not pager.note_buffer:
-        pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
-        return False
-    # 章节名取自打开这本书时建/读的目录缓存（toc.load_toc → Pager.chapters）
-    chapter = pager.chapter_title
-    try:
-        # 有译文就走"引用 + 译文 + 自己的想法"那条写入口
-        if pager.note_translation:
-            note = notes.save_note_with_translation(
-                pager.book_id,
-                pager.title,
-                pager.note_buffer,
-                pager.note_translation,
-                text,
-                chapter_name=chapter,
-                # 成就判定由阅读器自己调：它要把"刚解锁的成就"回显到状态行上
-                check_achievements=False,
-            )
-        else:
-            # 真正落盘：追加到 markdown 并刷新索引
-            note = notes.save_note(
-                pager.book_id,
-                pager.title,
-                pager.note_buffer,
-                text,
-                chapter_name=chapter,
-                check_achievements=False,
-            )
-    except (notes.NotesError, OSError) as exc:
-        # 写不进去（目录只读、磁盘满）：内容留在编辑区，别让用户白写一遍
-        pager.say("笔记保存失败：{}".format(exc))
-        return False
-    # 理论上被上面拦掉了，兜一层防止"静默成功"
-    if note is None:
-        pager.say("先按 m 标记一段文字，或在编辑区写点什么，再按 Ctrl+S")
-        return False
-    # 内存里也记一份：折叠提示的计数立刻跟着变
-    pager.notes.append(note)
-    # 内容已经变成正式笔记，草稿不再需要
-    notes.clear_draft(pager.book_id)
-    # 存完清空引用（以及编辑区，如果这一条是从编辑区来的）
-    pager.note_buffer = ""
-    # 译文已经写进这一条，别再粘到下一条笔记上
-    pager.note_translation = ""
-    if editor is not None:
-        _clear_editor(editor)
-    # 规格要求：状态栏闪现"✓ 已保存"1.5 秒（带上章节，并报出刚解锁的成就）
-    pager.say(_note_saved_flash(chapter), _NOTE_SAVED_SECONDS)
-    return True
-
-
-def _note_saved_flash(chapter: Any) -> str:
-    """The message flashed after a note lands: 已保存 + 章节 + 刚解锁的成就.
-
-    Side effect: this is where the note triggers its achievement check
-    (:func:`wreader.notes.check_note_achievements`, the ``note_add`` event).  It
-    happens **after** the note is on disk and the file lock is released, and it
-    swallows every failure inside, so a badge can never block or break a save --
-    the message is just nicer when there is one.
-    """
-    message = "✓ 已保存"
-    # 章节名：让用户看见"当前章节"真的写进笔记元数据了
-    name = str(chapter or "").strip()
-    if name:
-        message += " · {}".format(name)
-    # 笔记总数可能刚好越过"笔记达人"的门槛：解锁就把名字报出来
-    unlocked = notes.check_note_achievements()
-    if unlocked:
-        message += " · 🏆 {}".format(
-            "、".join(str(item.get("name") or item.get("id")) for item in unlocked)
-        )
-    return message
-
-
-def _save_note(pager: Pager, editor: Any) -> bool:
-    """``Ctrl+S``: commit whatever the editor holds as one note."""
-    # 从这里进来的内容一定过过 Textbox，所以直接读编辑区
-    return _commit_note(pager, _editor_text(editor), editor)
-
-
-def _clear_editor(editor: Any) -> None:
-    """Blank the text box so the next note starts from an empty line."""
-    try:
-        # 清掉窗口内容并把光标放回左上角
-        editor.win.erase()
-        editor.win.move(0, 0)
-        editor.win.refresh()
-    except curses.error:
-        # 窗口已失效（比如正在 resize）：忽略
-        pass
-
-
-def _fill_editor(editor: Any, text: str) -> None:
-    """Put *text* into a Textbox window (the stock widget has no setter).
-
-    Lines are wrapped by **display width** before being written: a long line
-    would otherwise be clipped by :func:`_addstr`, quietly shortening the draft
-    that is being restored.
-    """
-    try:
-        # 子窗口尺寸：用它决定折行宽度与能放几行
-        rows, cols = editor.win.getmaxyx()
-        editor.win.erase()
-        width = max(1, cols - 1)
-        # 光标最后落在哪（写完把光标放过去，接着往下写）
-        row = 0
-        last_row, last_col = 0, 0
-        for line in text.split("\n"):
-            # 窗口写满了就不再往下写（多余的仍在草稿文件里）
-            if row >= rows:
-                break
-            for piece in _wrap_line(line, width):
-                if row >= rows:
-                    break
-                _addstr(editor.win, row, 0, piece)
-                last_row, last_col = row, min(_text_width(piece), width)
-                row += 1
-        editor.win.move(min(last_row, rows - 1), min(last_col, max(0, cols - 1)))
-        editor.win.refresh()
-    except curses.error:
-        # 窗口失效：忽略（草稿还在磁盘上，不会丢）
-        pass
-
-
-def _restore_draft(pager: Pager, editor: Any) -> str:
-    """Put an un-committed draft back, returning the part that did not fit.
-
-    The quote always comes back -- it is a plain string in ``pager.note_buffer``.
-    The **body** can only go into the text box while it is pure ASCII:
-    :meth:`curses.textpad.Textbox.gather` rebuilds its string with
-    ``curses.ascii.ascii()``, which masks every character to 7 bits, so a Chinese
-    body would come back as mojibake (``草`` -> ``I``).
-
-    A non-ASCII body is therefore left **out** of the editor and handed back to
-    the caller, which commits it straight from the draft file: what gets stored is
-    the draft byte for byte, and nothing is silently mangled.
-    """
-    try:
-        draft = notes.load_draft(pager.book_id)
-    except notes.NotesError:
-        # 草稿读不了不该挡着面板打开
-        return ""
-    # 引用区还是空的才用草稿里的引用（别覆盖刚复制的那段）
-    if not pager.note_buffer and draft["quote"]:
-        pager.note_buffer = draft["quote"]
-    body = draft["text"]
-    # 没有正文：只把引用捞回来就够了
-    if not body:
-        return ""
-    if body.isascii():
-        # 纯 ASCII：编辑区能原样呈上来，用户还能接着改
-        _fill_editor(editor, body)
-        return ""
-    # 中文正文：不进编辑区（会被 gather 截成 8 位），交给调用方直接提交
-    pager.say("草稿里有中文：按 Esc 提交会原样写入（编辑区只显英文）")
-    return body
-
-
-def _autosave_draft(pager: Pager, editor: Any, last: float) -> float:
-    """Write a draft every :data:`NOTE_AUTOSAVE_SECONDS`; return the new stamp.
-
-    Called from the panel's idle tick, so it never blocks typing.  A draft is
-    **not** a note: it is only the crash-recovery copy of what is being typed.
-    """
-    moment = time.monotonic()
-    # 还没到点：把上次的时刻原样交回去
-    if moment - last < NOTE_AUTOSAVE_SECONDS:
-        return last
-    try:
-        # 编辑区为空时 save_draft 会顺手删掉旧草稿
-        notes.save_draft(pager.book_id, pager.note_buffer, _editor_text(editor))
-    except (notes.NotesError, OSError):
-        # 草稿写不了无所谓：正式笔记照样能存
-        pass
-    return moment
-
-
-def _finish_note_panel(
-    pager: Pager, editor: Any, commit: bool, pending_body: str = ""
-) -> None:
-    """Leave the panel: commit what was typed, or stash it as a draft.
-
-    ``Esc`` means "done, keep this" (commit a note); ``Ctrl-C`` and any other way
-    out mean "not now" (keep it as a draft).  Either way nothing typed is lost.
-    *pending_body* is the non-ASCII draft body from :func:`_restore_draft`, which
-    never entered the editor and is committed straight from the draft file.
-    """
-    text = _editor_text(editor)
-    # 编辑区里没有、但草稿文件里有的正文（中文草稿）
-    body = text or pending_body
-    # 什么都没写：顺手清掉可能存在的旧草稿，不留垃圾
-    if not body and not pager.note_buffer:
-        notes.clear_draft(pager.book_id)
-        return
-    if commit:
-        # Esc：提交成一条正式笔记；中文草稿不经过 Textbox，直接原样落盘
-        _commit_note(pager, body, editor if text else None)
-        return
-    try:
-        # 非正常关闭：留成草稿，下次打开面板自动捞回来
-        notes.save_draft(pager.book_id, pager.note_buffer, body)
-    except (notes.NotesError, OSError):
-        # 草稿写不了也只能算了，不能因此把面板关不掉
-        pass
-
-
-def _draw_quote(window: Any, quote: str, translation: str = "") -> None:
-    """Paint the read only quote area: ``"> "`` plus the copied selection.
-
-    A translation staged with mark mode ``t`` is shown right under the quote, behind
-    a ``> 译文：`` line: that is exactly what gets written into the note when the
-    panel is saved, so the reader gets to see it before committing to it.
-    """
-    # 子窗口尺寸
-    rows, cols = window.getmaxyx()
-    # 没有引用时给一句引导语，别留一片空白
-    text = quote if quote else _NOTE_QUOTE_EMPTY
-    # 折行按显示宽度算（汉字占 2 列），并给 "> " 和最后一列各留位置
-    width = max(1, cols - len(_NOTE_QUOTE_PREFIX) - 1)
-    lines = _wrap_line(text, width)
-    body = str(translation or "").strip()
-    # 备好译文时接在引用下面（同一块只读区；放不下只画前几行）
-    if body:
-        lines.append(_NOTE_TRANSLATION_MARK)
-        lines.extend(_wrap_line(body, width))
-    # 引用区放不下就只画前几行（Phase 1+2 不做引用区滚动）
-    for offset, line in enumerate(lines[:rows]):
-        _addstr(window, offset, 0, _NOTE_QUOTE_PREFIX + line, curses.A_DIM)
-
-
-def _draw_note_panel(
-    stdscr: Any, pager: Pager, quote_win: Any, edit_win: Any, text_rows: int
-) -> None:
-    """Repaint one frame of the panel: the text above, quote then editor below.
-
-    The main window is refreshed **before** the two sub windows: ``stdscr.erase``
-    touches the rows the panel covers, so painting the panel afterwards is what lets
-    it win over the blank cells underneath instead of being wiped by them.
-    """
-    # 主窗口尺寸
-    height, width = stdscr.getmaxyx()
-    # 正文区可用宽度（第 0 列留给书签位）
-    text_width = max(1, width - 1)
-    # 先清主窗口，再画缩小后的正文
-    stdscr.erase()
-    for screen_row, (_, text) in enumerate(
-        pager.visible_rows(max(1, text_rows), text_width)
-    ):
-        # 写笔记时正文不加任何高亮，专心看引用与编辑区
-        _addstr(stdscr, screen_row, 1, text, curses.A_NORMAL)
-    # 最后一行是面板自己的快捷键提示（留出最后一列，避开 curses 右下角限制）
-    room = max(0, width - 1)
-    if room > 0:
-        _addstr(stdscr, height - 1, 0, _pad_line(_NOTE_HINT, room), curses.A_DIM)
-    # 主窗口先刷；它那几行里被面板盖住的部分稍后由子窗口刷回来
-    stdscr.refresh()
-    # 引用区：只读灰字
-    quote_win.erase()
-    _draw_quote(quote_win, pager.note_buffer, pager.note_translation)
-    quote_win.refresh()
-    # 编辑区的内容由 Textbox 维护，这里只把它刷到屏幕上
-    edit_win.refresh()
-
-
-def _cycle_mode(stdscr: Any, pager: Pager) -> None:
-    """``l``: cycle 中文 -> 英文 -> 双语对照, translating the screen as needed."""
-    order = MODE_ORDER
-    # 在三种视图里循环切换
-    pager.mode = order[(order.index(pager.mode) + 1) % len(order)]
-    # 切完立刻把屏幕上需要的段落翻出来
-    first, last = _screen_range(stdscr, pager)
-    pager.say(
-        "视图：{} · {}".format(
-            MODE_LABELS[pager.mode], _translate_screen_range(pager, first, last)
-        )
-    )
-
-
-def _translation_ready() -> Tuple[bool, str]:
-    """Whether the configured engine can be used, and why not when it cannot.
-
-    Checked *before* a request goes out, so an unconfigured engine shows the
-    actionable "run ``werd config translate``" hint instead of a provider error.
-    """
-    try:
-        # engine_ready 会自己读设置，这里不用再传一遍
-        return translator.engine_ready()
-    except translator.TranslationError as exc:
-        # 配置本身坏了（比如 TOML 写错）：也算"没配好"，给可操作的提示
-        return False, str(exc)
-
-
-def _translate_screen(stdscr: Any, pager: Pager) -> None:
-    """``t``: translate what is on screen and pop the result up for a few seconds.
-
-    The translation is still merged into ``Pager.translations`` (so switching to
-    the bilingual view afterwards is instant), but the point of ``t`` is the
-    popup: a quick look that does not change the view you are reading in.
-    """
-    # 引擎没配好：直接告诉用户跑哪条命令，别让请求先失败
-    ready, reason = _translation_ready()
-    if not ready:
-        pager.say("未配置翻译引擎：运行 werd config translate（{}）".format(reason))
-        return
-    # 只处理当前一屏
-    first, last = _screen_range(stdscr, pager)
-    # 不管当前是哪个视图，都翻成"另一种语言"（中文书 -> 英文，英文书 -> 中文）
-    target = mode_language(MODE_BOTH, pager.language)
-    if target is None:
-        # 理论上 MODE_BOTH 总有目标；真取不到就什么都不做
-        pager.say("这些段落无需翻译")
-        return
-    try:
-        # 显式给 target：当前视图是原文时也要能翻（比如中文书的中文视图）
-        count = pager.translate_screen(first, last, target=target)
-    except translator.TranslationUnavailable as exc:
-        # 后端不可达
-        pager.say("翻译不可用：{}".format(exc))
-        return
-    except translator.TranslationError as exc:
-        # 其它翻译错误
-        pager.say("翻译失败：{}".format(exc))
-        return
-    # 一段都没翻出来
-    if not count:
-        pager.say("这些段落还没有译文")
-        return
-    # 记一次翻译使用
-    pager.translations_used += 1
-    # 把这一屏的译文收拢成一段文字弹出来
-    text = _screen_translation_text(pager, first, last)
-    if not text:
-        # 译文是空的（后端返回空串）：退化成一行提示，别弹一个空面板
-        pager.say("已翻译 {} 段（临时，不缓存）".format(count))
-        return
-    _show_translation_popup(stdscr, pager, text)
-
-
-def _translate_chapter(stdscr: Any, pager: Pager) -> None:
-    """``T``: translate and cache the whole chapter, showing a progress bar.
-
-    A cached chapter is loaded straight from disk, which is what makes a second
-    visit free and an interrupted run resumable.
-    """
-    # 当前章节下标（-1 时按 0 处理）
-    index = max(0, pager.current_chapter())
-    try:
-        settings = translator.load_settings()
-        # 先看有没有缓存
-        cached = translator.get_cached_translation(pager.book_id, index, settings)
-    except translator.TranslationError as exc:
-        pager.say("翻译不可用：{}".format(exc))
-        return
-    # 没缓存才真的去翻
-    if cached is None:
-        try:
-            translator.translate_chapter(
-                pager.book_id,
-                index,
-                # 进度回调直接把进度条画在消息行上
-                progress=lambda done, total: _draw_progress(stdscr, index, done, total),
-                settings=settings,
-            )
-        except translator.TranslationUnavailable as exc:
-            pager.say("翻译不可用：{}".format(exc))
-            return
-        except translator.TranslationError as exc:
-            pager.say("翻译失败：{}".format(exc))
-            return
-    # 把（刚写入的或已有的）缓存合并进视图
-    covered = pager.load_chapter(index)
-    if covered:
-        pager.translations_used += 1
-        pager.say(
-            "第 {} 章已就绪（{}）· 覆盖 {} 行".format(
-                index + 1, "来自缓存" if cached else "已写入缓存", covered
-            )
-        )
-    else:
-        pager.say("第 {} 章没有可用的译文".format(index + 1))
-
-
-def _switch_to_chinese(stdscr: Any, pager: Pager) -> None:
-    """``c``: jump straight into the Chinese view."""
-    # 直接切到中文视图
-    pager.mode = MODE_ZH
-    first, last = _screen_range(stdscr, pager)
-    pager.say("视图：中文 · {}".format(_translate_screen_range(pager, first, last)))
-
-
-def _reload_vocab(pager: Pager) -> None:
-    """Refresh the underline set from the notebook.
-
-    A missing or damaged notebook must never stop you reading, so a failure only
-    surfaces as a message.
-    """
-    try:
-        # 从生词本读出全部单词，用于正文下划线
-        pager.set_vocab_words(vocab.word_set())
-    except vocab.VocabError as exc:
-        # 生词本坏了也不该影响阅读，只提示一句
-        pager.say("生词本读取失败：{}".format(exc))
-
-
 def _celebrate_achievements(
     newly: Sequence[Dict[str, Any]], ring: bool = True
 ) -> List[Dict[str, Any]]:
@@ -3616,77 +2071,17 @@ def _achievement_tick(pager: Pager, event_type: str) -> List[Dict[str, Any]]:
     return newly
 
 
-def _mark_word(stdscr: Any, pager: Pager) -> None:
-    """``v``: look a word up, show its translation and offer to keep it.
-
-    A curses pager has no mouse selection, so the word is typed into a prompt that
-    is pre-filled with the longest Latin token on the current line -- usually
-    exactly the word you were staring at.  The sentence around it is kept as the
-    context, and the notebook is reloaded afterwards so the new word starts being
-    underlined straight away.
-    """
-    # 当前行（书为空时给空串）
-    line = pager.lines[pager.position] if pager.total else ""
-    # 提示框预填"本行最长的英文单词"，用户可以直接回车确认
-    word = _prompt(stdscr, _WORD_PROMPT, pick_word(line))
-    if word is None or not word.strip():
-        return
-    word = word.strip()
-    # 取包含该词的整句当上下文
-    context = sentence_around(line, word)
-    try:
-        # 查词（单次翻译，不缓存）
-        translated = translator.translate_text(
-            word, target=pager.word_target(), source=pager.source_language
-        )
-    except translator.TranslationError as exc:
-        pager.say("查词失败：{}".format(exc))
-        return
-    # 记一次翻译使用
-    pager.translations_used += 1
-    # ``vocab.auto_add_on_mark`` skips the confirmation: the word is looked up and
-    # filed in one go, and the message still shows the meaning that was stored.
-    # 开了自动入库就跳过确认弹窗
-    auto = pager.auto_add_on_mark
-    if auto or _confirm(stdscr, "生词：{}".format(word), [translated, "", context]):
-        # 记进生词本（带上书名与章节名）
-        vocab.add_word(
-            word,
-            translated,
-            context=context,
-            book=pager.title,
-            chapter=pager.chapter_title,
-        )
-        # 立刻刷新下划线集合，新词马上就会高亮
-        _reload_vocab(pager)
-        # 自动入库时把释义也回显出来
-        pager.say(
-            "已加入生词本：{} = {}".format(word, translated)
-            if auto
-            else "已加入生词本：{}".format(word)
-        )
-    else:
-        pager.say("已取消：{}".format(word))
-
 
 def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     """Act on one key press; return ``False`` when the pager should quit.
 
     ``n`` follows the specification and moves to the next *search* hit, so
-    chapter hopping lives on ``[`` and ``]`` instead.  ``m`` starts mark mode and
-    ``o`` opens the note panel; while marking, every key goes to the selection, so
-    the screen never moves under the cursor (``y`` copies it, ``t`` also translates
-    it into a note template).
+    chapter hopping lives on ``[`` and ``]`` instead.
     """
-    # q / Q / Ctrl-C：退出（标记模式里也放行，免得用户被困在选区里出不来）
+    # q / Q / Ctrl-C：退出
     if key in ("q", "Q", 3):
         return False
-    # 标记模式：只处理选字相关的按键，翻页一律不响应
-    if pager.mark_mode:
-        _handle_mark_key(stdscr, pager, key)
-        return True
-    # 数一下这个键：空格连击、连续翻页、方向键怀旧都从这里记账（标记模式里的
-    # h/j/k/l 是在挪光标而不是翻页，所以上面已经 return 掉，不算数）
+    # 数一下这个键：空格连击、连续翻页、方向键怀旧都从这里记账
     pager.note_key(key)
     # 向下翻页：j、空格、回车、下方向键、PageDown
     if key in ("j", " ", "\n", "\r", curses.KEY_DOWN, curses.KEY_NPAGE):
@@ -3724,63 +2119,13 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
             if added
             else "已删除书签：第 {} 行".format(pager.position + 1)
         )
-    # l：循环切换语言视图
-    elif key == "l":
-        _cycle_mode(stdscr, pager)
-    # t：翻译当前屏幕并弹窗显示几秒（临时，不缓存）
-    elif key == "t":
-        # 记一次翻译键（翻译狂魔）；不管有没有配好引擎都算"按过了"
-        pager.key_counters["translate_hits"] += 1
-        _translate_screen(stdscr, pager)
-    # T：翻译并缓存整章
-    elif key == "T":
-        # 同上：整章翻译也算一次
-        pager.key_counters["translate_hits"] += 1
-        _translate_chapter(stdscr, pager)
-    # c：直接切到中文视图
-    elif key == "c":
-        _switch_to_chinese(stdscr, pager)
-    # v：查词并收藏
-    elif key == "v":
-        _mark_word(stdscr, pager)
-    # m：进入标记模式，在这一屏内选一段文字
-    elif key == "m":
-        _enter_mark(pager)
-    # o：展开 / 折叠笔记面板
-    elif key == "o":
-        _note_panel(stdscr, pager)
     # ?：帮助页（快捷键一览；帮助迷也在这里记账）
     elif key == "?":
         _help_overlay(stdscr, pager)
     # 数完了就看看有没有刚越过门槛的成就（没越过就是纯内存判断，不写盘）
     _achievement_tick(pager, "key")
-    # 每次按键后都看看要不要触发"进章自动翻译"
-    _maybe_auto_translate(stdscr, pager)
     # True 表示继续阅读
     return True
-
-
-def _maybe_auto_translate(stdscr: Any, pager: Pager) -> None:
-    """Translate the chapter under the cursor before it is needed.
-
-    Only active with ``translator.auto_translate_chapter``.  The work happens on
-    the main thread -- exactly like pressing ``T`` -- and each chapter is
-    attempted at most once per session, so a chapter already in the cache is
-    simply loaded from disk.  The translation is prepared whatever the current
-    view shows: the point of the setting is that switching to 英文 or 双语 is
-    instant, which is why it is not gated on the view needing a translation.
-    """
-    # 没开这个设置就什么都不做
-    if not pager.auto_translate_chapter:
-        return
-    # 当前章节下标
-    index = max(0, pager.current_chapter())
-    # 本次会话已经处理过这一章：不再重复
-    if index in pager.auto_translated:
-        return
-    # 先记下来，避免翻译过程中再次触发
-    pager.auto_translated.add(index)
-    _translate_chapter(stdscr, pager)
 
 
 def build_session(
@@ -3900,9 +2245,6 @@ def save_session(
         ) + int(seconds)
         # 全局与当天的统计
         accumulate_stats(document, seconds, ended.strftime("%Y-%m-%d"))
-        # 本次用过翻译就累加翻译次数
-        if pager.translations_used:
-            stats.bump_translations(document, pager.translations_used)
     # 统一落盘
     library.save_library(document)
 
@@ -4223,10 +2565,9 @@ def _run(stdscr: Any, pager: Pager) -> None:
         # 鼠标 / 触摸事件：滚轮一格滚 wheel_scroll_step 行，按住拖动按位移滚
         if key == curses.KEY_MOUSE:
             delta = _mouse_event_delta(pager, drag)
-            # 真的滚动了才走后续流程（比如进章自动翻译）
+            # 真的滚动了才动位置（没位移就不折腾）
             if delta:
                 pager.scroll(delta)
-                _maybe_auto_translate(stdscr, pager)
             continue
         # 交给按键处理器；它返回 False 表示要退出
         if not handle_key(stdscr, pager, key):
@@ -4332,22 +2673,13 @@ def open_reader(book_id: str) -> int:
             "werd read needs an interactive terminal (a tty on stdin and stdout)"
         )
 
-    # 读配置（三个段落分别用到）
+    # 读配置（reader 与 stats 两段分别用到）
     settings = config.load_config()
     reader_settings = settings.section("reader")
-    translator_settings = settings.section("translator")
-    vocab_settings = settings.section("vocab")
     # 书里存的上次进度
     progress = book.get("progress") or {}
-    # 自动识别书的语言，决定初始视图
-    language = detect_book_language(lines)
     # 目录（章节表 + 百分比）：优先读缓存，缺失/过期则现建
     book_toc = toc.load_toc(str(book_id), book, settings)
-    # 这本书已有的笔记（磁盘是权威；读不出来就当没有，不能挡住开书）
-    try:
-        book_notes = notes.load_notes(str(book_id))
-    except notes.NotesError:
-        book_notes = []
     # 组装 Pager：所有配置都在这里被"翻译"成运行时参数
     pager = Pager(
         lines=lines,
@@ -4357,11 +2689,7 @@ def open_reader(book_id: str) -> int:
         book_id=str(book_id),
         title=str(book.get("title") or "untitled"),
         author=str(book.get("author") or "unknown"),
-        mode=LANGUAGE_MODES.get(language, MODE_ZH),
-        book_language=language,
         bookmarks=progress.get("bookmarks") or [],
-        target_language=str(translator_settings.get("target_language") or "zh-CN"),
-        source_language=str(translator_settings.get("source_language") or "auto"),
         # 连续阅读天数由统计里的每日桶算出
         streak=reading_streak(
             (document.get("stats") or {}).get("daily_read_time") or {}
@@ -4377,16 +2705,9 @@ def open_reader(book_id: str) -> int:
             reader_settings.get("status_bar_format") or DEFAULT_STATUS_FORMAT
         ),
         auto_save_interval=int(reader_settings.get("auto_save_interval") or 0),
-        auto_translate_chapter=bool(translator_settings.get("auto_translate_chapter")),
-        highlight_vocab=bool(vocab_settings.get("highlight_in_reader", True)),
-        auto_add_on_mark=bool(vocab_settings.get("auto_add_on_mark", True)),
         # Tab 目录浮层用的条目（带百分比）
         toc_entries=book_toc,
-        # 这本书已经存在的笔记：折叠提示显示条数，面板打开时接着写
-        notes=book_notes,
     )
-    # 载入生词集合，正文里会给它们加下划线
-    _reload_vocab(pager)
 
     # -- 成就：先备好"实时判定"要用的门槛表与基线（各读一次盘）--------------
     _prepare_achievements(pager, document)
@@ -4429,7 +2750,7 @@ def open_reader(book_id: str) -> int:
     # 在普通终端里打印一行摘要
     console.print(
         "[dim]{} · 停在 {}/{} 行 ({:.1f}%) · 本次 {} · 书签 {} 个[/dim]".format(
-            MODE_LABELS[pager.mode],
+            pager.title,
             pager.position + 1,
             pager.total,
             pager.percentage,

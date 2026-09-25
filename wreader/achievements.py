@@ -41,9 +41,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # 同包引用：数据目录、环境探测（前缀信号名）、地理（世仇组合）、书库索引（迁移用）、
-# 笔记（数笔记总数）、指标与成就定义
-from . import config, env, geo, library, notes, stats
-# 跨进程文件锁：与 notes.py 共用同一份实现
+# 指标与成就定义
+from . import config, env, geo, library, stats
+# 跨进程文件锁：成就状态文件是唯一还在做读-改-写的存储
 from .lock import file_lock
 
 # 模块对外暴露的名字
@@ -1010,18 +1010,38 @@ def metric_thresholds(
     }
 
 
+# 笔记小节标题：``## 笔记 #3 — 2026-09-23 15:10``（沿用老 notes 模块的写法）
+_NOTE_SECTION_RE = re.compile(r"^##\s*笔记\s*#\d+")
+
+
 def _note_total() -> int:
     """Return the total number of notes on disk, or 0 when they cannot be read.
 
     The count is *derived* from the notes directory every time rather than kept as
     a counter in the state file: a note deleted (or written) by hand must move the
     笔记达人 progress in the same direction, exactly like every other metric here.
+    The notes feature itself is gone from the CLI and the reader, but the metric
+    survives so the condition keeps meaning for the files users already have.
     """
-    try:
-        return notes.total_note_count()
-    except Exception:  # pragma: no cover - notes 自己已经兜过底
-        # 笔记目录整个读不了：按 0 算，别让统计页与成就页一起炸掉
+    # 笔记沿用老位置：<数据目录>/notes/*.md
+    directory = config.data_dir() / "notes"
+    # 目录不存在（从没写过笔记）就是 0
+    if not directory.is_dir():
         return 0
+    total = 0
+    # 逐份 markdown 数小节标题，口径与老的 total_note_count 一致
+    for path in sorted(directory.glob("*.md")):
+        try:
+            # 笔记一律 UTF-8（中文内容靠它）
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # 某一本书的文件坏了：跳过它，别把别人写的条数一起清零
+            continue
+        # 一行行看有没有 ``## 笔记 #N`` 标题
+        for line in text.split("\n"):
+            if _NOTE_SECTION_RE.match(line):
+                total += 1
+    return total
 
 
 def check_achievements(

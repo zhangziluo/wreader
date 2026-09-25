@@ -18,11 +18,9 @@ python tools/check_docs.py
 | `check_doc_numbers.py` | README 里写的源码行数、测试项数是否与真实情况一致 | 0 / 1 |
 | `check_comments.py` | 有没有「上方没有紧邻注释行」的逻辑语句（默认只报告） | 见下 |
 | `verify_wrap.py` | `reader._wrap_line` 折行：不超宽、不丢字符、不产空行（约 4 万次属性检查） | 0 / 1 |
-| `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 × 3 视图 = 420 组） | 0 / 1 |
+| `verify_draw.py` | `reader._draw` 的每次写入都不越界（4 种正文 × 7 宽 × 5 高 = 140 组） | 0 / 1 |
 | `verify_colors.py` | 真 pty 里 `_init_colors()` 的效果（默认色 `-1` 可用 ⇒ 背景能跟随终端主题） | 0 / 1 |
 | `verify_mouse.py` | 真 pty 里灌 SGR 鼠标序列，验证滚轮 / 触摸拖动真的翻滚页（8 项对账） | 0 / 1 |
-| `verify_notes.py` | 真 pty 里走一遍「标记 + 笔记面板」：引用区、Ctrl+S、折叠提示都对账（5 项） | 0 / 1 |
-| `verify_translate.py` | 真 pty 里验证 `t` 的未配置提示，外加 `werd config translate` 落盘（4 项） | 0 / 1 |
 | `verify_achievements.py` | 真 pty 里验证帮助页、屏内 5 秒成就通知、意外中断恢复、名字彩蛋（19 项） | 0 / 1 |
 
 ## 逐个说明
@@ -49,7 +47,7 @@ python tools/check_doc_numbers.py
 > 注意：它内部会调用 pytest 来数测试项，所以**不要**把它放进 `tests/` 当测试跑（会递归）。
 
 > ⚠️ **子包里的文件不在它的校验范围内**。行数那条规则只认 `wreader/<文件名>`，
-> 而 `wreader/translate/` 这类子包的文件名会跟包根撞车（两边都有 `__init__.py`），
+> 而 `wreader/data/` 这类子包的文件名会跟包根撞车（两边都有 `__init__.py`），
 > 光看文件名分不清是哪一个。所以 README 的子包条目**不写"（N 行）"**，
 > 这些数字记在 `memory-bank/techContext.md` 里。
 
@@ -58,12 +56,12 @@ python tools/check_doc_numbers.py
 ```bash
 python tools/check_comments.py              # 只报告 wreader/ 与 tests/
 python tools/check_comments.py --strict     # 有遗漏就返回退出码 1
-python tools/check_comments.py --strict wreader/vocab.py   # 限定文件，适合逐个改善
+python tools/check_comments.py --strict wreader/library.py   # 限定文件，适合逐个改善
 ```
 
 项目约定「每条逻辑语句上方都要有一行口语化中文注释」，但**这是个很严的字面规则**：
-2026-09-22 实测 `wreader/` + `tests/` 仍有 **2260** 条语句上方没有紧邻注释行
-（`test_reader.py` 447、`reader.py` 399、`translator.py` 189 …）。
+2026-09-25 实测 `wreader/` + `tests/` 仍有 **2771** 条语句上方没有紧邻注释行
+（`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 223 …）。
 所以默认模式**只报告、不判定**；要拿它当门禁就加 `--strict`，并配合文件参数一次啃一个。
 
 > ⚠️ 历史坑：这个脚本早先的版本把 `tokenize.NEWLINE` 也放进了「跳过」集合，
@@ -124,43 +122,6 @@ python tools/verify_mouse.py     # 期望：RESULT: 全部通过
 >
 > 它的价值已经被验证过：抓出了一个"拖动完全失效"的真 bug —— `curses.mouseinterval` 默认的
 > 点击判定窗口会把**按下事件扣住**，导致拖动状态建立不起来。单测发现不了这个。
-
-### `verify_notes.py`
-
-```bash
-python tools/verify_notes.py     # 期望：RESULT: 全部通过
-```
-
-笔记面板会真的建两个 curses 子窗口、跑 `curses.textpad.Textbox`，还要靠
-「主窗口先刷、子窗口后刷」的刷新顺序才不会被 `stdscr.erase()` 擦掉 —— 这些用 `FakeStdscr`
-的单元测试**盖不到底**（假窗口没有真正的 curses 叠窗语义）。所以这里开一个真 pty、
-跑一次阅读器、按 `m` → `ll` → `y` → `o` → 打 `abc` → `Tab` → `Ctrl+S` → `Esc` → `q`，
-再把终端输出读回来对账 **5 项**：引用区画出 `> …`、面板提示行、`Ctrl+S` 存成功
-（顺带证明 `_disable_flow_control()` 真把 `IXON` 关掉了，否则 XOFF 会被行规程吞掉）、
-折叠后提示行显示 `按o展开`、全程没有 traceback。
-
-> ⚠️ 它的价值也已经被验证过：第一版把子窗口写成 `stdscr.newwin(...)`，
-> 单测（假窗口正好实现了 `newwin`）全绿，但**真 curses 的 window 对象根本没有 `newwin` 方法**
-> （只有 `derwin`）—— 一跑这个脚本就 `AttributeError`。现在代码走 `reader._sub_window()`
-> 这层间接，生产用 `curses.newwin`，测试替换成假窗口。
->
-> 另一个坑：脚本必须显式给子进程一个 `TERM`（非交互运行时 `TERM` 可能没设，
-> curses 起不来，子进程会提前退出，写 pty 直接 `EIO`）。
-
-### `verify_translate.py`
-
-```bash
-python tools/verify_translate.py     # 期望：RESULT: 全部通过
-```
-
-`t` 的译文弹窗要真的建子窗口、真的按"主窗口先刷、子窗口后刷"的顺序画；
-但**翻译本身要联网**，而项目纪律是测试绝不联网。所以这里只验证**不联网也完全确定**的两条路径，
-它们恰好是规格里最容易写错的两条：
-
-1. **引擎没配好时按 `t`** 必须给出「运行 werd config translate」这种可操作提示 ——
-   既不能偷偷发请求，也不能把后端报错甩给用户（分别用"选了 local 但没装 argostranslate"
-   和"选了 baidu 但没填密钥"两种情况各验一次）；
-2. **`werd config translate` 向导**真的把引擎名与密钥写进 `settings.toml`（喂标准输入，非交互跑）。
 
 ### `verify_achievements.py`
 

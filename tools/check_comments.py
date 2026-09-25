@@ -11,10 +11,11 @@
 默认模式**只报告、不判定**：因为“每条逻辑语句上方都要有一行注释”是很严的字面规则，
 仓库目前并没有全量满足（见下方「现状」），把它当硬门禁会让 CI 直接全红。
 
-> 现状（2026-09-22 实测）：`wreader/` + `tests/` 合计 **2054** 条语句上方没有紧邻注释行
-> （`wreader/reader.py` 357、`wreader/translator.py` 189、`wreader/library.py` 163 …）。
+> 现状（2026-09-25 实测，去掉翻译 / 生词本 / 笔记之后）：`wreader/` + `tests/` 合计 **2771** 条语句
+> 上方没有紧邻注释行（`tests/test_reader.py` 591、`wreader/reader.py` 480、
+> `wreader/achievements.py` 223、`wreader/library.py` 170、`tests/test_library.py` 165 …）。
 > 所以那句“每条逻辑语句上方都有中文注释”更接近**目标**而不是**已达成的事实**。
-> 想推进就逐个文件来：`python tools/check_comments.py --strict wreader/vocab.py`（目前 28 条）。
+> 想推进就逐个文件来：`python tools/check_comments.py --strict wreader/library.py`（目前 170 条）。
 
 > 历史坑（2026-09-22 修）：早先的版本把 tokenize.NEWLINE 也放进了「跳过」集合，
 > 于是“一条语句结束、下个 token 是新语句”这个判断永远不会触发，**每个文件只检查了第 1 行**，
