@@ -1226,7 +1226,8 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 6. **记忆库全量复核**：`projectbrief.md` / `productContext.md` / `techContext.md` /
    `systemPatterns.md` / `progress.md` / 本文件。
 
-**实测规模**：`git diff --stat` 为 **-10,649 / +599 行**。
+**实测规模**：整次提交（含记忆库 / 协议文档）`git show --stat` 为 **-11,240 / +1,163 行**、
+47 个文件；其中代码与测试部分是 **-10,649 / +599**（当时 `git diff --stat` 的中途读数）。
 
 **验证证据（2026-09-25，全部通过）**
 | 检查 | 命令 | 结果 |
@@ -1281,6 +1282,11 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 ⚠️ **踩到的一点小坑**：把 `verify_mouse.py` / `verify_achievements.py` 写进
 `for s in ...; do ... | tail -3; done` 这种管道循环里会**假挂**（实测 300 秒无输出、只能 `pkill`），
 单独跑就 40–50 秒正常通过 —— 这两个脚本自己开 pty、要么就单独跑，要么重定向到文件后台观察。
+
+⚠️ **第二个小坑（heredoc 的两副面孔）**：本会话提交时用了 `git commit -F - <<'MSG'`，
+**消息确实进了提交，但命令挂满 300 秒不返回**；而更早的会话里 `cat > file <<EOF` 干脆一个字节都没写。
+结论写进协议了：写文件只用 `editor`，提交信息落成文件再 `git commit -F <file>`。
+最终这次提交是 **47 个文件 / -11,240 / +1,163 行**，已推上 `origin/main`（`git status -sb` 无领先/落后）。
 
 ## 待办 / 下一步
 
