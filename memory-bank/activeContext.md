@@ -4,7 +4,7 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话三次实测 11.58 / 21.97 / 43.84 秒）、
+代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话四次实测 11.58 / 21.97 / 23.76 / 43.84 秒）、
 `npx pyright` **0 errors / 0 warnings / 0 informations**、`tools/` 的 **8** 个校验脚本全绿
 （`check_docs` OK / `check_doc_numbers` ALL OK / `check_comments` **3403** / `verify_wrap` 40077 /
 `verify_draw` 140 / `verify_colors` 干净退出（`-1/-1` 可用）/ `verify_mouse` 8 项 /
