@@ -10,8 +10,8 @@
 `verify_mouse` 8 项 / `verify_achievements` 19 项）。
 本会话（2026-09-26，紧接在已提交的 ㉜ 之后）做的是**自动翻页**：阅读器里按 `a` 让正文自己往下走、
 `>` / `<` 调速，配置加 `reader.auto_scroll_interval` / `reader.auto_scroll_step` 两个键，
-中英文档与《使用指南.md》都补了说明，见 ㉝。**代码 + 文档 + 测试 + 记忆库都改完了，还没提交**
-（下一步就是 commit + push）。
+中英文档与《使用指南.md》都补了说明，见 ㉝。**已提交并推送**：`93e3719`（功能 + 文档 + 测试）
+与 `f0b10bd`（记忆库同步）两个提交都在 `origin/main` 上，`git status -sb` 为 `## main...origin/main`（不显示领先/落后）。
 
 - `wreader/` = **12** 个 `.py` / **9,803** 行（`reader.py` **3036**、`config.py` **971**）；
   `tests/` = 11 个文件 / **618** 项；`tools/` = 8 个 `.py`。
@@ -1384,6 +1384,10 @@ werd config reader.auto_scroll_interval abc
 `reader.py` 3036 / `config.py` 971）；`check_comments` → **3204**；`verify_wrap` → 40077；`verify_draw` → 140。
 ⚠️ 本会话**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`：没动鼠标与成就逻辑，
 `a` 键也不在 `verify_mouse.py` 的键盘基准里 —— 下次动这三块时补跑。
+
+**已提交并推送**：`93e3719`（`wreader/reader.py` + `wreader/config.py` + 两个测试文件 +
+`README.md` / `README.en.md` / `使用指南.md`）与 `f0b10bd`（记忆库 6 个状态文件 +
+`memory-bank/README.md` + `.clinerules/memory-bank.md`）。
 
 ## 待办 / 下一步
 
