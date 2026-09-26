@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 16 项（reader 9 + stats 4 + library 1 + toc 2）
-    assert len(paths) == 16
+    # 当前 schema 共 18 项（reader 11 + stats 4 + library 1 + toc 2）
+    assert len(paths) == 18
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:
@@ -38,6 +38,18 @@ def test_mobile_scrolling_settings_are_declared() -> None:
     # 类型按默认值推断：一个是整数、一个是布尔
     assert config.coerce_value("reader.wheel_scroll_step", "3") == 3
     assert config.coerce_value("reader.touch_scroll", "off") is False
+
+
+def test_auto_scroll_settings_are_declared() -> None:
+    # 自动翻页：默认每 5 秒走 1 屏幕行（与 reader 的默认值一致）
+    assert config.DEFAULT_FLAT["reader.auto_scroll_interval"] == 5.0
+    assert config.DEFAULT_FLAT["reader.auto_scroll_step"] == 1
+    # 类型按默认值推断：间隔是浮点（"2" 变成 2.0）、步长是整数
+    assert config.coerce_value("reader.auto_scroll_interval", "2") == 2.0
+    assert config.coerce_value("reader.auto_scroll_step", "3") == 3
+    # 非数字直接报错（写入时就被拦住，别让它变成 0 秒狂翻）
+    with pytest.raises(config.ConfigError):
+        config.coerce_value("reader.auto_scroll_interval", "abc")
 
 
 def test_page_overlap_setting_is_declared() -> None:

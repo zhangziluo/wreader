@@ -8,6 +8,8 @@ Everything wreader can be told to do differently lives in one TOML document,
     page_overlap = 3              # 翻页时上下保留几行上下文（0 = 关闭）
     status_bar_format = "time|chapter|duration"
     auto_save_interval = 60       # 自动保存进度间隔（秒），0 = 关闭
+    auto_scroll_interval = 5.0    # 自动翻页速度（每隔几秒往前走一次）
+    auto_scroll_step = 1          # 自动翻页每次前进几行（屏幕行）
 
     [stats]
     daily_goal_minutes = 60       # 每日阅读目标（分钟），0 = 关闭
@@ -190,6 +192,9 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         ("touch_scroll", True, "触摸拖动即滚动（手机终端）"),
         ("status_bar_format", "time|chapter|duration", ""),
         ("auto_save_interval", 60, "自动保存进度间隔（秒），0 = 关闭"),
+        # 自动翻页（阅读中按 a 开关；速度也能在界面里按 > / < 临时调）
+        ("auto_scroll_interval", 5.0, "自动翻页速度（每隔几秒往前走一次）"),
+        ("auto_scroll_step", 1, "自动翻页每次前进几行（屏幕行）"),
         ("page_height", 24, "每屏显示的行数"),
         ("theme", "default", "配色主题名（预留）"),
         ("store_history", True, "退出时把本次会话时长记入统计"),

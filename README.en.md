@@ -546,7 +546,7 @@ The hint bar **at the bottom of the reader shows this list by default** (a trans
 replaces it), so there is nothing to memorise:
 
 ```
-q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助
+q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助
 ```
 
 | Key | Action |
@@ -554,6 +554,9 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?�
 | `q` / `Q` / `Ctrl-C` | Quit (saves position, bookmarks and this session's duration) |
 | `j` / `space` / `Enter` / `↓` / `PageDown` | Next page (measured in **screen rows**: a paragraph too long for one screen resumes **inside** the paragraph on the next page, so nothing is skipped or repeated; the distance comes from `reader.page_scroll_step`, keeping `reader.page_overlap` lines of context) |
 | `k` / `↑` / `PageUp` | Previous page |
+| `a` | **Automatic page turns**: from then on the pager walks `reader.auto_scroll_step` screen rows (1 by default) every `reader.auto_scroll_interval` seconds (5 by default). Any key press pushes the next turn back by one full interval, so typing never fights the timer, and the mode switches itself off with a message at the end of the book |
+| `>` / `+` | Automatic turns **faster** (halve the interval, down to `0.5` s) |
+| `<` / `-` | Automatic turns **slower** (double the interval, up to `600` s) |
 | Mouse wheel down · swipe up | Scroll **one line at a time** forward (lines per tick: `reader.wheel_scroll_step`) |
 | Mouse wheel up · swipe down | Scroll **one line at a time** backwards |
 | `g` | Jump to a line number (prompts `跳到行号 (1-281):`; `Esc` cancels) |
@@ -589,6 +592,13 @@ Useful details:
   costs you that one resume offer, never the position stored in the library index.
 - **The leftmost column of every text row is the bookmark gutter**: bookmarked lines show `★`, other rows are blank.
 - **Search highlighting**: the hit you jumped to is in reverse video, the other hits in the same set are bold.
+- **Automatic page turns (hands free)**: press `a` and the pager walks forward by itself —
+  **one row every 5 seconds** by default, set by `reader.auto_scroll_interval` (seconds) and
+  `reader.auto_scroll_step` (rows per turn). While reading, `>` speeds it up and `<` slows it down
+  (each press doubles or halves the pace, clamped to `0.5`–`600` s), and the hint bar shows the current
+  pace (`自动翻页中 · 每 5 秒 1 行（12 行/分钟）`). Any key press pushes the next turn a full interval
+  back, so manual paging is never stolen, and at the end of the book the mode stops itself with a message.
+  Handy: `werd config reader.auto_scroll_interval 2` or `werd config reader.auto_scroll_step 3`.
 - **`Ctrl-C` mid-session loses nothing**: the position and the session duration are still saved on the way out.
 
 ---
@@ -596,7 +606,7 @@ Useful details:
 ## Settings
 
 Everything lives in `~/.wreader/settings.toml`, split into 4 sections (`reader` / `stats` / `library` / `toc`,
-16 entries). Edit the file directly, or use `werd config <section.key> <value>`.
+18 entries). Edit the file directly, or use `werd config <section.key> <value>`.
 **Deleting any line falls back to that setting's default**, so you cannot really break it.
 
 ### `[reader]`
@@ -609,6 +619,8 @@ Everything lives in `~/.wreader/settings.toml`, split into 4 sections (`reader` 
 | `touch_scroll` | `true` | Drag the finger to scroll (mobile terminals); `false` keeps the wheel and keyboard only |
 | `status_bar_format` | the `time`, `chapter`, `duration` segments | Which status bar segments to show, separated by a vertical bar (see the table below) |
 | `auto_save_interval` | `60` | Seconds between automatic position saves; `0` disables |
+| `auto_scroll_interval` | `5.0` | Automatic page turns: seconds between two turns (toggled with `a`, adjustable in the reader with `>` / `<`; range 0.5–600 s) |
+| `auto_scroll_step` | `1` | Automatic page turns: **screen rows** walked per turn (together with the interval this is the reading pace) |
 | `page_height` | `24` | Fallback lines per screen when no terminal size is known (a real terminal pages by the actual height of the text area, so you normally leave this alone) |
 | `theme` | `"default"` | Colour theme name (reserved, not implemented yet) |
 | `store_history` | `true` | Record this session's duration into the statistics; `false` reads without counting time |
@@ -933,26 +945,26 @@ wreader/
 │   ├── __init__.py          __version__ and the module map (22 lines)
 │   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1250 lines)
 │   ├── cli.py               argparse definition + one handler per sub-command (1004 lines)
-│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (966 lines)
+│   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (971 lines)
 │   ├── env.py               environment probe: cloud host / WSL / tmux / editable install (183 lines)
 │   ├── geo.py               location: ip-api lookup + a one hour cache, country → continent, feud pairs (343 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1425 lines)
 │   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (80 lines)
-│   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, toc overlay, help page and notices (2799 lines)
+│   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, auto scrolling, toc overlay, help page and notices (3036 lines)
 │   ├── stats.py             metrics, heatmap, achievement definitions, celebration (817 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
 │   ├── transfer.py          the `werd data` bundle: export reading time + achievements to JSON, merge add-only (198 lines)
 │   └── data/
 │       └── achievements.json  the 48 achievement definitions (348 lines)
-└── tests/                   592 tests, all offline (see "Running the tests" below)
+└── tests/                   618 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, library samples, epub builder
     ├── test_achievements.py 51 tests — word counting, range dedup, event accounting, state file, locking, unlock checks, live thresholds, geo/env metrics
     ├── test_cli.py          45 tests — argument parsing, every sub-command's output, exit codes, the achievement banner, the name egg
-    ├── test_config.py       49 tests — defaults, type checks, legacy migration, data dir adoption, directory resolution
+    ├── test_config.py       50 tests — defaults, type checks, legacy migration, data dir adoption, directory resolution
     ├── test_env.py          14 tests — cloud host / WSL / tmux / editable install probing (all injected)
     ├── test_geo.py          31 tests — country → continent, feud pairs, ip-api parsing, caching, offline fallback
     ├── test_library.py      132 tests — encodings, chapters, epub, dedup, file names, search, recent books, clear/prune, merging a bundle
-    ├── test_reader.py       174 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay,
+    ├── test_reader.py       199 tests — paging maths, Pager, status bar, keys, auto scrolling, sessions, wrapping, wheel, toc overlay,
     │                          help page, achievement notice, recovery flow
     ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
     ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
@@ -1006,7 +1018,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 592 tests, about 15 seconds
+pytest                      # 618 tests, about 10–30 seconds (varies with load)
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -1155,7 +1167,7 @@ Ten former issues that are now fixed, kept here so they are not mistaken for pen
   the translation feature, so the problem no longer exists.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings (`translator.py` / `vocab.py` went away with the feature).
-- ~~No automated tests~~ → 592 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 618 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → that code path was
   removed together with the translation feature (the discovery back then, while writing the tests:
   `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN`).

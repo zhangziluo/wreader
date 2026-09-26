@@ -19,12 +19,20 @@ Keys
 walks to the next hit, ``b`` toggles a bookmark, ``?`` shows the key map and
 ``q``/``Q``/Ctrl-C leaves and saves the position.
 
+``a`` switches on **automatic page turns** for hands-free reading: from then on the
+pager walks ``reader.auto_scroll_step`` screen rows (default 1) every
+``reader.auto_scroll_interval`` seconds (default 5), and ``>`` / ``<`` double or halve
+the pace.  Any key press pushes the next turn back by one interval, so typing never
+fights the timer, and the mode switches itself off at the end of the book.
+
 Settings
 --------
 The ``[reader]`` and ``[stats]`` tables of ``~/.wreader/settings.toml`` drive the
 front end (see :mod:`wreader.config`): ``page_scroll_step`` sets how much the page
 keys move (``1`` = one screen) and ``page_overlap`` how many lines of the previous
-screen stay visible after a page turn, ``status_bar_format`` picks the status
+screen stay visible after a page turn, ``auto_scroll_step`` / ``auto_scroll_interval``
+set how far and how often the automatic page turns go,
+``status_bar_format`` picks the status
 segments, ``auto_save_interval`` writes the position while reading and
 ``store_history`` (``[reader]``) decides whether the session lands in the stats.
 
@@ -72,6 +80,8 @@ from . import (
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
 __all__ = [
+    "DEFAULT_AUTO_SCROLL_INTERVAL",
+    "DEFAULT_AUTO_SCROLL_STEP",
     "DEFAULT_PAGE_OVERLAP",
     "DEFAULT_STATUS_FORMAT",
     "NOTICE_SECONDS",
@@ -143,11 +153,33 @@ DEFAULT_STATUS_FORMAT = "time|chapter|duration"
 #: Lines of the previous screen kept on a page turn (``reader.page_overlap``).
 DEFAULT_PAGE_OVERLAP = 3
 
+# -- 自动翻页（免手翻）-------------------------------------------------------
+# 每两次自动前进之间的默认间隔（秒），对应 reader.auto_scroll_interval
+#: Seconds between two automatic page turns (``reader.auto_scroll_interval``).
+DEFAULT_AUTO_SCROLL_INTERVAL = 5.0
+# 每次自动前进几行**屏幕行**，对应 reader.auto_scroll_step
+#: Screen rows one automatic page turn moves (``reader.auto_scroll_step``).
+DEFAULT_AUTO_SCROLL_STEP = 1
+# 速度可调范围（秒）：比 0.5 秒还快人的眼睛跟不上，比 10 分钟还慢不如自己按 j
+#: Slowest and fastest automatic pace, in seconds between two turns.
+AUTO_SCROLL_MIN_INTERVAL = 0.5
+AUTO_SCROLL_MAX_INTERVAL = 600.0
+# 调速键每按一次，间隔乘 / 除这个倍数（间隔变小 = 翻得更快）
+_AUTO_SPEED_FACTOR = 2.0
+# 自动翻页开着时 get_wch 最少等多少毫秒：到点就能翻，又不至于空转烧 CPU
+_AUTO_MIN_POLL_MS = 50
+# 开关自动翻页的键，以及加速 / 减速键（都挑的空闲键，不与任何已有键位冲突）
+_AUTO_TOGGLE_KEYS = ("a",)
+_AUTO_FASTER_KEYS = (">", "+", "=")
+_AUTO_SLOWER_KEYS = ("<", "-", "_")
+# 自动翻页开着时，底部提示栏改显示这一行（{} 处填"每 N 秒 M 行（K 行/分钟）"）
+_AUTO_HINT = "自动翻页中 · {} · a 暂停 > 加速 < 减速"
+
 # 两个输入提示的前缀
 _SEARCH_PROMPT = "搜索: "
 
 # 底部常驻的快捷键提示
-_HINT = "q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助"
+_HINT = "q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?帮助"
 
 # 目录浮层占屏幕宽度的比例（靠右显示），其余留给正文
 _TOC_WIDTH_RATIO = 0.4
@@ -189,6 +221,8 @@ _HELP_LINES: Tuple[str, ...] = (
     "  j / 空格 / 回车 / ↓ / PgDn   下一页",
     "  k / ↑ / PgUp                 上一页",
     "  滚轮 / 触摸拖动               逐行滚动（手机上就是靠它）",
+    "  a                            自动翻页开关（按行数自己往下走）",
+    "  > / <                        自动翻页加速 / 减速",
     "  g                            跳到指定行（输入行号）",
     "  G                            跳到全书末尾",
     "",
@@ -206,6 +240,7 @@ _HELP_LINES: Tuple[str, ...] = (
     "  意外中断后再打开              会问要不要接着上次的位置读",
     "",
     "设置文件 ~/.wreader/settings.toml：werd config reader.page_height 40",
+    "自动翻页速度：werd config reader.auto_scroll_interval 3（每 3 秒一行）",
 )
 
 # -- 成就的实时记账（Phase 2）-----------------------------------------------
@@ -393,6 +428,25 @@ def format_duration(seconds: float) -> str:
     return "{:02d}:{:02d}".format(minutes, secs)
 
 
+def _format_seconds(seconds: float) -> str:
+    """Render a number of seconds without trailing zeros: ``5``, ``2.5``, ``0.625``."""
+    # 先按 3 位小数格式化，再剪掉尾部的 0 与小数点
+    text = "{:.3f}".format(max(0.0, float(seconds)))
+    trimmed = text.rstrip("0").rstrip(".")
+    # 全零（或空串）兜成 "0"
+    return trimmed or "0"
+
+
+def _clamp_auto_interval(seconds: float) -> float:
+    """Keep an automatic page-turn interval inside the usable range.
+
+    The clamp is what stops a stuck ``>`` key from turning the pager into a strobe,
+    and a stuck ``<`` from making a turn so rare that the mode looks broken.
+    """
+    # 上下界都取自模块常量，改范围只改一处
+    return max(AUTO_SCROLL_MIN_INTERVAL, min(AUTO_SCROLL_MAX_INTERVAL, float(seconds)))
+
+
 def find_matches(lines: Sequence[str], needle: str) -> List[int]:
     """Return the indexes of every line containing *needle*, case insensitive."""
     wanted = str(needle or "")
@@ -439,6 +493,10 @@ class Pager:
         auto_save_interval: int = 60,
         # 目录条目（章节表 + 百分比），供 Tab 浮层使用
         toc_entries: Sequence[Dict[str, Any]] = (),
+        # 自动翻页：每几秒自动前进一次（``reader.auto_scroll_interval``）
+        auto_scroll_interval: float = DEFAULT_AUTO_SCROLL_INTERVAL,
+        # 自动翻页：每次自动前进几行屏幕行（``reader.auto_scroll_step``）
+        auto_scroll_step: int = DEFAULT_AUTO_SCROLL_STEP,
     ) -> None:
         # 拷贝成列表，避免外部改动影响内部状态
         self.lines = list(lines)
@@ -478,6 +536,19 @@ class Pager:
         #: seconds between position saves, 0 disables (``reader.auto_save_interval``)
         # 自动保存间隔，0 表示关闭
         self.auto_save_interval = max(0, int(auto_save_interval))
+        # -- 自动翻页（a 键开关，免手翻）-----------------------------------
+        #: seconds between two automatic page turns (``reader.auto_scroll_interval``)
+        # 两次自动前进之间的间隔（秒），夹进可读范围后使用
+        self.auto_scroll_interval = _clamp_auto_interval(auto_scroll_interval)
+        #: screen rows one automatic turn moves (``reader.auto_scroll_step``)
+        # 每次自动前进几行屏幕行，至少 1（否则自动模式等于空转）
+        self.auto_scroll_step = max(1, int(auto_scroll_step))
+        #: whether the text walks forward by itself right now (``a`` toggles it)
+        # 自动翻页现在开着吗；会话开始时一律是关的（不落库、不跨会话记忆）
+        self.auto_scroll = False
+        #: monotonic time of the next automatic turn, ``0.0`` = not scheduled
+        # 下一次自动前进的时刻（单调时钟）；0.0 = 没排期
+        self.auto_scroll_deadline = 0.0
         #: the table of contents: ``[{"title", "line", "percentage"}, ...]``
         # 目录条目（由 toc.load_toc 备好），Tab 浮层直接读它
         self.toc = [dict(entry) for entry in toc_entries]
@@ -780,6 +851,107 @@ class Pager:
         """Go back one page, counted in screen rows like :meth:`next_page`."""
         # 往回也按屏幕行，和前进对称
         self.move_to(*self.previous_top(self.page_budget, self.viewport_width))
+
+    # -- automatic page turns (hands free reading) -----------------------
+    def set_auto_scroll(self, enabled: bool, now: Optional[float] = None) -> bool:
+        """Turn the automatic page turns on or off; return the new state.
+
+        Switching it on schedules the first turn one interval ahead, so the page is
+        never yanked away at the very moment the mode is turned on.
+        """
+        # 先记住开关状态
+        self.auto_scroll = bool(enabled)
+        # 开着就排下一次；关掉时把时刻清零，免得下次打开立刻翻一屏
+        self.auto_scroll_deadline = (
+            self._auto_now(now) + self.auto_scroll_interval if self.auto_scroll else 0.0
+        )
+        return self.auto_scroll
+
+    def toggle_auto_scroll(self, now: Optional[float] = None) -> bool:
+        """Flip the automatic page turns; ``True`` when they are now on."""
+        # 取反后交给 set_auto_scroll，排期逻辑只留一处
+        return self.set_auto_scroll(not self.auto_scroll, now)
+
+    def defer_auto_scroll(self, now: Optional[float] = None) -> None:
+        """Push the next automatic turn back by one full interval.
+
+        Every key press calls this: someone who is typing is reading at their own
+        pace, and the timer must not steal the page from under them a moment later.
+        """
+        # 没开自动翻页就没什么可推的
+        if not self.auto_scroll:
+            return
+        # 从"现在"重新排期（间隔可能刚被调速改过，所以每次都现读）
+        self.auto_scroll_deadline = self._auto_now(now) + self.auto_scroll_interval
+
+    def auto_scroll_wait(self, now: Optional[float] = None) -> Optional[float]:
+        """Seconds until the next automatic turn; ``None`` when the mode is off."""
+        # 关着的时候不存在"下一次"
+        if not self.auto_scroll:
+            return None
+        # 已经过点的返回 0，调用方不用处理负数
+        return max(0.0, self.auto_scroll_deadline - self._auto_now(now))
+
+    def auto_scroll_tick(self, now: Optional[float] = None) -> bool:
+        """Turn the page when the interval has elapsed; ``True`` when it did.
+
+        It advances by :attr:`auto_scroll_step` **screen rows** -- the same unit the
+        page keys use, so a paragraph too long for one screen is walked row by row
+        instead of being skipped.  At the end of the book the mode switches itself
+        off and says so: a hands-free mode that silently does nothing is worse than
+        no mode at all.
+        """
+        # 没开自动翻页：这一轮什么都不做
+        if not self.auto_scroll:
+            return False
+        moment = self._auto_now(now)
+        # 还没到点：留给下一轮
+        if moment < self.auto_scroll_deadline:
+            return False
+        # 到点了：先只算落点（不改位置），才好判断是不是已经到头了
+        line, offset = self.next_top(self.auto_scroll_step, self.viewport_width)
+        target = clamp(line, self.total)
+        off = max(0, int(offset))
+        # 落点与"现在"完全一样 → 屏幕已经停在书末，再翻也不动了
+        if target == self.position and off == self.line_offset:
+            self.set_auto_scroll(False, moment)
+            self.say("已经读到全书末尾，自动翻页已停")
+            return False
+        # 真的往后挪一屏，并按新的时刻排下一次
+        self.move_to(line, offset)
+        self.set_auto_scroll(True, moment)
+        return True
+
+    def auto_scroll_pace(self) -> str:
+        """Describe the automatic pace, e.g. ``每 5 秒 1 行（12 行/分钟）``."""
+        # 每分钟走几行：把"速度"换算成一个更直观的数字
+        per_minute = self.auto_scroll_step * 60.0 / self.auto_scroll_interval
+        return "每 {} 秒 {} 行（{} 行/分钟）".format(
+            _format_seconds(self.auto_scroll_interval),
+            self.auto_scroll_step,
+            _format_seconds(round(per_minute, 1)),
+        )
+
+    def adjust_auto_scroll_speed(self, factor: float) -> float:
+        """Multiply the interval by *factor*; return the new interval (seconds).
+
+        A **smaller** interval means faster turns, so the "faster" key passes a factor
+        below one.  The value is clamped (:func:`_clamp_auto_interval`) and the next
+        turn is rescheduled, so changing the speed is never followed instantly by a
+        turn that was already due.
+        """
+        # 乘完再夹进范围；非正因子按 0.01 兜底，免得把间隔乘成 0
+        self.auto_scroll_interval = _clamp_auto_interval(
+            self.auto_scroll_interval * max(0.01, float(factor))
+        )
+        # 速度变了：从现在重新排期
+        self.defer_auto_scroll()
+        return self.auto_scroll_interval
+
+    def _auto_now(self, now: Optional[float]) -> float:
+        """The monotonic clock, unless the caller injected a fixed *now*."""
+        # 注入时间是为了单测能精确驱动"到点了没有"
+        return time.monotonic() if now is None else float(now)
 
     def to_start(self) -> None:
         """Jump to the first line."""
@@ -1244,6 +1416,9 @@ def _message_row(pager: Pager, room: int, notice: str = "") -> str:
     if message:
         # 按显示宽度裁到整行再右填充（填充用来盖掉上一帧的残留）
         return _pad_line(message, room)
+    # 自动翻页开着：提示栏改报当前速度（比快捷键提示更有用）
+    if pager.auto_scroll:
+        return _pad_line(_AUTO_HINT.format(pager.auto_scroll_pace()), room)
     # 否则显示常驻的快捷键提示
     return _pad_line(_HINT, room)
 
@@ -2072,6 +2247,26 @@ def _achievement_tick(pager: Pager, event_type: str) -> List[Dict[str, Any]]:
 
 
 
+def _toggle_auto_scroll(pager: Pager) -> None:
+    """Switch the automatic page turns on or off and say which it is now."""
+    # 开着 → 关掉；关着 → 打开并报一次当前速度
+    if pager.toggle_auto_scroll():
+        pager.say(
+            "自动翻页：{}（a 暂停，> 加速 < 减速）".format(pager.auto_scroll_pace())
+        )
+        return
+    pager.say("自动翻页已暂停（a 继续）")
+
+
+def _adjust_auto_scroll(pager: Pager, factor: float) -> None:
+    """Change the automatic pace by *factor* and report the new pace."""
+    # 调速本身与开关无关：没开也能先设好速度
+    pager.adjust_auto_scroll_speed(factor)
+    # 没开自动翻页时顺带提示一句怎么开始
+    suffix = "" if pager.auto_scroll else "（按 a 开始）"
+    pager.say("自动翻页速度：{}{}".format(pager.auto_scroll_pace(), suffix))
+
+
 def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     """Act on one key press; return ``False`` when the pager should quit.
 
@@ -2119,6 +2314,15 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
             if added
             else "已删除书签：第 {} 行".format(pager.position + 1)
         )
+    # a：开关自动翻页（免手翻，按行数自己往下走）
+    elif key in _AUTO_TOGGLE_KEYS:
+        _toggle_auto_scroll(pager)
+    # > / +：自动翻页加速（间隔变小 = 翻得更快）
+    elif key in _AUTO_FASTER_KEYS:
+        _adjust_auto_scroll(pager, 1.0 / _AUTO_SPEED_FACTOR)
+    # < / -：自动翻页减速
+    elif key in _AUTO_SLOWER_KEYS:
+        _adjust_auto_scroll(pager, _AUTO_SPEED_FACTOR)
     # ?：帮助页（快捷键一览；帮助迷也在这里记账）
     elif key == "?":
         _help_overlay(stdscr, pager)
@@ -2508,6 +2712,22 @@ def _as_position(value: Any) -> int:
         return 0
 
 
+def _poll_timeout_ms(pager: Pager) -> int:
+    """How long ``get_wch`` may wait before the next frame: at most one tick.
+
+    Without automatic page turns this is exactly :data:`_TICK_MS`, so the clock and
+    the status bar keep refreshing once a second.  With them on the wait is shortened
+    to whatever is left before the next turn (never below :data:`_AUTO_MIN_POLL_MS`),
+    which is what makes the mode advance on time instead of only on tick boundaries.
+    """
+    # 自动翻页关着：按老规矩，最多等一个 tick
+    wait = pager.auto_scroll_wait()
+    if wait is None:
+        return _TICK_MS
+    # 到点/过点：用最小等待，下一帧立刻翻页
+    return max(_AUTO_MIN_POLL_MS, min(_TICK_MS, int(wait * 1000)))
+
+
 def _run(stdscr: Any, pager: Pager) -> None:
     """curses main loop: repaint on a tick, act on keys, never block forever."""
     # 让 curses 解析方向键等特殊键序列
@@ -2534,13 +2754,15 @@ def _run(stdscr: Any, pager: Pager) -> None:
     write_marker(pager)
     # 先量一次终端宽度：极限尺寸的秒表从这里开始走
     pager.note_width(stdscr.getmaxyx()[1])
-    # get_wch 最多等 1 秒：这样时钟和状态栏能持续刷新
-    stdscr.timeout(_TICK_MS)
+    # get_wch 最多等 1 秒：这样时钟和状态栏能持续刷新（自动翻页开着时会缩短）
+    stdscr.timeout(_poll_timeout_ms(pager))
     # 上次自动保存的时刻
     last_save = time.monotonic()
     while True:
         # 检查是否换了章节（章节计时用）
         pager.sync()
+        # 自动翻页到点就自己往后挪一屏（挪不动 = 已到书末，模式会自己关掉）
+        pager.auto_scroll_tick()
         # 重画整帧
         _draw(stdscr, pager, _now())
         # 自动保存：间隔到了就把进度写盘
@@ -2549,6 +2771,8 @@ def _run(stdscr: Any, pager: Pager) -> None:
             if moment - last_save >= pager.auto_save_interval:
                 last_save = moment
                 save_position(pager)
+        # 按"离下一次自动翻页还有多久"决定这一帧等多久，否则按一个 tick
+        stdscr.timeout(_poll_timeout_ms(pager))
         try:
             # 等一个按键（或等到超时）
             key = stdscr.get_wch()
@@ -2561,6 +2785,8 @@ def _run(stdscr: Any, pager: Pager) -> None:
         if key == curses.KEY_RESIZE:
             pager.note_width(stdscr.getmaxyx()[1])
             _achievement_tick(pager, "resize")
+            # 有人动终端：把下一次自动翻页往后推
+            pager.defer_auto_scroll()
             continue
         # 鼠标 / 触摸事件：滚轮一格滚 wheel_scroll_step 行，按住拖动按位移滚
         if key == curses.KEY_MOUSE:
@@ -2568,10 +2794,14 @@ def _run(stdscr: Any, pager: Pager) -> None:
             # 真的滚动了才动位置（没位移就不折腾）
             if delta:
                 pager.scroll(delta)
+            # 手动滚过之后重新计时，别紧接着又自动翻
+            pager.defer_auto_scroll()
             continue
         # 交给按键处理器；它返回 False 表示要退出
         if not handle_key(stdscr, pager, key):
             return
+        # 有按键进来：把下一次自动翻页推后一整拍，别抢在读者眼皮底下翻页
+        pager.defer_auto_scroll()
 
 
 def _has_terminal() -> bool:
@@ -2705,6 +2935,13 @@ def open_reader(book_id: str) -> int:
             reader_settings.get("status_bar_format") or DEFAULT_STATUS_FORMAT
         ),
         auto_save_interval=int(reader_settings.get("auto_save_interval") or 0),
+        # 自动翻页（a 键）的节拍与步长：速度在阅读中按 > / < 还能再调
+        auto_scroll_interval=float(
+            reader_settings.get("auto_scroll_interval") or DEFAULT_AUTO_SCROLL_INTERVAL
+        ),
+        auto_scroll_step=int(
+            reader_settings.get("auto_scroll_step") or DEFAULT_AUTO_SCROLL_STEP
+        ),
         # Tab 目录浮层用的条目（带百分比）
         toc_entries=book_toc,
     )

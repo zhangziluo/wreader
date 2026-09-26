@@ -725,6 +725,182 @@ def test_say_and_current_message(pager) -> None:
     assert pager.current_message() == ""
 
 
+# --------------------------------------------------------------- auto page turns
+def test_auto_scroll_defaults_are_read_from_the_settings(pager_factory) -> None:
+    # 默认是关的：不按 a 就一点行为都不变
+    pager = pager_factory()
+    assert pager.auto_scroll is False
+    assert pager.auto_scroll_wait() is None
+    # 默认速度：每 5 秒 1 行，与 config.SCHEMA 里的默认值一致
+    assert pager.auto_scroll_interval == reader.DEFAULT_AUTO_SCROLL_INTERVAL == 5.0
+    assert pager.auto_scroll_step == reader.DEFAULT_AUTO_SCROLL_STEP == 1
+    # 设置里的值会被夹进可用范围：太快的、太慢的、0 行的都收进来
+    fast = pager_factory(auto_scroll_interval=0.01, auto_scroll_step=0)
+    assert fast.auto_scroll_interval == reader.AUTO_SCROLL_MIN_INTERVAL
+    assert fast.auto_scroll_step == 1
+    slow = pager_factory(auto_scroll_interval=99999.0)
+    assert slow.auto_scroll_interval == reader.AUTO_SCROLL_MAX_INTERVAL
+
+
+def test_clamp_auto_interval_keeps_the_pace_usable() -> None:
+    # 范围内的值原样返回
+    assert reader._clamp_auto_interval(3.0) == 3.0
+    # 太快晃眼、太慢像卡死：两头都夹住
+    assert reader._clamp_auto_interval(0.0) == reader.AUTO_SCROLL_MIN_INTERVAL
+    assert reader._clamp_auto_interval(1e9) == reader.AUTO_SCROLL_MAX_INTERVAL
+
+
+# 参数化：秒数 -> 去掉尾随 0 的显示文本
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [(5.0, "5"), (2.5, "2.5"), (0.625, "0.625"), (0.0, "0"), (-3.0, "0")],
+)
+def test_format_seconds_drops_trailing_zeros(seconds, expected) -> None:
+    # 速度文案要用：0.5 / 2.5 这类小数显示得干净，负数兜成 0
+    assert reader._format_seconds(seconds) == expected
+
+
+def test_auto_scroll_pace_reports_rows_per_minute(pager_factory) -> None:
+    # 0.5 秒 3 行 = 360 行/分钟（比"每 0.5 秒 3 行"更直观）
+    pager = pager_factory(auto_scroll_interval=0.1, auto_scroll_step=3)
+    assert pager.auto_scroll_pace() == "每 0.5 秒 3 行（360 行/分钟）"
+    # 反复减速最终停在上限，不会慢到看起来像坏了
+    for _ in range(20):
+        pager.adjust_auto_scroll_speed(reader._AUTO_SPEED_FACTOR)
+    assert pager.auto_scroll_interval == reader.AUTO_SCROLL_MAX_INTERVAL
+    # 因子非正时按 0.01 兜底：间隔不会被乘成 0
+    assert pager.adjust_auto_scroll_speed(0.0) == reader.AUTO_SCROLL_MAX_INTERVAL * 0.01
+
+
+def test_auto_scroll_schedules_the_first_turn_one_interval_ahead(pager) -> None:
+    # 打开：不立刻翻页，第一拍排到一个间隔之后（免得刚开就跳屏）
+    assert pager.set_auto_scroll(True, now=100.0) is True
+    assert pager.auto_scroll_deadline == 105.0
+    assert pager.auto_scroll_wait(now=100.0) == 5.0
+    assert pager.auto_scroll_wait(now=103.0) == 2.0
+    # 已经过点：返回 0，调用方不用处理负数
+    assert pager.auto_scroll_wait(now=200.0) == 0.0
+    # 关掉：排期清零，wait 变成 None
+    assert pager.set_auto_scroll(False, now=100.0) is False
+    assert pager.auto_scroll_deadline == 0.0
+    assert pager.auto_scroll_wait(now=100.0) is None
+    # toggle 就是一次取反
+    assert pager.toggle_auto_scroll(now=100.0) is True
+    assert pager.toggle_auto_scroll(now=100.0) is False
+
+
+def test_defer_auto_scroll_pushes_the_next_turn_back(pager) -> None:
+    pager.set_auto_scroll(True, now=0.0)
+    # 读者自己按了一下：下一拍从"现在"重新数起
+    pager.defer_auto_scroll(now=3.0)
+    assert pager.auto_scroll_deadline == 8.0
+    assert pager.auto_scroll_tick(now=7.9) is False
+    # 没开自动翻页时推了也没有副作用（本来就没有排期）
+    pager.set_auto_scroll(False, now=100.0)
+    pager.defer_auto_scroll(now=100.0)
+    assert pager.auto_scroll_deadline == 0.0
+
+
+def test_auto_scroll_tick_waits_then_advances(pager) -> None:
+    pager.set_auto_scroll(True, now=0.0)
+    # 还没到点：一动不动
+    assert pager.auto_scroll_tick(now=4.9) is False
+    assert pager.position == 0
+    # 到点：走 auto_scroll_step 行，并重新排下一拍
+    assert pager.auto_scroll_tick(now=5.0) is True
+    assert pager.position == 1
+    assert pager.auto_scroll_deadline == 10.0
+    # 关着的时候 tick 什么都不做（哪怕时间早就过了）
+    pager.set_auto_scroll(False, now=10.0)
+    assert pager.auto_scroll_tick(now=999.0) is False
+    assert pager.position == 1
+
+
+def test_auto_scroll_step_is_measured_in_screen_rows(pager_factory) -> None:
+    # 一次走 2 行：单位与翻页键一样，都是屏幕行
+    pager = pager_factory(auto_scroll_step=2)
+    pager.set_auto_scroll(True, now=0.0)
+    assert pager.auto_scroll_tick(now=5.0) is True
+    assert pager.position == 2
+    # 连着两拍继续往前走，每拍都重新排期
+    for moment in (10.0, 15.0):
+        assert pager.auto_scroll_tick(now=moment) is True
+    assert pager.position == 6
+    # 再一拍落到末行；之后挪不动了，模式自己关掉并说明原因
+    assert pager.auto_scroll_tick(now=20.0) is True
+    assert pager.position == pager.total - 1
+    assert pager.auto_scroll_tick(now=25.0) is False
+    assert pager.auto_scroll is False
+    assert "已经读到全书末尾" in pager.current_message()
+
+
+def test_auto_scroll_stops_itself_at_the_end_of_the_book(pager) -> None:
+    # 从倒数第二行开始，步长 1：翻到末行之后就没得翻了
+    pager.move_to(pager.total - 2)
+    pager.set_auto_scroll(True, now=0.0)
+    assert pager.auto_scroll_tick(now=5.0) is True
+    assert pager.position == pager.total - 1
+    # 位置不再变化 → 自动关闭（免手翻模式静悄悄什么都不做比没有更糟）
+    assert pager.auto_scroll_tick(now=10.0) is False
+    assert pager.auto_scroll is False
+    assert "自动翻页已停" in pager.current_message()
+
+
+def test_auto_scroll_walks_rows_inside_one_wrapped_line(pager_factory) -> None:
+    # 一行 8 个汉字、正文宽 4 列 → 折成 4 条屏幕行
+    pager = pager_factory(lines=("一二三四五六七八",))
+    pager.viewport_width = 4
+    pager.set_auto_scroll(True, now=0.0)
+    # 步长 1 行：源行号没动，段内偏移往下走了一条（长段落不会被整段跳过去）
+    assert pager.auto_scroll_tick(now=5.0) is True
+    assert (pager.position, pager.line_offset) == (0, 1)
+    assert pager.auto_scroll_tick(now=10.0) is True
+    assert (pager.position, pager.line_offset) == (0, 2)
+
+
+def test_auto_scroll_counts_as_reading_but_not_as_key_presses(pager) -> None:
+    pager.set_auto_scroll(True, now=0.0)
+    assert pager.auto_scroll_tick(now=5.0) is True
+    # 读过的行照样算阅读量：进度、字数与时长统计都不能漏
+    assert pager.lines_read == 1
+    assert pager.read_ranges == [(0, 1)]
+    # 但自动翻页不喂"按键彩蛋"：免手翻不该把连续翻页刷上去
+    assert pager.page_run == 0
+    assert pager.space_run == 0
+    assert pager.key_maxima["page_streak"] == 0
+    # 手动按一次翻页键则照旧记账（证明上面不是"整套机制坏了"）
+    pager.note_key("j")
+    assert pager.page_run == 1
+
+
+def test_poll_timeout_follows_the_next_auto_turn(pager, monkeypatch) -> None:
+    # 关着自动翻页：老规矩，最多等一个 tick
+    assert reader._poll_timeout_ms(pager) == reader._TICK_MS
+    # 开着：按"离下一拍还有多久"缩短等待，这样才翻得准
+    pager.set_auto_scroll(True, now=0.0)
+    monkeypatch.setattr(pager, "auto_scroll_wait", lambda now=None: 0.2)
+    assert reader._poll_timeout_ms(pager) == 200
+    # 已经过点：用最小等待，下一帧立刻翻页
+    monkeypatch.setattr(pager, "auto_scroll_wait", lambda now=None: 0.0)
+    assert reader._poll_timeout_ms(pager) == reader._AUTO_MIN_POLL_MS
+    # 离得比一帧还远：也不会等得比一个 tick 更久（时钟照样每秒刷新）
+    monkeypatch.setattr(pager, "auto_scroll_wait", lambda now=None: 30.0)
+    assert reader._poll_timeout_ms(pager) == reader._TICK_MS
+
+
+def test_message_row_shows_the_auto_pace_while_it_runs(pager) -> None:
+    # 关着：还是常驻的快捷键提示
+    assert "q退出" in reader._message_row(pager, 60)
+    # 开着：提示栏改报当前速度（比快捷键提示更有用）
+    pager.set_auto_scroll(True, now=0.0)
+    row = reader._message_row(pager, 60)
+    assert "自动翻页中" in row
+    assert "每 5 秒 1 行" in row
+    # 临时消息仍然优先显示（成就通知那一行的逻辑不受影响）
+    pager.say("hello there")
+    assert reader._message_row(pager, 60).startswith("hello there")
+
+
 # ------------------------------------------------------------------- status bar
 # 固定一个时间点，让显示时钟的断言可预测
 MOMENT = datetime(2026, 1, 7, 21, 34, 56)
@@ -963,6 +1139,44 @@ def test_bookmark_key_reports_both_directions(window, pager) -> None:
     reader.handle_key(window, pager, "b")
     assert "已删除书签" in pager.current_message()
     assert pager.is_bookmarked(0) is False
+
+
+def test_auto_scroll_key_toggles_and_reports_the_pace(window, pager) -> None:
+    # a：打开自动翻页，并把当前速度报在提示栏
+    assert reader.handle_key(window, pager, "a") is True
+    assert pager.auto_scroll is True
+    assert "自动翻页：每 5 秒 1 行" in pager.current_message()
+    # 再按一次 a：暂停
+    reader.handle_key(window, pager, "a")
+    assert pager.auto_scroll is False
+    assert "已暂停" in pager.current_message()
+
+
+# 参数化：所有"加速"键
+@pytest.mark.parametrize("key", [">", "+", "="])
+def test_auto_scroll_faster_keys_halve_the_interval(window, pager, key) -> None:
+    # 间隔减半 = 翻得更快；没开自动翻页也能先设好速度
+    reader.handle_key(window, pager, key)
+    assert pager.auto_scroll_interval == 2.5
+    assert "按 a 开始" in pager.current_message()
+
+
+# 参数化：所有"减速"键
+@pytest.mark.parametrize("key", ["<", "-", "_"])
+def test_auto_scroll_slower_keys_double_the_interval(window, pager, key) -> None:
+    reader.handle_key(window, pager, key)
+    assert pager.auto_scroll_interval == 10.0
+
+
+def test_auto_scroll_speed_keys_stop_at_the_clamp(window, pager) -> None:
+    # 一直加速：最终停在下限，不会快到闪屏
+    for _ in range(10):
+        reader.handle_key(window, pager, ">")
+    assert pager.auto_scroll_interval == reader.AUTO_SCROLL_MIN_INTERVAL
+    # 一直减速：停在上限
+    for _ in range(20):
+        reader.handle_key(window, pager, "<")
+    assert pager.auto_scroll_interval == reader.AUTO_SCROLL_MAX_INTERVAL
 
 
 def test_next_match_without_a_search_says_so(window, pager) -> None:
@@ -1680,7 +1894,7 @@ def test_help_lines_cover_every_shortcut_the_pager_answers(pager) -> None:
     lines = reader.help_lines()
     text = "\n".join(lines)
     # 帮助页得真的提到这些键，否则"帮助迷"打开看到的是空话
-    for token in ("q", "j", "Tab", "?", "/关键词", "g", "b", "Ctrl-C", "滚轮"):
+    for token in ("q", "j", "Tab", "?", "/关键词", "g", "b", "Ctrl-C", "滚轮", "自动翻页"):
         assert token in text, token
     # 返回的是一份拷贝：调用方改坏了不影响模块常量
     lines.append("junk")
