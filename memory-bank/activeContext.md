@@ -1382,7 +1382,11 @@ werd config reader.auto_scroll_interval abc
 **全量验证（2026-09-26）**：`pytest tests/` → **618 passed**（同一台机器两次：14.59s / 26.35s）；`npx pyright` → **0 / 0 / 0**；
 `check_docs` → OK；`check_doc_numbers` → **ALL OK**（618 总数 + `test_reader` 199 / `test_config` 50 /
 `reader.py` 3036 / `config.py` 971）；`check_comments` → **3204**；`verify_wrap` → 40077；`verify_draw` → 140。
-⚠️ 本会话**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`：没动鼠标与成就逻辑，
+**真 pty 端到端补测（本会话临时写的一次性脚本，跑完已删）**：40×100 的 pty + 沙箱书 200 行，
+设 `auto_scroll_interval=1` / `auto_scroll_step=2` / `auto_save_interval=1`：按 `a` 后 3.6 秒，
+屏上从开头走到**第 038~041 行**、`progress.current_line` **0 → 4**；再按 `a` 暂停、干等 2.5 秒，
+仍停在 **4**（暂停是暂停，不是减速）；提示栏确实出现「自动翻页」字样。
+⚠️ 仍**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`：没动鼠标与成就逻辑，
 `a` 键也不在 `verify_mouse.py` 的键盘基准里 —— 下次动这三块时补跑。
 
 **已提交并推送**：`93e3719`（`wreader/reader.py` + `wreader/config.py` + 两个测试文件 +
