@@ -1334,6 +1334,11 @@ werd clear → 已清空书库：1 本书及其正文文件已删除 / 阅读时
 `test_transfer.py` 8 项）；`check_comments` → **TOTAL: 3099**；`verify_wrap` → 40077；`verify_draw` → 140；
 `verify_achievements.py`（真 pty）→ 全部通过（改动动了 `achievements.py`，所以照规矩跑了一遍）。
 
+**记忆库全量复核（2026-09-26 同一轮）**：6 个状态文件 + `memory-bank/README.md` + `.clinerules/memory-bank.md`
+全部按实测重写数字（559 → 592 项 / 29 → 31 个 `.py` / 8,840 → 9,561 行 / 注释缺口 2771 → 3099），
+`systemPatterns.md` 补模式 #12 与坑 #34–#37、模块表补上此前漏列的 `toc.py` 并新增 `transfer.py` 行。
+**已提交并推送**（同一提交 19 个文件 / +1,964 −98；`git status -sb` 为 `## main...origin/main`，无领先/落后）。
+
 ## 待办 / 下一步
 
 > 本文件只列"下一步做什么"；每条的理由与实测数字在 `progress.md` 的待办里（不在两处各写一份）。
