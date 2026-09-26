@@ -51,6 +51,8 @@ import json
 import locale
 # 写会话现场时记下进程号，方便排查谁留下的
 import os
+# 出校验题（随机运算符 / 随机选项顺序）
+import random
 # 判断 stdin/stdout 是不是真实终端
 import sys
 # 计时（monotonic 不受系统时间调整影响）
@@ -175,6 +177,23 @@ _AUTO_SLOWER_KEYS = ("<", "-", "_")
 # 自动翻页开着时，底部提示栏改显示这一行（{} 处填"每 N 秒 M 行（K 行/分钟）"）
 _AUTO_HINT = "自动翻页中 · {} · a 暂停 > 加速 < 减速"
 
+# -- 自动翻页的"防作弊"校验（连续自动翻页太久就弹一道算术题）------------------
+# 连续自动翻页多少分钟弹一次题，对应 reader.auto_scroll_check_minutes（0 = 不校验）
+#: Minutes of non-stop automatic page turning before the reader asks a question.
+DEFAULT_AUTO_CHECK_MINUTES = 10.0
+# 弹题后最多等几秒，对应 reader.auto_scroll_check_seconds；没人作答就停自动翻页
+#: Seconds the question waits for an answer before the mode stops itself.
+DEFAULT_AUTO_CHECK_SECONDS = 30.0
+# 一道题给几个选项：1 个正确 + 3 个干扰项（都按序号键作答）
+_AUTO_CHECK_CHOICES = 4
+# 运算符一律用 ASCII 的 + - * /：`×` `÷` 属于"东亚宽度不确定"字符，
+# 在 CJK 终端里可能被显示成两列，而 _char_width 按一列算，弹窗边框就会错位。
+_AUTO_CHECK_OPERATORS = ("+", "-", "*", "/")
+# 校验窗的标题、脚注（{} 处填选项个数），以及倒计时轮询间隔（毫秒）
+_AUTO_CHECK_TITLE = "自动翻页校验"
+_AUTO_CHECK_FOOTER = "按 1~{} 选一个继续 · 其它键 / Esc / 超时 = 停止自动翻页"
+_AUTO_CHECK_POLL_MS = 200
+
 # 两个输入提示的前缀
 _SEARCH_PROMPT = "搜索: "
 
@@ -223,6 +242,7 @@ _HELP_LINES: Tuple[str, ...] = (
     "  滚轮 / 触摸拖动               逐行滚动（手机上就是靠它）",
     "  a                            自动翻页开关（按行数自己往下走）",
     "  > / <                        自动翻页加速 / 减速",
+    "  （自动翻页每 10 分钟弹一道算术题，按 1~4 选一个才继续）",
     "  g                            跳到指定行（输入行号）",
     "  G                            跳到全书末尾",
     "",
@@ -241,6 +261,7 @@ _HELP_LINES: Tuple[str, ...] = (
     "",
     "设置文件 ~/.wreader/settings.toml：werd config reader.page_height 40",
     "自动翻页速度：werd config reader.auto_scroll_interval 3（每 3 秒一行）",
+    "自动翻页校验：werd config reader.auto_scroll_check_minutes 15（0 = 不校验）",
 )
 
 # -- 成就的实时记账（Phase 2）-----------------------------------------------
@@ -497,6 +518,10 @@ class Pager:
         auto_scroll_interval: float = DEFAULT_AUTO_SCROLL_INTERVAL,
         # 自动翻页：每次自动前进几行屏幕行（``reader.auto_scroll_step``）
         auto_scroll_step: int = DEFAULT_AUTO_SCROLL_STEP,
+        # 自动翻页的防作弊校验：连续多少分钟弹一道题（0 = 不校验）
+        auto_scroll_check_minutes: float = DEFAULT_AUTO_CHECK_MINUTES,
+        # 自动翻页的防作弊校验：弹题后等几秒，没人作答就停
+        auto_scroll_check_seconds: float = DEFAULT_AUTO_CHECK_SECONDS,
     ) -> None:
         # 拷贝成列表，避免外部改动影响内部状态
         self.lines = list(lines)
@@ -549,6 +574,21 @@ class Pager:
         #: monotonic time of the next automatic turn, ``0.0`` = not scheduled
         # 下一次自动前进的时刻（单调时钟）；0.0 = 没排期
         self.auto_scroll_deadline = 0.0
+        #: seconds of non-stop automatic paging between two quizzes (0 = never)
+        # 连续自动翻页多少秒弹一次校验题；0 = 不校验（配置里的分钟数换算成秒）
+        self.auto_check_period = max(0.0, float(auto_scroll_check_minutes) * 60.0)
+        #: seconds the quiz on screen waits for an answer (0 = stop right away)
+        # 一道题最多等几秒；0 表示弹出来就算没人作答
+        self.auto_check_wait = max(0.0, float(auto_scroll_check_seconds))
+        #: monotonic time the next quiz is due, ``0.0`` = not armed
+        # 下一次校验的时刻；0.0 = 没排期（校验关着、自动翻页关着，或刚答完还没排）
+        self.auto_check_deadline = 0.0
+        #: monotonic time the quiz on screen gives up, ``0.0`` = nothing pending
+        # 屏幕上这道题最晚等到什么时候；过了就算没作答
+        self.auto_check_until = 0.0
+        #: the question on screen: ``{"prompt", "answer", "choices", "correct"}``
+        # 屏幕上这道题；None = 现在没在等作答
+        self.auto_check_question: Optional[Dict[str, Any]] = None
         #: the table of contents: ``[{"title", "line", "percentage"}, ...]``
         # 目录条目（由 toc.load_toc 备好），Tab 浮层直接读它
         self.toc = [dict(entry) for entry in toc_entries]
@@ -865,7 +905,30 @@ class Pager:
         self.auto_scroll_deadline = (
             self._auto_now(now) + self.auto_scroll_interval if self.auto_scroll else 0.0
         )
+        # 关掉时连"在等作答的题"一起收掉：屏幕上不该留着一道没人管的题
+        if not self.auto_scroll:
+            self.auto_check_question = None
+            self.auto_check_until = 0.0
+        # 校验计时按"这一次连续自动翻页"从头算
+        self._schedule_auto_check(now)
         return self.auto_scroll
+
+    def _schedule_auto_check(self, now: Optional[float] = None) -> None:
+        """Arm the next quiz one period ahead; leave an armed one alone.
+
+        ``set_auto_scroll(True)`` runs again after **every** single turn (see
+        :meth:`auto_scroll_tick`), so re-arming here would push the quiz further away
+        for as long as the pages keep turning -- the timer measures one continuous run
+        of automatic paging, and that is why an already armed deadline is kept.
+        """
+        # 校验关着（period 为 0）或自动翻页没开：不排期
+        if not self.auto_scroll or self.auto_check_period <= 0:
+            self.auto_check_deadline = 0.0
+            return
+        # 已经排过：原样留着，别让每一拍自动翻页都把校验往后推
+        if self.auto_check_deadline:
+            return
+        self.auto_check_deadline = self._auto_now(now) + self.auto_check_period
 
     def toggle_auto_scroll(self, now: Optional[float] = None) -> bool:
         """Flip the automatic page turns; ``True`` when they are now on."""
@@ -947,6 +1010,91 @@ class Pager:
         # 速度变了：从现在重新排期
         self.defer_auto_scroll()
         return self.auto_scroll_interval
+
+    # -- the anti-cheat quiz (a long unattended run gets questioned) -------
+    def auto_check_due(self, now: Optional[float] = None) -> bool:
+        """``True`` when a quiz is owed right now.
+
+        Never ``True`` while one is already on screen (the caller would otherwise
+        stack them up), and never ``True`` with the mode off or the check disabled.
+        A key press does **not** push this back: the clock measures how long the
+        automatic page turns have been running, not how long the reader has been idle.
+        """
+        # 没开自动翻页 / 没排期（关掉校验，或刚答完还没排）：不弹
+        if not self.auto_scroll or not self.auto_check_deadline:
+            return False
+        # 屏幕上已经有一道题：等它结算，别叠罗汉
+        if self.auto_check_question is not None:
+            return False
+        # 到点或过点：该弹了
+        return self._auto_now(now) >= self.auto_check_deadline
+
+    def auto_check_remaining(self, now: Optional[float] = None) -> float:
+        """Seconds left on the quiz on screen; ``0`` when there is none."""
+        # 没在等作答：没有倒计时
+        if self.auto_check_question is None:
+            return 0.0
+        # 过点后返回 0，调用方不用处理负数
+        return max(0.0, self.auto_check_until - self._auto_now(now))
+
+    def begin_auto_check(
+        self, question: Dict[str, Any], now: Optional[float] = None
+    ) -> None:
+        """Put *question* on screen and start its countdown."""
+        # 记下题目与最晚作答时刻（题目是普通 dict，拷一份免得外部改到）
+        self.auto_check_question = dict(question)
+        self.auto_check_until = self._auto_now(now) + self.auto_check_wait
+        # 弹题期间不翻页：等结算之后再重新排一拍，免得文字在题目背后自己走
+        self.auto_scroll_deadline = 0.0
+
+    def resolve_auto_check(self, choice: Optional[int], now: Optional[float] = None) -> bool:
+        """Settle the quiz; return whether the automatic page turns carry on.
+
+        **Any** of the options counts: the point is to prove somebody is at the
+        keyboard, not to test arithmetic, so a wrong answer is still an answer.  With
+        no answer at all (countdown over, ``Esc``, any other key) the mode stops and
+        says so -- a hands-free mode that keeps scrolling for nobody is the whole
+        problem this check exists for.
+        """
+        # 先把屏幕上的题收掉，并把校验排期清零（下一轮要从头计时）
+        question = self.auto_check_question
+        moment = self._auto_now(now)
+        self.auto_check_question = None
+        self.auto_check_until = 0.0
+        self.auto_check_deadline = 0.0
+        # 压根没有题在屏上却来结算：按"没作答"处理（不会悄悄继续翻）
+        if question is None:
+            self.set_auto_scroll(False, moment)
+            self.say("校验题没有作答，自动翻页已停（按 a 重新开始）")
+            return False
+        # 选了题里的一个序号才算作答（None 与越界都算没选）
+        answered = choice is not None and 0 <= int(choice) < len(
+            question.get("choices") or []
+        )
+        # 没作答（超时 / Esc / 别的键）：停掉自动翻页，并说清为什么停
+        if not answered:
+            self.set_auto_scroll(False, moment)
+            self.say("校验题没有作答，自动翻页已停（按 a 重新开始）")
+            return False
+        # 选了选项：自动翻页继续读下去（并把下一次翻页排到一整拍之后）
+        self.set_auto_scroll(True, moment)
+        self.defer_auto_scroll(moment)
+        # 报一句正确答案：答错也放过，但读者知道对的是哪个
+        self.say(
+            "已作答（正确答案 {}），自动翻页继续；{} 分钟后再校验".format(
+                question.get("answer"), _format_seconds(self.auto_check_period / 60.0)
+            )
+        )
+        return True
+
+    def auto_check_note(self) -> str:
+        """A short suffix for the toggle message, e.g. ``；10 分钟后校验一次``."""
+        # 校验关着（period 为 0）就什么都不用提
+        if self.auto_check_period <= 0:
+            return ""
+        return "；{} 分钟后校验一次".format(
+            _format_seconds(self.auto_check_period / 60.0)
+        )
 
     def _auto_now(self, now: Optional[float]) -> float:
         """The monotonic clock, unless the caller injected a fixed *now*."""
@@ -2249,10 +2397,12 @@ def _achievement_tick(pager: Pager, event_type: str) -> List[Dict[str, Any]]:
 
 def _toggle_auto_scroll(pager: Pager) -> None:
     """Switch the automatic page turns on or off and say which it is now."""
-    # 开着 → 关掉；关着 → 打开并报一次当前速度
+    # 开着 → 关掉；关着 → 打开，报一次当前速度，顺带提一句多久会弹校验题
     if pager.toggle_auto_scroll():
         pager.say(
-            "自动翻页：{}（a 暂停，> 加速 < 减速）".format(pager.auto_scroll_pace())
+            "自动翻页：{}{}（a 暂停，> 加速 < 减速）".format(
+                pager.auto_scroll_pace(), pager.auto_check_note()
+            )
         )
         return
     pager.say("自动翻页已暂停（a 继续）")
@@ -2265,6 +2415,220 @@ def _adjust_auto_scroll(pager: Pager, factor: float) -> None:
     # 没开自动翻页时顺带提示一句怎么开始
     suffix = "" if pager.auto_scroll else "（按 a 开始）"
     pager.say("自动翻页速度：{}{}".format(pager.auto_scroll_pace(), suffix))
+
+
+def _make_auto_check_question(rng: Optional[random.Random] = None) -> Dict[str, Any]:
+    """Build one four-choice arithmetic question, everything within 100.
+
+    Returns ``{"prompt": "37 + 25", "answer": "62", "choices": [...], "correct": 0}``,
+    where ``correct`` is where ``answer`` sits inside ``choices``.  *rng* is injectable,
+    so a test can pin one question down instead of hoping for it.
+    """
+    # 没注入随机源就用全局那个（出题只要求"每次不一样"）
+    picker = rng or random.Random()
+    operator = picker.choice(_AUTO_CHECK_OPERATORS)
+    # 四种运算分开挑操作数：加减乘除都要保证结果落在 0~100、且除法整除
+    if operator == "+":
+        # 和不超过 100：先挑第一个加数，第二个只能填剩下的额度
+        left = picker.randint(1, 99)
+        right = picker.randint(1, 100 - left)
+        result = left + right
+    elif operator == "-":
+        # 被减数不超过 100，结果至少 1（不做"减到 0"这种送分题）
+        left = picker.randint(2, 100)
+        right = picker.randint(1, left - 1)
+        result = left - right
+    elif operator == "*":
+        # 积不超过 100：两个因数取 2~10，第二个再按剩余的额度夹一下
+        left = picker.randint(2, 10)
+        right = picker.randint(2, max(2, 100 // left))
+        result = left * right
+    else:
+        # 除法要整除：先挑除数与商，再乘出被除数（这样被除数也不会超过 100）
+        right = picker.randint(2, 10)
+        result = picker.randint(2, max(2, 100 // right))
+        left = right * result
+    # 干扰项候选：答案附近的几个数（差 1、差 2、差 10），夹进 0~100 且不与答案重复
+    pool = [
+        value
+        for value in (
+            result + 1,
+            result - 1,
+            result + 2,
+            result - 2,
+            result + 10,
+            result - 10,
+        )
+        if 0 <= value <= 100 and value != result
+    ]
+    # 打乱候选再取前几个：偏移量两两不同，所以这一批里不会自己撞车
+    picker.shuffle(pool)
+    choices = [str(value) for value in pool[:_AUTO_CHECK_CHOICES - 1]]
+    # 候选不够时（答案是 1 或 100 这类贴边值）用随机数补足，同样不许重复
+    while len(choices) < _AUTO_CHECK_CHOICES - 1:
+        filler = str(picker.randint(0, 100))
+        if filler != str(result) and filler not in choices:
+            choices.append(filler)
+    # 正确选项插在随机位置：不然"总是按 1"就能过关
+    correct = picker.randrange(_AUTO_CHECK_CHOICES)
+    choices.insert(correct, str(result))
+    return {
+        "prompt": "{} {} {}".format(left, operator, right),
+        "answer": str(result),
+        "choices": choices,
+        "correct": correct,
+    }
+
+
+def _auto_check_lines(
+    question: Dict[str, Any], remaining: float, period: float
+) -> List[str]:
+    """The lines of the quiz box (pure, so a test can read them without a terminal)."""
+    # 选项拼成一行："1) 62   2) 61  ..."，键位就是选项序号
+    choices = list(question.get("choices") or [])
+    row = "   ".join(
+        "{}) {}".format(index + 1, text) for index, text in enumerate(choices)
+    )
+    return [
+        _AUTO_CHECK_TITLE,
+        # 说清为什么弹这一下，免得用户以为阅读器出毛病了
+        "已经连续自动翻页 {} 分钟，确认一下有人在读".format(
+            _format_seconds(period / 60.0)
+        ),
+        "",
+        "{} = ?".format(question.get("prompt")),
+        row,
+        "",
+        # 倒计时向下取整：看到"还剩 0 秒"就意味着下一轮就要停了
+        "还剩 {} 秒 · {}".format(
+            int(max(0.0, remaining)), _AUTO_CHECK_FOOTER.format(len(choices))
+        ),
+    ]
+
+
+def _auto_check_layout(
+    height: int, width: int, lines: Sequence[str]
+) -> Optional[Tuple[int, int, int, int]]:
+    """Return ``(rows, cols, top, left)`` for the quiz box, or ``None``.
+
+    ``None`` means the terminal is too small to hold the question, its options and the
+    countdown; the caller treats that as "no answer" rather than leaving the reader
+    staring at an invisible countdown.
+    """
+    # 没有内容 / 窗口小到放不下题目和提示：宁可不画
+    if not lines or height < 6 or width < 24:
+        return None
+    # 最宽的一行决定盒子宽度（按显示列数算：汉字占 2 列），左右各留 2 列空隙
+    widest = max(_text_width(line) for line in lines)
+    rows = min(len(lines) + 2, height - 2)
+    cols = min(widest + 4, width - 1)
+    # 太扁 / 太窄的盒子连一行正文都放不下
+    if rows < 4 or cols < 16:
+        return None
+    # 居中显示（放不下时贴左上角）
+    top = max(0, (height - rows) // 2)
+    left = max(0, (width - cols) // 2)
+    return rows, cols, top, left
+
+
+def _draw_auto_check(
+    stdscr: Any, lines: Sequence[str], height: int, width: int
+) -> None:
+    """Paint the quiz box centred on top of the text."""
+    layout = _auto_check_layout(height, width, lines)
+    # 放不下就不画（调用方进来前已经查过一次，这里再兜一层）
+    if layout is None:
+        return
+    rows, cols, top, left = layout
+    # 先用暗色空格把这一块盖掉，正文不再从框里透出来
+    blank = " " * cols
+    for row in range(rows):
+        _addstr(stdscr, top + row, left, blank, curses.A_DIM)
+    # 标题行反白
+    _addstr(
+        stdscr,
+        top,
+        left,
+        _pad_line(_clip_line(" " + lines[0], cols), cols),
+        curses.A_REVERSE,
+    )
+    # 题目、选项与倒计时逐行画（最后一行压暗，和帮助页的脚注一个调子）
+    body = list(lines[1:])
+    last = len(body) - 1
+    for step, line in enumerate(body[: max(0, rows - 2)], start=1):
+        attr = curses.A_DIM if step == last else curses.A_NORMAL
+        _addstr(stdscr, top + step, left, _pad_line(_clip_line(line, cols), cols), attr)
+    stdscr.refresh()
+
+
+def _auto_check_choice(key: Any, count: int) -> Optional[int]:
+    """Map a key press to an option index; ``None`` means "no answer".
+
+    Only the digit keys ``1``..``count`` answer the question.  Everything else --
+    ``Esc``, ``q``, a stray ``j``, and the control keys (``get_wch`` hands those back as
+    ``int``) -- is "the reader picked nothing", which stops the automatic page turns.
+    """
+    # 方向键 / 功能键 / 控制键都是键码（int）：一律不算作答
+    if isinstance(key, int):
+        return None
+    text = str(key)
+    # 只认单字符数字键："1" = 第一个选项
+    if len(text) != 1 or not text.isdigit():
+        return None
+    index = int(text) - 1
+    # 序号越界（4 个选项时按了 7）也算没作答
+    return index if 0 <= index < count else None
+
+
+def _auto_check_overlay(stdscr: Any, pager: Pager) -> None:
+    """Ask one arithmetic question, then keep or stop the automatic page turns.
+
+    A modal mini loop in the same style as the help overlay: repaint on every
+    iteration (the countdown has to move), poll rather than block (so the countdown can
+    actually expire), and restore the main tick in ``finally``.  Choosing **any** of the
+    options carries on; no answer at all stops the mode (see
+    :meth:`Pager.resolve_auto_check`).
+    """
+    # 出题：运算符与选项顺序每次都变，背不住也没法"总是按 1"
+    question = _make_auto_check_question()
+    pager.begin_auto_check(question)
+    # 先按"回答时限"算一遍内容：屏幕小到放不下就当没作答，别让用户干等
+    height, width = stdscr.getmaxyx()
+    lines = _auto_check_lines(question, pager.auto_check_wait, pager.auto_check_period)
+    if _auto_check_layout(height, width, lines) is None:
+        pager.resolve_auto_check(None)
+        pager.say("屏幕太小，放不下校验题，自动翻页已停（按 a 重新开始）")
+        return
+    # 倒计时得动起来：把主循环的整拍换成短轮询
+    stdscr.timeout(_AUTO_CHECK_POLL_MS)
+    try:
+        while True:
+            # 每帧重读尺寸：弹题期间窗口照样可以被拉大拉小
+            height, width = stdscr.getmaxyx()
+            lines = _auto_check_lines(
+                question, pager.auto_check_remaining(), pager.auto_check_period
+            )
+            _draw_auto_check(stdscr, lines, height, width)
+            try:
+                # 等一个按键（轮询到点会抛 curses.error）
+                key = stdscr.get_wch()
+            except curses.error:
+                # 轮询到点时倒计时还没走完：接着等
+                if pager.auto_check_remaining() > 0:
+                    continue
+                # 超时：按"没作答"结算，自动翻页停
+                pager.resolve_auto_check(None)
+                return
+            except KeyboardInterrupt:
+                # Ctrl-C：不当作答（只停自动翻页，阅读器本身继续开着）
+                pager.resolve_auto_check(None)
+                return
+            # 选了选项就继续，其它键一律按没作答结算
+            pager.resolve_auto_check(_auto_check_choice(key, len(question["choices"])))
+            return
+    finally:
+        # 恢复主循环的轮询间隔，否则界面会卡在阻塞读上
+        stdscr.timeout(_TICK_MS)
 
 
 def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
@@ -2765,6 +3129,9 @@ def _run(stdscr: Any, pager: Pager) -> None:
         pager.auto_scroll_tick()
         # 重画整帧
         _draw(stdscr, pager, _now())
+        # 连续自动翻页够久了：弹一道算术题确认有人在读（没作答就把模式停掉）
+        if pager.auto_check_due():
+            _auto_check_overlay(stdscr, pager)
         # 自动保存：间隔到了就把进度写盘
         if pager.auto_save_interval:
             moment = time.monotonic()
@@ -2941,6 +3308,14 @@ def open_reader(book_id: str) -> int:
         ),
         auto_scroll_step=int(
             reader_settings.get("auto_scroll_step") or DEFAULT_AUTO_SCROLL_STEP
+        ),
+        # 自动翻页的防作弊校验：连续多少分钟弹一次题、弹了等几秒
+        # （用 get 的默认参数，别用 or，否则配置里的 0 会被吃掉，校验就关不掉了）
+        auto_scroll_check_minutes=float(
+            reader_settings.get("auto_scroll_check_minutes", DEFAULT_AUTO_CHECK_MINUTES)
+        ),
+        auto_scroll_check_seconds=float(
+            reader_settings.get("auto_scroll_check_seconds", DEFAULT_AUTO_CHECK_SECONDS)
         ),
         # Tab 目录浮层用的条目（带百分比）
         toc_entries=book_toc,

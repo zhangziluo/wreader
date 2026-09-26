@@ -20,8 +20,8 @@ from wreader import config
 def test_schema_has_a_default_for_every_path() -> None:
     # SCHEMA 里声明的每一条路径都要有默认值
     paths = config.all_paths()
-    # 当前 schema 共 18 项（reader 11 + stats 4 + library 1 + toc 2）
-    assert len(paths) == 18
+    # 当前 schema 共 20 项（reader 13 + stats 4 + library 1 + toc 2）
+    assert len(paths) == 20
     # 不能有重复
     assert len(set(paths)) == len(paths)
     for path in paths:
@@ -50,6 +50,22 @@ def test_auto_scroll_settings_are_declared() -> None:
     # 非数字直接报错（写入时就被拦住，别让它变成 0 秒狂翻）
     with pytest.raises(config.ConfigError):
         config.coerce_value("reader.auto_scroll_interval", "abc")
+
+
+def test_auto_scroll_check_settings_are_declared() -> None:
+    # 自动翻页的防作弊校验：连续 10 分钟弹一道题、每题最多等 30 秒
+    assert config.DEFAULT_FLAT["reader.auto_scroll_check_minutes"] == 10.0
+    assert config.DEFAULT_FLAT["reader.auto_scroll_check_seconds"] == 30
+    # 分钟数是浮点（0.5 = 半分钟，方便试效果），回答时限是整数；0 都要原样保留
+    assert config.coerce_value("reader.auto_scroll_check_minutes", "15") == 15.0
+    assert config.coerce_value("reader.auto_scroll_check_minutes", "0.5") == 0.5
+    assert config.coerce_value("reader.auto_scroll_check_minutes", "0") == 0.0
+    assert config.coerce_value("reader.auto_scroll_check_seconds", "45") == 45
+    # 非数字照样被拦下
+    with pytest.raises(config.ConfigError):
+        config.coerce_value("reader.auto_scroll_check_seconds", "soon")
+    with pytest.raises(config.ConfigError):
+        config.coerce_value("reader.auto_scroll_check_minutes", "soon")
 
 
 def test_page_overlap_setting_is_declared() -> None:

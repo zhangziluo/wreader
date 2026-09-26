@@ -195,6 +195,10 @@ SCHEMA: Dict[str, Tuple[Tuple[str, Any, str], ...]] = {
         # 自动翻页（阅读中按 a 开关；速度也能在界面里按 > / < 临时调）
         ("auto_scroll_interval", 5.0, "自动翻页速度（每隔几秒往前走一次）"),
         ("auto_scroll_step", 1, "自动翻页每次前进几行（屏幕行）"),
+        # 自动翻页的"防作弊"校验：连续自动翻页够久就弹一道算术题，选一个选项才继续
+        # 分钟数用浮点：既能设 10（分钟），也能设 0.5（半分钟）方便试效果
+        ("auto_scroll_check_minutes", 10.0, "自动翻页多久弹一次校验题（分钟，可小数），0 = 不校验"),
+        ("auto_scroll_check_seconds", 30, "弹题后等几秒；没人作答就停自动翻页"),
         ("page_height", 24, "每屏显示的行数"),
         ("theme", "default", "配色主题名（预留）"),
         ("store_history", True, "退出时把本次会话时长记入统计"),

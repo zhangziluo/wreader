@@ -15,6 +15,10 @@ import curses
 import curses.ascii
 # 注入固定日期/时间
 from datetime import date, datetime
+# 出校验题用固定种子（结果可复现，断言才稳）
+import random
+# 自动翻页校验的排期要拿"现在"当基准（真的单调时钟）
+import time
 # 类型注解
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -48,6 +52,11 @@ class FakeStdscr:
         self.screen: List[List[str]] = [[" "] * width for _ in range(height)]
         # 需要读键的循环（目录浮层与输入框）预置的按键队列
         self.keys: List[Any] = []
+        # 队列空时 get_wch 抛什么：默认 KeyboardInterrupt（保证测试不会死循环）；
+        # 设成 "timeout" 就抛 curses.error，用来测"轮询超时"那条分支
+        self.empty_key = "interrupt"
+        # 最后一次 timeout() 设的毫秒数（弹窗退出时要把主循环的整拍恢复回来）
+        self.timeout_value: Optional[int] = None
 
     # -- the slice of the window API the reader uses ---------------------
     def getmaxyx(self) -> Tuple[int, int]:
@@ -67,8 +76,9 @@ class FakeStdscr:
         # 真实现里用来标记需要重画；这里什么都不用做
         return None
 
-    def timeout(self, _milliseconds: int) -> None:
-        return None
+    def timeout(self, milliseconds: int) -> None:
+        # 记下轮询上限：弹窗类测试要断言它被恢复成主循环的整拍
+        self.timeout_value = milliseconds
 
     def keypad(self, _flag: bool) -> None:
         return None
@@ -81,6 +91,9 @@ class FakeStdscr:
     def get_wch(self) -> Any:
         # 目录浮层会一直读键；队列空了就当 Ctrl-C，保证测试不会死循环
         if not self.keys:
+            # 需要测"轮询超时"的测试把 empty_key 设成 "timeout"
+            if self.empty_key == "timeout":
+                raise curses.error("no input")
             raise KeyboardInterrupt
         return self.keys.pop(0)
 
@@ -886,6 +899,258 @@ def test_poll_timeout_follows_the_next_auto_turn(pager, monkeypatch) -> None:
     # 离得比一帧还远：也不会等得比一个 tick 更久（时钟照样每秒刷新）
     monkeypatch.setattr(pager, "auto_scroll_wait", lambda now=None: 30.0)
     assert reader._poll_timeout_ms(pager) == reader._TICK_MS
+
+
+# ---------------------------------------------- the anti-cheat check (the a key)
+def test_auto_check_defaults_come_from_the_settings(pager_factory) -> None:
+    # 默认：连续自动翻页 10 分钟弹一道题，每题最多等 30 秒
+    pager = pager_factory()
+    assert pager.auto_check_period == reader.DEFAULT_AUTO_CHECK_MINUTES * 60.0
+    assert pager.auto_check_period == 600.0
+    assert pager.auto_check_wait == reader.DEFAULT_AUTO_CHECK_SECONDS == 30.0
+    assert pager.auto_check_question is None
+    assert pager.auto_check_due(now=0.0) is False
+    # 设置里的分钟数换算成秒；回答时限直接按秒读
+    tuned = pager_factory(auto_scroll_check_minutes=5, auto_scroll_check_seconds=10)
+    assert tuned.auto_check_period == 300.0
+    assert tuned.auto_check_wait == 10.0
+    # 0 分钟 = 关掉校验；负数一律兜成 0
+    assert pager_factory(auto_scroll_check_minutes=0).auto_check_period == 0.0
+    assert pager_factory(auto_scroll_check_minutes=-3).auto_check_period == 0.0
+    assert pager_factory(auto_scroll_check_seconds=-1).auto_check_wait == 0.0
+
+
+def test_auto_check_note_mentions_the_period_only_while_it_runs(pager_factory) -> None:
+    # 打开自动翻页的提示语里会带上"多久弹一次"；校验关掉时就不提
+    assert pager_factory().auto_check_note() == "；10 分钟后校验一次"
+    assert pager_factory(auto_scroll_check_minutes=2.5).auto_check_note() == "；2.5 分钟后校验一次"
+    assert pager_factory(auto_scroll_check_minutes=0).auto_check_note() == ""
+
+
+def test_make_auto_check_question_stays_within_one_hundred() -> None:
+    # 固定种子跑一批：题干与答案都必须是 0~100 的整数、除法必须整除
+    rng = random.Random(20260926)
+    for _ in range(300):
+        question = reader._make_auto_check_question(rng)
+        left, operator, right = str(question["prompt"]).split(" ")
+        assert operator in ("+", "-", "*", "/")
+        first, second = int(left), int(right)
+        assert 0 <= first <= 100
+        assert 0 <= second <= 100
+        # 自己按运算符算一遍：减法不出负数、除法整除，结果也不超过 100
+        expected = {
+            "+": first + second,
+            "-": first - second,
+            "*": first * second,
+            "/": (first / second if second else -1.0),
+        }[operator]
+        assert int(expected) == expected
+        assert 0 <= expected <= 100
+        assert str(int(expected)) == question["answer"]
+        # 4 个选项互不重复，正确答案正好在其中一格
+        choices = question["choices"]
+        assert len(choices) == reader._AUTO_CHECK_CHOICES == 4
+        assert len(set(choices)) == 4
+        assert all(isinstance(choice, str) for choice in choices)
+        assert choices[question["correct"]] == question["answer"]
+        assert choices.count(question["answer"]) == 1
+
+
+def test_make_auto_check_question_uses_every_operator_and_position() -> None:
+    rng = random.Random(7)
+    questions = [reader._make_auto_check_question(rng) for _ in range(200)]
+    # 加减乘除都得出现：只出加法就不算"加减乘除判断题"
+    operators = {str(question["prompt"]).split(" ")[1] for question in questions}
+    assert operators == {"+", "-", "*", "/"}
+    # 正确选项的位置也得变，不然"总是按 1"就能一直过
+    spots = {question["correct"] for question in questions}
+    assert spots == {0, 1, 2, 3}
+
+
+def test_auto_check_lines_write_the_question_options_and_countdown() -> None:
+    question = {
+        "prompt": "37 + 25",
+        "answer": "62",
+        "choices": ["62", "61", "63", "52"],
+        "correct": 0,
+    }
+    lines = reader._auto_check_lines(question, 27.9, 600.0)
+    text = "\n".join(lines)
+    # 标题、连续时长、题干、四个带序号的选项都在
+    assert reader._AUTO_CHECK_TITLE in text
+    assert "连续自动翻页 10 分钟" in text
+    assert "37 + 25 = ?" in text
+    for index, choice in enumerate(("62", "61", "63", "52")):
+        assert "{}) {}".format(index + 1, choice) in text
+    # 倒计时向下取整；到点或过点显示 0 秒
+    assert "还剩 27 秒" in text
+    assert "停止自动翻页" in text
+    assert "还剩 0 秒" in "\n".join(reader._auto_check_lines(question, -3.0, 600.0))
+
+
+def test_auto_check_layout_refuses_a_screen_that_is_too_small() -> None:
+    lines = reader._auto_check_lines(
+        {"prompt": "2 + 3", "answer": "5", "choices": ["5", "4", "6", "7"], "correct": 0},
+        30.0,
+        600.0,
+    )
+    # 正常终端：盒子居中，且不比屏幕大
+    layout = reader._auto_check_layout(24, 80, lines)
+    assert layout is not None
+    rows, cols, top, left = layout
+    assert rows <= 22 and cols <= 79
+    assert top >= 0 and left >= 0
+    # 太扁 / 太窄 / 没内容都返回 None（调用方会说"屏幕太小"而不是画一团乱）
+    assert reader._auto_check_layout(5, 80, lines) is None
+    assert reader._auto_check_layout(24, 20, lines) is None
+    assert reader._auto_check_layout(24, 80, []) is None
+
+
+def test_auto_check_due_one_period_after_the_mode_started(pager_factory) -> None:
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    # 开着自动翻页才排期：从打开那一刻开始数，一个周期之后才该弹
+    pager.set_auto_scroll(True, now=1000.0)
+    assert pager.auto_check_due(now=1000.0) is False
+    assert pager.auto_check_due(now=1059.9) is False
+    assert pager.auto_check_due(now=1060.0) is True
+    # 读者按键不会把校验推后：计的是"自动翻页开了多久"，不是"闲了多久"
+    pager.defer_auto_scroll(now=1500.0)
+    assert pager.auto_check_due(now=1500.0) is True
+    # 每翻一拍都会再调一次 set_auto_scroll，但排期不能被它越推越远
+    pager.set_auto_scroll(True, now=5000.0)
+    assert pager.auto_check_due(now=5000.0) is True
+    # 关掉自动翻页：不排期、不弹
+    pager.set_auto_scroll(False, now=5000.0)
+    assert pager.auto_check_due(now=99999.0) is False
+    # 0 分钟 = 关掉校验：自动翻页开再久也不弹
+    off = pager_factory(auto_scroll_check_minutes=0)
+    off.set_auto_scroll(True, now=0.0)
+    assert off.auto_check_due(now=99999.0) is False
+
+
+def test_resolve_auto_check_with_an_answer_keeps_reading(pager_factory) -> None:
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    pager.set_auto_scroll(True, now=1000.0)
+    question = {
+        "prompt": "2 + 3",
+        "answer": "5",
+        "choices": ["5", "4", "6", "7"],
+        "correct": 0,
+    }
+    # 弹题：题目上屏、倒计时从 30 秒开始走、这一拍先不翻页
+    pager.begin_auto_check(question, now=1060.0)
+    assert pager.auto_check_question == question
+    assert pager.auto_check_remaining(now=1060.0) == 30.0
+    assert pager.auto_check_remaining(now=1075.0) == 15.0
+    assert pager.auto_scroll_deadline == 0.0
+    # 屏幕上已经有一道题：不再弹第二道
+    assert pager.auto_check_due(now=1060.0) is False
+    # 选了第二个选项（答错也算作答）：自动翻页继续，题目下屏，两个排期都重排
+    assert pager.resolve_auto_check(1, now=1070.0) is True
+    assert pager.auto_scroll is True
+    assert pager.auto_check_question is None
+    assert pager.auto_check_remaining(now=1070.0) == 0.0
+    assert pager.auto_scroll_deadline == 1075.0
+    assert pager.auto_check_deadline == 1130.0
+    # 提示栏报出正确答案，读者知道对的是哪个
+    assert "正确答案 5" in pager.current_message()
+
+
+def test_resolve_auto_check_without_an_answer_stops_the_mode(pager_factory) -> None:
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    question = {
+        "prompt": "2 + 3",
+        "answer": "5",
+        "choices": ["5", "4", "6", "7"],
+        "correct": 0,
+    }
+    # 超时 / Esc / 其它键都走这条路：没作答 → 自动翻页停，并说清原因
+    pager.set_auto_scroll(True, now=0.0)
+    pager.begin_auto_check(question, now=60.0)
+    assert pager.resolve_auto_check(None, now=90.0) is False
+    assert pager.auto_scroll is False
+    assert pager.auto_scroll_deadline == 0.0
+    assert pager.auto_check_question is None
+    assert pager.auto_check_due(now=9999.0) is False
+    assert "没有作答" in pager.current_message()
+    # 序号越界（4 个选项时按了 9）也算没作答
+    pager.set_auto_scroll(True, now=100.0)
+    pager.begin_auto_check(question, now=160.0)
+    assert pager.resolve_auto_check(9, now=170.0) is False
+    assert pager.auto_scroll is False
+    # 没有题在屏上却来结算：同样按没作答处理，不会悄悄继续翻
+    pager.set_auto_scroll(True, now=200.0)
+    assert pager.resolve_auto_check(0, now=200.0) is False
+    assert pager.auto_scroll is False
+
+
+def test_auto_check_choice_only_counts_the_digit_keys() -> None:
+    # 只有 1~4 这几个数字键算作答（键位就是选项序号）
+    assert reader._auto_check_choice("1", 4) == 0
+    assert reader._auto_check_choice("4", 4) == 3
+    # 别的都算"没选"：越界数字、字母、Esc、回车、控制键与各种键码
+    for key in ("5", "0", "a", "q", "\x1b", "\n", "\r", "\x03", curses.KEY_LEFT, 3, 27):
+        assert reader._auto_check_choice(key, 4) is None, key
+
+
+def test_auto_check_overlay_keeps_going_when_an_option_is_chosen(pager_factory) -> None:
+    # 24×80 的假窗口放得下弹窗；预置一个 "2"，模拟读者选了第二个选项
+    window = FakeStdscr(24, 80)
+    window.keys = ["2"]
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    pager.set_auto_scroll(True)
+    # 把校验排期拨到过去：模拟"已经连续自动翻页 1 分钟"
+    pager.auto_check_deadline = time.monotonic() - 1.0
+    assert pager.auto_check_due() is True
+    reader._auto_check_overlay(window, pager)
+    # 题目、选项与倒计时都真的画出来了
+    drawn = "".join(text for _, _, text, _ in window.writes)
+    assert reader._AUTO_CHECK_TITLE in drawn
+    assert "= ?" in drawn
+    assert "还剩" in drawn
+    # 选了选项：自动翻页继续、题目收掉、主循环的整拍恢复回去
+    assert pager.auto_scroll is True
+    assert pager.auto_check_question is None
+    assert window.timeout_value == reader._TICK_MS
+
+
+def test_auto_check_overlay_stops_the_mode_when_nobody_answers(pager_factory) -> None:
+    # 队列空就抛 curses.error，模拟轮询到点；回答时限设 0 秒，第一轮就到点
+    window = FakeStdscr(24, 80)
+    window.empty_key = "timeout"
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=0)
+    pager.set_auto_scroll(True)
+    pager.auto_check_deadline = time.monotonic() - 1.0
+    reader._auto_check_overlay(window, pager)
+    # 没人作答：自动翻页停，提示栏说明原因，轮询间隔也被恢复
+    assert pager.auto_scroll is False
+    assert "没有作答" in pager.current_message()
+    assert window.timeout_value == reader._TICK_MS
+
+
+def test_auto_check_overlay_treats_a_stray_key_as_no_answer(pager_factory) -> None:
+    # Esc 不是选项：照"没作答"处理（停自动翻页，但阅读器本身不退出）
+    window = FakeStdscr(24, 80)
+    window.keys = ["\x1b"]
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    pager.set_auto_scroll(True)
+    pager.auto_check_deadline = time.monotonic() - 1.0
+    reader._auto_check_overlay(window, pager)
+    assert pager.auto_scroll is False
+    assert pager.auto_check_question is None
+
+
+def test_auto_check_overlay_refuses_a_screen_that_is_too_small(pager_factory) -> None:
+    # 8×20 放不下题目与选项：不弹（当没作答），并且直说原因
+    window = FakeStdscr(8, 20)
+    pager = pager_factory(auto_scroll_check_minutes=1, auto_scroll_check_seconds=30)
+    pager.set_auto_scroll(True)
+    pager.auto_check_deadline = time.monotonic() - 1.0
+    reader._auto_check_overlay(window, pager)
+    assert pager.auto_scroll is False
+    assert "屏幕太小" in pager.current_message()
+    # 一帧都没画，没白占屏幕
+    assert window.writes == []
 
 
 def test_message_row_shows_the_auto_pace_while_it_runs(pager) -> None:
@@ -1894,7 +2159,7 @@ def test_help_lines_cover_every_shortcut_the_pager_answers(pager) -> None:
     lines = reader.help_lines()
     text = "\n".join(lines)
     # 帮助页得真的提到这些键，否则"帮助迷"打开看到的是空话
-    for token in ("q", "j", "Tab", "?", "/关键词", "g", "b", "Ctrl-C", "滚轮", "自动翻页"):
+    for token in ("q", "j", "Tab", "?", "/关键词", "g", "b", "Ctrl-C", "滚轮", "自动翻页", "校验"):
         assert token in text, token
     # 返回的是一份拷贝：调用方改坏了不影响模块常量
     lines.append("junk")

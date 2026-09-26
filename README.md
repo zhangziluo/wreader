@@ -514,7 +514,7 @@ q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b�
 | `q` / `Q` / `Ctrl-C` | 退出阅读器（会保存进度、书签、本次时长） |
 | `j` / `空格` / `回车` / `↓` / `PageDown` | 往下翻页（按**屏幕行**精确推进：长段落折行后一屏装不下，下一页就从段落中间接着显示，不漏也不重；翻页量由 `reader.page_scroll_step` 决定，并保留 `reader.page_overlap` 行上下文） |
 | `k` / `↑` / `PageUp` | 往上翻页 |
-| `a` | **自动翻页**开关：打开后每隔 `reader.auto_scroll_interval` 秒自己往前走 `reader.auto_scroll_step` 行（默认每 5 秒 1 行）；按任意键都会把下一次翻页推后一整拍，所以打字 / 翻页时不会被抢；读到全书末尾会自己停下来并提示 |
+| `a` | **自动翻页**开关：打开后每隔 `reader.auto_scroll_interval` 秒自己往前走 `reader.auto_scroll_step` 行（默认每 5 秒 1 行）；按任意键都会把下一次翻页推后一整拍，所以打字 / 翻页时不会被抢；读到全书末尾会自己停下来并提示；**连续自动翻页 `reader.auto_scroll_check_minutes` 分钟（默认 10 分钟）后会弹一道算术题，按 `1`~`4` 选一个才继续**（不答 / `Esc` / 超时就停） |
 | `>` / `+` | 自动翻页**加速**一倍（间隔减半，最快 `0.5` 秒一次） |
 | `<` / `-` | 自动翻页**减速**一半（间隔加倍，最慢 `600` 秒一次） |
 | 滚轮下 · 手指向上滑 | 往后**逐行**滚动（一行一行往下读；一格滚几行由 `reader.wheel_scroll_step` 决定） |
@@ -551,6 +551,12 @@ q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b�
   按任意键（翻页、搜索、滚动……）都会把下一次翻页**推后一整拍**，所以手动操作时不会被抢节奏；
   走到全书末尾它自己停并提示一句。想调顺手：`werd config reader.auto_scroll_interval 2`
   （每 2 秒一行）或 `werd config reader.auto_scroll_step 3`（每次 3 行，更快）。
+- **自动翻页久了会考你一道算术题**（防作弊）：连续自动翻页 `reader.auto_scroll_check_minutes`
+  分钟（默认 **10 分钟**）后，屏幕中间弹出一道 **100 以内的加减乘除**题，四个选项（`1) 62`
+  这样带序号，顺序每次都变），按 `1`~`4` 选一个就接着自动翻 —— **答错也没关系**，它只是想确认
+  键盘前有人。**没作答**（`Esc` / 按了别的键 / 超过 `reader.auto_scroll_check_seconds` 秒
+  （默认 30 秒）还没选）就停下并提示一句，不会让书在没人看的时候一直空翻。
+  不想要这道题：`werd config reader.auto_scroll_check_minutes 0`。
 - **中途 Ctrl-C** 不会丢进度：退出前同样会保存位置和本次时长。
 - **意外中断（崩溃 / 断电 / 被 `kill`）**：下次打开**同一本书**时，会先弹一个小窗问
   `上次好像没有正常退出 · 上次读到第 N 行`，`y` 接着上次的位置读，其他键从头开始；
@@ -561,7 +567,7 @@ q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b�
 
 ## 设置项
 
-设置都在 `~/.wreader/settings.toml` 里，分 4 个 section（`reader` / `stats` / `library` / `toc`），一共 18 项。
+设置都在 `~/.wreader/settings.toml` 里，分 4 个 section（`reader` / `stats` / `library` / `toc`），一共 20 项。
 可以直接用编辑器改，也可以用 `werd config <section.key> <value>` 改。
 **删掉任意一行都会回落到默认值**，所以不用担心改坏。
 
@@ -577,6 +583,8 @@ q退出 j/space翻页 a自动 g跳行 [/]章节 Tab目录 /搜索 n下一个 b�
 | `auto_save_interval` | `60` | 自动保存进度间隔（秒），`0` = 关闭 |
 | `auto_scroll_interval` | `5.0` | **自动翻页**速度：每隔几秒往前走一次（按 `a` 开关，阅读中还能用 `>` / `<` 临时调速；范围 0.5~600 秒） |
 | `auto_scroll_step` | `1` | **自动翻页**每次往前走几行**屏幕行**（调大 = 一次走得更远，配合上面的间隔就是最终速度） |
+| `auto_scroll_check_minutes` | `10.0` | **自动翻页**连续多久弹一道防作弊校验题（分钟，可以填 `0.5` 这样的小数）；弹出来后按 `1`~`4` 选一个选项才继续，`0` = 关掉校验 |
+| `auto_scroll_check_seconds` | `30` | 校验题最多等几秒；没人作答（按了 `Esc` / 别的键，或超时）就停自动翻页 |
 | `page_height` | `24` | 拿不到终端尺寸时的**回退**每屏行数（真实终端里翻页按正文区实际高度算，通常不用改） |
 | `theme` | `"default"` | 配色主题名（当前预留，尚未生效） |
 | `store_history` | `true` | 退出时把本次会话时长记入统计；设 `false` 可只读书不记时长 |
@@ -941,26 +949,26 @@ wreader/
 │   ├── __init__.py          __version__ 和模块地图（22 行）
 │   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1250 行）
 │   ├── cli.py               argparse 定义 + 各子命令处理函数（1004 行）
-│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（971 行）
+│   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（975 行）
 │   ├── env.py               环境探测：云主机 / WSL / tmux / 可编辑安装（183 行）
 │   ├── geo.py               地理位置：ip-api 查询 + 一小时缓存，国家→大洲、世仇组合（343 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1425 行）
 │   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（80 行）
-│   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、自动翻页、目录浮层、帮助页与成就通知（3036 行）
+│   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、自动翻页（含防作弊校验）、目录浮层、帮助页与成就通知（3411 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（817 行）
 │   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
 │   ├── transfer.py          `werd data` 的数据包：把时长/成就导出成 JSON、按「只加不减」合并回来（198 行）
 │   └── data/
 │       └── achievements.json  48 个成就的定义（348 行）
-└── tests/                   618 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   633 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、馆藏样例、epub 构造器
     ├── test_achievements.py 51 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定、实时门槛与地理/环境指标
     ├── test_cli.py          45 项 —— 参数解析、各子命令输出、退出码、成就横幅、名字彩蛋、清空/清理与数据包导入导出
-    ├── test_config.py       50 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
+    ├── test_config.py       51 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_env.py          14 项 —— 云主机 / WSL / tmux / 可编辑安装探测（全部注入，不看本机）
     ├── test_geo.py          31 项 —— 国家→大洲、世仇组合、ip-api 响应解析、缓存与离线降级
     ├── test_library.py      132 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读、清空/清理、数据包合并
-    ├── test_reader.py       199 项 —— 分页数学、Pager、状态栏、按键、自动翻页、会话落库、折行、滚轮、目录浮层、帮助页、成就通知与恢复流程
+    ├── test_reader.py       213 项 —— 分页数学、Pager、状态栏、按键、自动翻页（含防作弊校验）、会话落库、折行、滚轮、目录浮层、帮助页、成就通知与恢复流程
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
     ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
     └── test_transfer.py      8 项 —— 导出数据包、在新机器上导入、只加不减的合并、各类错误输入
@@ -1012,7 +1020,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 618 项，约 10~30 秒（随负载浮动）
+pytest                      # 633 项，约 10~30 秒（随负载浮动）
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -1144,7 +1152,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 该模块已随翻译功能一起删除，问题不复存在。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings（`translator.py` / `vocab.py` 已随功能移除）。
-- ~~没有自动化测试~~ → 已补 **618 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **633 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 该代码路径已随翻译功能移除（当年补测试时的发现：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`）。
 - ~~带 BOM 的损坏文件会让整次导入崩掉~~ → 已修：BOM 认 UTF-8/16/32 且宽编码优先（UTF-32 的 BOM 以
