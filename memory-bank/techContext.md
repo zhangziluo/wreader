@@ -134,7 +134,7 @@ git add -A && git commit -m "..."             # 提交
 # `git -c http.proxy= push` 这种"绕过"会挂在直连上（实测只能 pkill git-remote-https）
 
 # 开发
-.venv/bin/python -m pytest tests/              # 618 项，约 8~26 秒（随负载浮动）
+.venv/bin/python -m pytest tests/              # 633 项，约 8~44 秒（随负载浮动）
 .venv/bin/python -m pytest tests/test_reader.py              # 单文件
 .venv/bin/python -m pytest -k "streak or heatmap"            # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings / 0 informations
@@ -143,7 +143,7 @@ HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 .venv/bin/python -m
 # 开发期校验脚本（tools/，详见 tools/README.md；都能从任意目录运行）
 .venv/bin/python tools/check_docs.py              # 文档锚点 + 代码围栏配对（RESULT: OK）
 .venv/bin/python tools/check_doc_numbers.py       # README 里的行数/测试项数与实际对拍（ALL OK）
-.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 3204）
+.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 3403）
 .venv/bin/python tools/verify_wrap.py             # 折行属性（OK: 40077 checks passed）
 .venv/bin/python tools/verify_draw.py             # 绘制不越界（OK: 140 draw checks passed）
 .venv/bin/python tools/verify_colors.py           # 需 pty：script -q /dev/null .venv/bin/python tools/verify_colors.py

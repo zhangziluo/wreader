@@ -60,8 +60,9 @@ python tools/check_comments.py --strict wreader/library.py   # 限定文件，�
 ```
 
 项目约定「每条逻辑语句上方都要有一行口语化中文注释」，但**这是个很严的字面规则**：
-2026-09-25 实测 `wreader/` + `tests/` 仍有 **2771** 条语句上方没有紧邻注释行
-（`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 223 …）。
+2026-09-26 实测 `wreader/` + `tests/` 仍有 **3403** 条语句上方没有紧邻注释行
+（`tests/test_reader.py` 777、`wreader/reader.py` 588、`wreader/achievements.py` 256 …；
+逐文件明细见 `memory-bank/progress.md` 待办 #1）。
 所以默认模式**只报告、不判定**；要拿它当门禁就加 `--strict`，并配合文件参数一次啃一个。
 
 > ⚠️ 历史坑：这个脚本早先的版本把 `tokenize.NEWLINE` 也放进了「跳过」集合，
@@ -80,7 +81,7 @@ python tools/verify_wrap.py     # 期望输出：OK: 40077 checks passed
 ### `verify_draw.py`
 
 ```bash
-python tools/verify_draw.py     # 期望输出：OK: 420 draw checks passed
+python tools/verify_draw.py     # 期望输出：OK: 140 draw checks passed
 ```
 
 用记录型假窗口接住每次 `addstr`，断言「起始列 + 显示宽度 ≤ 终端宽度」。

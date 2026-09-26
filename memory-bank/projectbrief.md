@@ -88,7 +88,7 @@
   同时保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-26 复测）**：这条目前是**目标**而非既成事实 ——
   `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3403** 条语句上方没有紧邻注释行
-  （`tests/test_reader.py` 777、`wreader/reader.py` 585、`wreader/achievements.py` 256、
+  （`tests/test_reader.py` 777、`wreader/reader.py` 588、`wreader/achievements.py` 256、
   `wreader/library.py` 233、`tests/test_library.py` 229 最多；2026-09-25 测得 2771）。
   早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"，别执行到每条 `return` / `assert` 都单独加。

@@ -4,13 +4,19 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话实测 21.97 / 43.84 秒）、`npx pyright` **0 errors / 0 warnings /
-0 informations**、`tools/` 的 **8** 个校验脚本全绿（`check_docs` OK / `check_doc_numbers` ALL OK /
-`check_comments` **3403** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors`
-干净退出（`-1/-1` 可用）/ `verify_mouse` 8 项 / `verify_achievements` 19 项 —— **8 个脚本全绿**）。
-本会话（2026-09-26，紧接在已提交的 ㉝ 之后）做的是**自动翻页的防作弊校验**：连续自动翻页 10 分钟
-后弹一道 100 以内加减乘除的四选一题，按 `1`~`4` 选一个才继续、没作答（`Esc` / 别的键 / 超时）就停；
-配置加 `reader.auto_scroll_check_minutes` / `reader.auto_scroll_check_seconds` 两个键，见 ㉞。
+代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话三次实测 11.58 / 21.97 / 43.84 秒）、
+`npx pyright` **0 errors / 0 warnings / 0 informations**、`tools/` 的 **8** 个校验脚本全绿
+（`check_docs` OK / `check_doc_numbers` ALL OK / `check_comments` **3403** / `verify_wrap` 40077 /
+`verify_draw` 140 / `verify_colors` 干净退出（`-1/-1` 可用）/ `verify_mouse` 8 项 /
+`verify_achievements` 19 项），`git status -sb` 收尾是 `## main...origin/main`（没有领先 / 落后）。
+
+最近两轮工作都是 **2026-09-26、都围绕自动翻页**，而且**都已提交并推送**：
+㉞（提交 `feat(reader): 自动翻页久了弹一道算术题防作弊`）给自动翻页加了**防作弊校验** ——
+连续自动翻页 10 分钟后弹一道 100 以内加减乘除的四选一题，按 `1`~`4` 选一个才继续、
+没作答（`Esc` / 别的键 / 超时）就停，配置加 `reader.auto_scroll_check_minutes` /
+`reader.auto_scroll_check_seconds` 两个键；㉟（提交 `chore(memory-bank): 同步防作弊校验（㉞）的实测数字与踩坑`）
+是它的收尾复核 —— 三个真 pty 脚本补跑、一个「探针假警报」的澄清、记忆库全量对账。
+**没有半成品悬着**：下个会话直接挑待办里的事项做即可（`reader.theme` 或注释口径拍板）。
 
 - `wreader/` = **12** 个 `.py` / **10,182** 行（`reader.py` **3411**、`config.py` **975**）；
   `tests/` = 11 个文件 / **633** 项；`tools/` = 8 个 `.py`。
@@ -1388,8 +1394,8 @@ werd config reader.auto_scroll_interval abc
 设 `auto_scroll_interval=1` / `auto_scroll_step=2` / `auto_save_interval=1`：按 `a` 后 3.6 秒，
 屏上从开头走到**第 038~041 行**、`progress.current_line` **0 → 4**；再按 `a` 暂停、干等 2.5 秒，
 仍停在 **4**（暂停是暂停，不是减速）；提示栏确实出现「自动翻页」字样。
-⚠️ 仍**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`：没动鼠标与成就逻辑，
-`a` 键也不在 `verify_mouse.py` 的键盘基准里 —— 下次动这三块时补跑。
+⚠️ 当时**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`（`a` 键也不在
+`verify_mouse.py` 的键盘基准里）—— **㉞ 收尾时已全部补跑并通过，见 ㉞**。
 
 **已提交并推送**：`93e3719`（`wreader/reader.py` + `wreader/config.py` + 两个测试文件 +
 `README.md` / `README.en.md` / `使用指南.md`）与 `f0b10bd`（记忆库 6 个状态文件 +
@@ -1456,8 +1462,32 @@ RESULT: ALL OK
 `sleep 1.3` 等 curses 起来，机器一忙按键就被吞、脚本挂在 `waitpid`（并行时卡了 3 分钟没动静，
 单独跑 8 项全过）。
 
-**已提交并推送**（本会话）：`wreader/reader.py`、`wreader/config.py`、两个测试文件、
-三份文档与记忆库一起提交，`git status -sb` 收尾为 `## main...origin/main`（不显示领先/落后）。
+**已提交并推送**（本会话）：`c99c3d7`（`wreader/reader.py` + `wreader/config.py` + 两个测试文件 +
+`README.md` / `README.en.md` / `使用指南.md`）与 `5935593`（记忆库 6 个状态文件 +
+`memory-bank/README.md` + `.clinerules/memory-bank.md`）；`git status -sb` 收尾
+`## main...origin/main`（不显示领先 / 落后）。收尾复核见 ㉟。
+
+### ㉟ 收尾复核：三个 pty 脚本补跑 + 一个探针假警报的澄清 + 记忆库全量对账（2026-09-26）
+
+**这一节没有新的功能改动**，做的是 ㉞ 的收尾：
+
+1. **三个真 pty 脚本补跑（都通过）** → `tools/` 的 8 个脚本本轮**全绿**：
+   `verify_achievements.py` 19 项、`verify_mouse.py` 8 项、`verify_colors.py`
+   （`default colour pair usable: yes (-1/-1)`；必须借真终端跑：
+   `script -q /dev/null .venv/bin/python tools/verify_colors.py`）。
+2. **澄清「阅读器不理 `q`」这个假警报**（教训已写进 `systemPatterns.md` 坑 #45 / #46）：
+   临时 pty 探针反复报「灌了 `q` 也不退出」，而把本轮改动 `git stash` 掉、在 HEAD 上**照样复现**
+   → 先排除了「回归」。最后 `ps -p <pid> -o stat` 看到子进程是 **`ZN`（zombie）**：
+   它其实**每次都在第一个 `q` 就正常退出了**，是探针自己「读到 EOF 就 `break`」把正常退出
+   误判成卡住。→ **阅读器的 `q` 一直好使**；`verify_mouse.py` 那次挂住是它固定 `sleep 1.3`
+   等 curses 起来，而我把 pytest 与它并行跑（机器一忙，灌进去的按键被 `initscr()` 的 flush
+   吃掉），**单独跑就 8 项全过**。
+3. **记忆库全量复核（本次）**：所有数字重测（见开头：633 项 / `wreader/` 12 个 `.py` /
+   10,182 行 / `reader.py` 3411 / `config.py` 975 / 注释缺口 3403 / `SCHEMA` 4 段 20 键 /
+   成就 48 条 / `tools/` 8 个脚本），并修掉三处漂移 ——
+   `.clinerules/memory-bank.md`（逐文件注释缺口抄的是更早的 `664` / `509`，现改为不重复，
+   明细只留 `progress.md` 待办 #1）、`projectbrief.md` 与 `progress.md`（`reader.py` 缺口
+   `585` → **588**）、`memory-bank/README.md`（模式数 `12` → **14**，补上坑 **46** 条）。
 
 ## 待办 / 下一步
 

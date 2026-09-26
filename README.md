@@ -1047,7 +1047,7 @@ python tools/check_docs.py            # 文档锚点与代码围栏（改过 REA
 python tools/check_doc_numbers.py     # README 里的行数、测试项数是否还和代码一致
 python tools/check_comments.py        # 注释覆盖情况（默认只报告；加 --strict 才是门禁）
 python tools/verify_wrap.py           # 折行属性（期望 OK: 40077 checks passed）
-python tools/verify_draw.py           # 绘制不越界（期望 OK: 420 draw checks passed）
+python tools/verify_draw.py           # 绘制不越界（期望 OK: 140 draw checks passed）
 python tools/verify_mouse.py          # 真 pty：滚轮 / 触摸拖动（期望 RESULT: 全部通过）
 python tools/verify_achievements.py   # 真 pty：帮助页、屏内 5 秒通知、意外中断恢复、名字彩蛋
 script -q /dev/null python tools/verify_colors.py   # 配色（需要 pty）
