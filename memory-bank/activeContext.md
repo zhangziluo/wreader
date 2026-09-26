@@ -4,22 +4,23 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**618 passed**（本机 8~26 秒，本会话实测 14.59 / 26.35 秒）、`npx pyright` **0 errors / 0 warnings /
+代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话实测 21.97 / 43.84 秒）、`npx pyright` **0 errors / 0 warnings /
 0 informations**、`tools/` 的 **8** 个校验脚本全绿（`check_docs` OK / `check_doc_numbers` ALL OK /
-`check_comments` **3204** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` /
-`verify_mouse` 8 项 / `verify_achievements` 19 项）。
-本会话（2026-09-26，紧接在已提交的 ㉜ 之后）做的是**自动翻页**：阅读器里按 `a` 让正文自己往下走、
-`>` / `<` 调速，配置加 `reader.auto_scroll_interval` / `reader.auto_scroll_step` 两个键，
-中英文档与《使用指南.md》都补了说明，见 ㉝。**已提交并推送**：`93e3719`（功能 + 文档 + 测试）
-与 `f0b10bd`（记忆库同步）两个提交都在 `origin/main` 上，`git status -sb` 为 `## main...origin/main`（不显示领先/落后）。
+`check_comments` **3403** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors`
+干净退出（`-1/-1` 可用）/ `verify_mouse` 8 项 / `verify_achievements` 19 项 —— **8 个脚本全绿**）。
+本会话（2026-09-26，紧接在已提交的 ㉝ 之后）做的是**自动翻页的防作弊校验**：连续自动翻页 10 分钟
+后弹一道 100 以内加减乘除的四选一题，按 `1`~`4` 选一个才继续、没作答（`Esc` / 别的键 / 超时）就停；
+配置加 `reader.auto_scroll_check_minutes` / `reader.auto_scroll_check_seconds` 两个键，见 ㉞。
 
-- `wreader/` = **12** 个 `.py` / **9,803** 行（`reader.py` **3036**、`config.py` **971**）；
-  `tests/` = 11 个文件 / **618** 项；`tools/` = 8 个 `.py`。
-- 配置 **4 个 section / 18 个键**（新增 `reader.auto_scroll_interval` / `reader.auto_scroll_step`）；
-  状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
-- 阅读器新增三个键：`a`（自动翻页开关）、`>` / `+` / `=`（加速）、`<` / `-` / `_`（减速）。
-- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3204** 条语句上方没有紧邻注释行
-  （2026-09-25 是 2771 → ㉜ 之后 3099 → 本会话的新测试又抬高到 3204；口径与处置见 `progress.md` 待办 #1）。
+- `wreader/` = **12** 个 `.py` / **10,182** 行（`reader.py` **3411**、`config.py` **975**）；
+  `tests/` = 11 个文件 / **633** 项；`tools/` = 8 个 `.py`。
+- 配置 **4 个 section / 20 个键**（本会话新增 `reader.auto_scroll_check_minutes` /
+  `reader.auto_scroll_check_seconds`）；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
+- 阅读器新增两个键：`a`（自动翻页开关）、`>` / `+` / `=`（加速）、`<` / `-` / `_`（减速）；
+  校验题**不用新键**，直接按 `1`~`4` 作答。
+- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3403** 条语句上方没有紧邻注释行
+  （2026-09-25 是 2771 → ㉜ 之后 3099 → ㉝ 之后 3204 → 本会话的新代码与新测试又加到 3403；
+  口径与处置见 `progress.md` 待办 #1）。
 - ⚠️ 遗留数据（`vocab.json`、`notes/*.md`、旧译文缓存）**仍被只读**，`werd stats --json`
   的 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键仍在（脚本兼容）。
 - ⚠️ IDE 里飘的**幽灵告警**（仓库根那份 **143 行**野生 `cli.py`，见 ㉔ / ㉕）：
@@ -29,7 +30,8 @@
   README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动（⑫）、翻页保留 3 行（⑭）、
   翻页按屏幕行推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)`（⑯）、`werd continue`（⑰）、
   `./install.sh`（⑱）、CLI 改名 `werd`（⑲）、目录浮层 + `werd toc`（⑳）、
-  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）、自动翻页（㉝）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
+  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）、自动翻页（㉝）、
+  自动翻页防作弊校验（㉞）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1212,7 +1214,7 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
    `wreader/notes.py`；`reader.py` 移除 `m` / `o` / `v` / `l` / `c` / `t` / `T` 键与所有标记模式、
    笔记面板、译文弹窗代码；`cli.py` 移除 `translate` / `vocab` / `notes` 三个子命令与 `_HANDLERS` 条目；
    `config.SCHEMA` 从 7 段 37 键缩到 **4 段 16 键**（`[translator]` / `[translate]` / `[vocab]` 全删；
-   2026-09-26 的 ㉜ / ㉝ 之后是 **18 键**，`[reader]` 段多了自动翻页两条）。
+   2026-09-26 的 ㉜ / ㉝ / ㉞ 之后是 **20 键**，`[reader]` 段多了自动翻页四条）。
 2. **成就保全**（关键取舍）：**一条成就都不删**。翻译 / 词汇 / 笔记相关的 4 条
    （`vocab_100` 📝 词汇积累、`vocab_500` 🧠 生词狂魔、`note_master` 🖊️ 笔记达人、
    `translate_maniac` 🔤 翻译狂魔）保留原条件，靠两个**只读**函数继续供数：
@@ -1344,9 +1346,9 @@ werd clear → 已清空书库：1 本书及其正文文件已删除 / 阅读时
 **已提交并推送**（同一提交 19 个文件 / +1,964 −98；`git status -sb` 为 `## main...origin/main`，无领先/落后）。
 
 > ℹ️ 本段（㉜）里的 **592 项 / 9,561 行 / 注释缺口 3099 / `reader.py` 2799 行 / `config.py` 966 行**
-> 都是**当时**的实测值，已被紧接其后的 ㉝（自动翻页）覆盖：现在是 **618 项 / 9,803 行 /
-> 缺口 3204 / `reader.py` 3036 / `config.py` 971**（见本文件顶部的「当前状态一句话」）。
-> 留着它们是为了说明「这一轮加了多少东西」，引用时请用 ㉝ 的数字。
+> 都是**当时**的实测值，已被其后的 ㉝（自动翻页）与 ㉞（防作弊校验）覆盖：现在是 **633 项 /
+> 10,182 行 / 缺口 3403 / `reader.py` 3411 / `config.py` 975**（见本文件顶部的「当前状态一句话」）。
+> 留着它们是为了说明「这一轮加了多少东西」，引用时请用 ㉞ 的数字。
 
 ### ㉝ 自动翻页：免手翻模式（2026-09-26）
 
@@ -1393,12 +1395,74 @@ werd config reader.auto_scroll_interval abc
 `README.md` / `README.en.md` / `使用指南.md`）与 `f0b10bd`（记忆库 6 个状态文件 +
 `memory-bank/README.md` + `.clinerules/memory-bank.md`）。
 
+> ℹ️ ㉝ 的数字同样是**当时**的（618 项 / 9,803 行 / 缺口 3204 / `reader.py` 3036 / `config.py` 971）；
+> 紧接着的 ㉞ 把它们推到 **633 项 / 10,182 行 / 缺口 3403 / `reader.py` 3411 / `config.py` 975**。
+
+### ㉞ 自动翻页的防作弊校验：连续 10 分钟弹一道算术题（2026-09-26）
+
+**需求（用户原话）**：「增加一个防作弊机制，自动翻页十分钟之后，程序跳出一个 100 以内的加减乘除
+判断题，如果用户没有选择，自动翻页结束。如果选择了选项，自动翻页继续。」
+
+**口径（弹题前问过用户，用户选了第二项）**：**只要按了某个选项就继续**（答错也继续 —— 证明确实
+有人在）；只有**超时未选**或按 `Esc`（以及任何别的非选项键）才停。题目做成四选一，
+是因为手机上（Termux）一个数字键就能作答。
+
+| 改动 | 内容 |
+| --- | --- |
+| `wreader/reader.py`（**3036 → 3411 行**） | `Pager` 新增 `auto_check_period`（= 分钟 × 60，0 = 关）/ `auto_check_wait` / `auto_check_deadline` / `auto_check_until` / `auto_check_question`，方法 `_schedule_auto_check` / `auto_check_due` / `auto_check_remaining` / `begin_auto_check` / `resolve_auto_check` / `auto_check_note`；纯函数 `_make_auto_check_question(rng)` / `_auto_check_lines(question, remaining, period)` / `_auto_check_choice(key, count)` / `_auto_check_layout(height, width, lines)`；绘制 `_draw_auto_check`、模态 `_auto_check_overlay`；常量 `DEFAULT_AUTO_CHECK_MINUTES`=10.0 / `DEFAULT_AUTO_CHECK_SECONDS`=30.0 / `_AUTO_CHECK_CHOICES`=4 / `_AUTO_CHECK_OPERATORS` / `_AUTO_CHECK_TITLE` / `_AUTO_CHECK_FOOTER` / `_AUTO_CHECK_POLL_MS`=200；`set_auto_scroll` 里接上排期，`_run` 在 `_draw` 之后 `if pager.auto_check_due(): _auto_check_overlay(...)`；`_HELP_LINES` 补两行说明；`open_reader` 读两个新键 |
+| `wreader/config.py`（**971 → 975 行**） | `SCHEMA` 的 `[reader]` 加 `auto_scroll_check_minutes`（默认 **10.0**，float）/ `auto_scroll_check_seconds`（默认 30，int）→ **4 段 20 键**（`reader` 13 键） |
+| `tests/test_reader.py`（**199 → 213 项**） | 默认值与换算 / 提示语 / 出题（300 次固定种子：四种运算符、操作数与结果 ≤ 100、除法整除、选项 4 个不重复且正确项位置随机）/ 文案与倒计时 / 布局太小 / 排期只在周期后 / 作答后继续（两个排期都重排）/ 没作答停（含越界与没题在屏上）/ `_auto_check_choice` 只认数字键 / 弹窗三个出口（选 `2`、超时、`Esc`）与屏太小 |
+| `tests/test_config.py`（**50 → 51 项**） | 两个新键的默认值（`10.0` / `30`）、`coerce_value` 认 `"15"` / `"0.5"` / `"0"`、非数字抛 `ConfigError` |
+| `tests/test_reader.py` 的 `FakeStdscr` | 加两个钩子：`empty_key="timeout"` 让 `get_wch` 抛 `curses.error`（测"轮询超时"分支）、`timeout_value` 记住最后一次 `timeout()`（断言模态退出后恢复 `_TICK_MS`）；默认行为不变 |
+| 文档 | `README.md` / `README.en.md`（按键表 `a` 行 + 特性段 + 设置表两行 + 18 → 20 项 + 全部行数/测试数字）、`使用指南.md`（场景 D 增「翻了十分钟会考你一道算术题」+ 总表 + 参数示例 + 快捷提示注释） |
+
+**行为口径（写进三份文档与 `progress.md` 的已知问题表）**：
+
+- **计时量的是「自动翻页连续开了多久」**：`set_auto_scroll(True)` 种下 `now + period`，
+  **读者按键 / 滚轮 / 改窗口都不重置它**（`defer_auto_scroll` 只推后下一拍翻页）——
+  否则敲一下键就能永久躲过校验（设计取舍见 `progress.md` 决策行）。
+- **弹题期间不翻页**：`begin_auto_check` 把 `auto_scroll_deadline` 清零，结算后再 `defer_auto_scroll`
+  排一整拍，所以题目不会在文字背后被卷走。
+- **任意选项都算作答**；没作答（`Esc` / 别的键 / 超时）就 `set_auto_scroll(False)` +
+  `say("校验题没有作答，自动翻页已停（按 a 重新开始）")`。作答成功则
+  `say("已作答（正确答案 62），自动翻页继续；10 分钟后再校验")`。
+- **屏幕小到放不下题目**（`_auto_check_layout` 返回 `None`）→ 当没作答处理 + `say("屏幕太小…")`，
+  不让用户对着看不见的倒计时干等。
+- **题目每次都不一样**：运算符、操作数、选项顺序随机；运算符刻意用 ASCII 的 `+ - * /`
+  （`×` `÷` 是"东亚宽度不确定"字符，CJK 终端里可能占两列，弹窗边框会错位）。
+
+**全量验证（2026-09-26，本会话实测）**：`pytest tests/` → **633 passed in 43.84s**（`test_reader` +
+`test_config` 两个文件单跑 21.97s）；`npx pyright` → **0 errors / 0 warnings / 0 informations**；
+`check_docs` → RESULT: OK；`check_doc_numbers` → **RESULT: ALL OK**（633 总数 + `test_reader` 213 /
+`test_config` 51 / `reader.py` 3411 / `config.py` 975）；`check_comments` → **TOTAL: 3403**；
+`verify_wrap` → 40077；`verify_draw` → 140。
+
+**真 pty 端到端补测（临时脚本 `/tmp/verify_auto_check.py`，跑完已删）**：40×100 的 pty + 沙箱书 400 行，
+设 `auto_scroll_interval=0.5` / `auto_scroll_step=1` / `auto_scroll_check_minutes=0.05`（= 3 秒周期）/
+`auto_scroll_check_seconds=3`，按 `a` 打开后等题目出现，三条路径实测：
+
+```
+① 收到题目后按 "1"  → 提示栏出现「正确答案」，进度 +12 行（6 秒 tail，且 3 秒后又弹了第二道）
+② 收到题目后按 Esc  → 提示栏「校验题没有作答，自动翻页已停」；进度只 +6（题目出现之前的那些）
+③ 收到题目后不按键  → 3 秒后同样提示已停；进度只 +6
+RESULT: ALL OK
+```
+
+**三个真 pty 脚本本会话都补跑了**（都通过）：`verify_achievements.py` → 19 项全过（帮助页 / 通知 /
+恢复流程）；`verify_mouse.py` → 8 项全过；`verify_colors.py` → `default colour pair usable: yes (-1/-1)`。
+⚠️ 两个环境坑（已写进 `systemPatterns.md` 坑 #45 / #46）：`verify_colors.py` 必须在**真终端**里跑
+（本会话用 `script -q /dev/null .venv/bin/python tools/verify_colors.py` 才过，非 tty 时它会打印
+「需要在真终端 / pty 里运行」并退出）；`verify_mouse.py` **不能和 pytest 并行跑** —— 它固定
+`sleep 1.3` 等 curses 起来，机器一忙按键就被吞、脚本挂在 `waitpid`（并行时卡了 3 分钟没动静，
+单独跑 8 项全过）。
+
+**已提交并推送**（本会话）：`wreader/reader.py`、`wreader/config.py`、两个测试文件、
+三份文档与记忆库一起提交，`git status -sb` 收尾为 `## main...origin/main`（不显示领先/落后）。
+
 ## 待办 / 下一步
 
-> 本文件只列"下一步做什么"；每条的理由与实测数字在 `progress.md` 的待办里（不在两处各写一份）。
-
-0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3204** 条缺口
-   （2026-09-26 复测：上一次是 2771 → ㉜ 之后 3099 → 本会话的自动翻页测试又添了 100 多条）。
+0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3403** 条缺口
+   （2026-09-26 复测：上一次是 2771 → ㉜ 之后 3099 → ㉝ 之后 3204 → 本会话的防作弊校验又添了 199 条）。
    要么正式把口径定为"一段逻辑配一段注释"（文档已如此），要么对改到的文件做 `--strict` 增量门禁。
 1. **`reader.theme` 仍未实现**（预留项，改了没效果）：在 `_init_colors()` 里按主题 `init_pair()`，
    并给正文 / 状态栏 / 书签分配 color pair；务必保住 `use_default_colors()` 的透明背景（背景用 `-1`），

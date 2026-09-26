@@ -44,19 +44,19 @@
 其余模块都是**纯函数 + 普通数据**，不依赖终端、不依赖全局状态（除 `config` 的带戳缓存）。
 这让分页数学、章节边界、统计指标、成就条件都能脱离 TTY 测试。
 
-## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 9,803 行）
+## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 10,182 行）
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 22 | `__version__`、模块地图 | 1 个 |
 | `wreader/achievements.py` | 1250 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重、**实时门槛（`metric_thresholds`/`crossed_thresholds`）与基线（`session_metrics`）**、**遗留老数据只读计数（`vocab` / `notes`）**、**跨机合并（`merge_states`，只加不减）** | 31 个（`check_achievements`/`record_event`/`merge_states`…） |
 | `wreader/cli.py` | 1004 | argparse 定义 + 子命令处理函数（`import`/`list`/`search`/`read`/`continue`/`stats`/`achievements`/`config`/`toc`/`data`/`prune`/`clear`/`werd`+`word`）；`_auto_prune_books` 在每个命令前对账一次（`clear` / `prune` 自己跳过） | `["build_parser", "main"]` |
-| `wreader/config.py` | 971 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 18 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
+| `wreader/config.py` | 975 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 20 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/env.py` | 183 | **环境探测**：云主机 / WSL / tmux / 可编辑安装（四个输入全部可注入） | 8 个（`detect`/`flags`/`SIGNAL_NAMES`…） |
 | `wreader/geo.py` | 343 | **地理位置**：ip-api 查询 + 一小时缓存 + 国家→大洲 + 世仇组合；注入式 fetcher、离线降级 | 15 个（`load_location`/`continent_of`/`feud_hit`…） |
 | `wreader/library.py` | 1425 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**阅读统计的落库侧（`accumulate_stats`）**、**书库清理（`prune_missing_books` 摘死记录 / `clear_library` 清书库保成绩）** | **无 `__all__`** |
 | `wreader/lock.py` | 80 | **跨进程文件锁**（POSIX `flock`；Windows 退化为"只有原子替换"） | 3 个 |
-| `wreader/reader.py` | 3036 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、**自动翻页（免手翻）**、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 20 个（`Pager`/`open_reader`/`DEFAULT_AUTO_SCROLL_INTERVAL`…） |
+| `wreader/reader.py` | 3411 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、**自动翻页（免手翻 + 防作弊校验）**、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 20 个（`Pager`/`open_reader`/`DEFAULT_AUTO_SCROLL_INTERVAL`…） |
 | `wreader/stats.py` | 817 | 指标、热力图、连续天数、**成就定义加载**、庆祝动画、**遗留数据只读计数（`vocab_legacy_count` / `notes_count`）** | 27 个 |
 | `wreader/toc.py` | 474 | **目录解析**：中文卷/章正则、epub nav/ncx、缓存与失效判定 | 10 个（`build_toc`/`load_toc`…） |
 | `wreader/transfer.py` | 198 | **数据搬家**：把阅读时长 / 每日桶 / 位置 / 书签 / 会话 / 成就解锁打成纯 JSON 包（`BUNDLE_KIND` / `BUNDLE_VERSION`），并把别的机器的包**只加不减**合并进来；坏包抛 `TransferError` | 5 个（`export_data`/`import_data`/`TransferError`…） |
@@ -70,7 +70,7 @@
 - **类型**（`coerce_value` 用 `type(default)` 推断该键该是 int/float/bool/str）
 - **写文件顺序**与**行尾注释**（`COMMENTS`）
 
-加一个设置项 = 在 `SCHEMA` 加一行，其余自动生效。当前是 **4 个 section / 18 个键**。
+加一个设置项 = 在 `SCHEMA` 加一行，其余自动生效。当前是 **4 个 section / 20 个键**。
 用户文件里多出来的键**不报错**：收进 `Config.unknown`，由 `cli._print_config` 打一行警告（见坑 #16）。
 
 ### 2. 行号坐标系统一
@@ -242,6 +242,34 @@
 - **提示与发现**：开着时底部消息行由 `_message_row()` 改显示 `_AUTO_HINT.format(pager.auto_scroll_pace())`
   （`每 5 秒 1 行（12 行/分钟） · a 暂停 > 加速 < 减速`）；`_HELP_LINES` 里也有对应条目。
 
+### 14. 自动翻页的防作弊校验：一道纯函数出的题 + 一个「谁作答谁说了算」的模态（2026-09-26 新增）
+
+「连续自动翻页太久就证明有人在」这件事被拆成**三层**，每层都能单独测：
+
+- **出题是纯函数**：`_make_auto_check_question(rng)` → `{"prompt", "answer", "choices", "correct"}`。
+  四种运算符各自夹住操作数（和 ≤ 100、差 ≥ 1、积 ≤ 100、除法整除且被除数 ≤ 100），
+  干扰项取「答案 ±1 / ±2 / ±10」里落在 0~100 的候选并**打乱**，正确项再插到随机位置
+  （不然永远按 `1` 就能过）。`rng` 可注入 → 测试喂 `random.Random(seed)` 就能断言边界。
+  ⚠️ 运算符刻意用 ASCII 的 `+ - * /`：`×` `÷` 是"东亚宽度不确定"字符，CJK 终端里可能被显示成
+  两列而 `_char_width` 按 1 列算，弹窗边框会错位（同坑 #4 的宽度口径）。
+- **状态机在 `Pager` 上，计时可注入**：`auto_check_period`（秒，= 分钟 × 60，0 = 关）、
+  `auto_check_wait`（秒）、`auto_check_deadline`（下一次该弹的时刻，0 = 没排期）、
+  `auto_check_until`（屏上这道题的截止时刻）、`auto_check_question`（屏上这道题）。
+  出口只有四个方法：`auto_check_due()` / `begin_auto_check()` / `auto_check_remaining()` /
+  `resolve_auto_check(choice)`；**`choice is None` 或序号越界 = 没作答 → `set_auto_scroll(False)`
+  + `say(...)`**，否则 `set_auto_scroll(True)` + `defer_auto_scroll()` + 重新排下一次校验。
+  提示栏会报出正确答案（答错也放过，但读者知道对的是哪个）。
+- **弹窗只在 `_run` 里挂一下**：`_draw` 之后 `if pager.auto_check_due(): _auto_check_overlay(stdscr, pager)`。
+  它是 `_help_overlay` 那种模态小循环，但**用 200ms 轮询而不是阻塞**（`_AUTO_CHECK_POLL_MS`），
+  这样倒计时能真的走完；`finally` 里恢复 `_TICK_MS`。`_auto_check_choice()` 是**纯函数**：
+  只认 `"1"`~`"4"`，`int` 键码（方向键 / 控制键）与其它任何键都返回 `None`。
+
+两条口径值得记住（都是用户的明确选择）：
+
+1. **任意选项都算作答**（答错也继续）—— 校验的是「有人在」，不是算术；
+2. **计时量的是「自动翻页连续开了多久」**，读者按键 / 滚轮 / 改窗口都**不重置**它
+   （`defer_auto_scroll` 只推后下一拍翻页）。若按键就重置，敲一下键就能永久躲过校验。
+
 ## 关键实现路径（改动时必看）
 
 | 场景 | 调用链 |
@@ -253,6 +281,7 @@
 | 翻页 | `handle_key` → `Pager.next_page` / `previous_page` → `next_top` / `previous_top(page_budget, viewport_width)` → `move_to(行, 段内偏移)` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行** |
 | 鼠标 / 触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 自动翻页一帧 | `_run` 循环 → `stdscr.timeout(_poll_timeout_ms(pager))`（开着时缩到「离下一拍还剩多久」）→ `get_wch` 超时 → 下一轮 `Pager.auto_scroll_tick()`（`next_top(step, viewport_width)` 先算落点 → 到头则自停 + `say`，否则 `move_to` + 重新排期）→ `_draw`。按键 / `KEY_MOUSE` / `KEY_RESIZE` 三条路各自 `Pager.defer_auto_scroll()`；开关与调速走 `handle_key` → `_toggle_auto_scroll` / `_adjust_auto_scroll` → `Pager.toggle_auto_scroll` / `adjust_auto_scroll_speed`。`open_reader` 从 `settings["reader"]["auto_scroll_interval"/"auto_scroll_step"]` 取初值 |
+| 自动翻页校验一题 | `_run` 每帧 `_draw` 之后 → `Pager.auto_check_due()`（`auto_scroll` 开着 + 排过期 + 到点 + 屏上没题）→ `_auto_check_overlay` → `_make_auto_check_question()` → `Pager.begin_auto_check()`（记题、起倒计时、把 `auto_scroll_deadline` 清零＝弹题期间不翻页）→ 循环 `_auto_check_lines` + `_draw_auto_check` + `get_wch`（200ms 轮询）→ `_auto_check_choice(key, 4)` → `Pager.resolve_auto_check(choice)`：有作答就 `set_auto_scroll(True)` + `defer_auto_scroll()` + 重排下次校验，没作答就 `set_auto_scroll(False)` + `say("校验题没有作答…")`；`finally` 恢复 `_TICK_MS`。排期入口是 `set_auto_scroll` → `_schedule_auto_check`（**已排过就不动**，见坑 #42） |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` → `save_library`；收尾 `clear_marker` 删掉现场 |
 | 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
 | 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
@@ -437,6 +466,36 @@
     pty 校验因此报了「3.6 秒前进了 0 行」的**假失败**（同一脚本里断言屏幕文字就立刻看出书在动）。
     正确做法二选一：把 `reader.auto_save_interval` 设成 1 再读文件，或直接断言 **pty 输出里的正文**。
     同理，「暂停之后不再动」也要等够一个落盘周期再读，否则读到的是上一次的存档。
+42. **`set_auto_scroll(True)` 会被每一拍调用，校验排期不能在里面重复续期**（2026-09-26）：
+    `auto_scroll_tick` 每次成功翻页都调 `set_auto_scroll(True, moment)`。如果 `_schedule_auto_check`
+    每次都重排，`auto_check_deadline` 就会被推成「现在 + 10 分钟」—— 间隔 5 秒时**永远也到不了点**，
+    校验一次都不会弹（而且单测里只要注入时间就很容易漏掉这个 bug）。
+    正确做法写死在 `_schedule_auto_check` 里：**已经排过（`deadline != 0`）就原样留着**，
+    只在刚打开 / 刚结算完（deadline 被清零）时才排。`test_auto_check_due_one_period_after_the_mode_started`
+    里那句 `pager.set_auto_scroll(True, now=5000.0)` 就是守这个的。
+43. **弹窗会「吃掉」按键，pty 脚本与消息行断言都要按这个节奏来**（2026-09-26 实测三次才写对）：
+    校验题在屏上时，第一个 `q` 是**给题目的**（= 没作答 → 停自动翻页），阅读器不会退出；
+    脚本要是只发一个 `q` 就 `waitpid`，会**永久挂住**（改成循环发 `q` + `WNOHANG` 判断）。
+    另外，作答后的 `say("已作答（正确答案 …）")` 会占满消息行 **5 秒**，
+    这段时间里提示栏**看不到** `自动翻页中`；想断言「模式还在」就等过了 5 秒，
+    或者干脆用进度增量（每次 tail 走的行数）来判断 —— 这次就是这么验的。
+44. **分钟数的设置键必须是 float，int 会把小数直接拒掉**（2026-09-26 实测）：
+    `auto_scroll_check_minutes` 原本默认 `10`（int），`werd config reader.auto_scroll_check_minutes 0.05`
+    直接报 `error: '...' expects an integer, got '0.05'`（`config.coerce_value` 按 `type(default)` 分派，
+    见模式 #1）。改成默认 `10.0` 之后能设 `0.5`（半分钟）—— 这不只是为了用户方便，
+    真 pty 端到端验证就是靠 `0.05` 分钟（3 秒周期）才跑得动的；**int 型的键在做秒级验证时会卡住**。
+45. **pty 校验脚本要单独跑，别和 pytest / 别的 pty 脚本并行**（2026-09-26 实测）：`verify_mouse.py`
+    用**固定 `sleep 1.3`** 等 curses 起来，机器一忙就不够 —— 灌进去的按键会被吞掉，脚本随后
+    **永久挂在 `waitpid`** 上（现象：只有「== 端到端结果 ==」一行、第一个用例迟迟不打印，
+    子进程 `ps` 看是活的）。这次并行跑 pytest 时就这样卡了 3 分钟；单独跑 **8 项全过**。
+    配套知识：**`initscr()` 会 flush 输入队列**，所以"启动瞬间灌的键"会直接消失 ——
+    写新脚本时宁可先**等到第一帧出现**再灌键，别用固定秒数赌。
+46. **判断"子进程退出了没有"必须用 `waitpid(pid, os.WNOHANG)`，不能靠"读到 EOF 就 break"**：
+    2026-09-26 写临时探针时踩的 —— master 端读到 `b""` **正是子进程已退出**的信号，
+    可我把它当成"读不动了"直接 `break`，于是每次都被判成"卡住"。最后靠
+    `ps -p <pid> -o stat` 看到 `ZN`（**zombie = 已退出但没人收尸**）才发现真相，
+    白排查了二十分钟。教训：pty 脚本自己也要有"我到底测到了什么"的自检（先怀疑探针，再怀疑被测代码；
+    这类"改前改后一个样"的现象，先用 `git stash` 把改动摘掉复现一次，就能立刻判断是不是回归）。
 
 
 
