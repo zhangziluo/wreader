@@ -25,7 +25,7 @@
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`[tool.setuptools.package-data]` 带 `data/*.json`） |
 | 运行时依赖 | 只有 **3 个**：`chardet`、`rich`、`requests`（后者只服务地理成就的可选联网） |
-| 规模（2026-09-26 实测） | `wreader/` **12** 个 `.py`（**9,561** 行）+ `data/achievements.json`（348 行 / 48 条）；`tests/` **10** 个测试文件 + `conftest.py`，**592** 项测试；`tools/` **8** 个校验脚本 |
+| 规模（2026-09-26 实测） | `wreader/` **12** 个 `.py`（**9,803** 行）+ `data/achievements.json`（348 行 / 48 条）；`tests/` **10** 个测试文件 + `conftest.py`，**618** 项测试；`tools/` **8** 个校验脚本 |
 | 版本控制 | **git 仓库**（2026-09-22 建）：`main` → `origin` = `https://github.com/zhangziluo/wreader`；判据是 `git status` 不显示领先/落后（不写提交数） |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
@@ -37,6 +37,8 @@
    `werd continue`（按 `progress.last_read` 倒序列出最近打开阅读的三本）。
 3. **阅读**：`werd read <book_id>` 全屏 curses 分页器；位置、书签、本次时长落库，随时续读。
    除键盘外还支持**鼠标滚轮 / 触摸拖动逐行滚动**（手机终端 Termux 上就是靠它翻页），
+   **自动翻页 / 免手翻**（按 `a` 让它每几秒自己往下走，`>`/`<` 调速，
+   速度由 `reader.auto_scroll_interval` / `reader.auto_scroll_step` 决定），
    以及 `?` 帮助页、意外中断后的恢复提示。
 4. **目录**：章节表由正则识别（`toc.patterns` 可加自定义正则），epub 优先用书自带的 `nav` / `ncx`；
    阅读中按 `Tab` 呼出目录浮层（`/` 过滤、回车跳转），`werd toc <id> [--rebuild]` 查看 / 重建；
@@ -49,7 +51,7 @@
    **意外中断恢复**（`~/.wreader/reading_session.json` 现场 + 开书时问一句）、
    `wreader/geo.py`（位置，一小时缓存，可完全关掉联网）与 `wreader/env.py`
    （云主机 / WSL / tmux / 可编辑安装）。命令行另有名字彩蛋 `werd werd` / `werd word` / `werd --werd`。
-6. **配置**：`~/.wreader/settings.toml`（**4 个 section / 16 个键**）；
+6. **配置**：`~/.wreader/settings.toml`（**4 个 section / 18 个键**）；
    `werd config <section.key> [value]` 读写，`--path` 看路径、`--reset` 复原；
    `werd config` 列出设置时（`cli._print_config`）会对每个这样的键打一行
    `warning: unknown setting '...' is ignored`（**不报错、不改写、不删用户的文件**）。
@@ -83,8 +85,8 @@
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   同时保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-26 复测）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3099** 条语句上方没有紧邻注释行
-  （`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 256、
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3204** 条语句上方没有紧邻注释行
+  （`tests/test_reader.py` 664、`wreader/reader.py` 509、`wreader/achievements.py` 256、
   `wreader/library.py` 233、`tests/test_library.py` 229 最多；2026-09-25 测得 2771）。
   早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"，别执行到每条 `return` / `assert` 都单独加。

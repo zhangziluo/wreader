@@ -29,17 +29,21 @@
   后来被发现是**假绿**的（每个文件只检查第 1 行，见 `activeContext.md` ⑪），
   所以早期"16 个文件注释全覆盖"的说法**不再成立**。
   现行口径与处置见 `projectbrief.md` 的「注释规范」与 `progress.md` 待办 #1。
-- **全量复核基线快照（2026-09-26，最新）**：**592** 项测试 / `pyright` **0 errors, 0 warnings** /
+- **全量复核基线快照（2026-09-26，最新）**：**618** 项测试 / `pyright` **0 errors, 0 warnings** /
   **31** 个 `.py`（`wreader/` 12 + `tests/` 11 + `tools/` 8，另 `install.sh` 是 bash）；
-  `wreader/` 共 **9,561** 行；`tools/` 的 **8** 个校验脚本全绿（含真 pty 的
+  `wreader/` 共 **9,803** 行；`tools/` 的 **8** 个校验脚本全绿（含真 pty 的
   `verify_achievements.py` 19 项、`verify_mouse.py` 8 项）。
-  ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3099** 条语句上方没有紧邻注释行。
-  以上都是**实测值**，不是估算。
+  ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3204** 条语句上方没有紧邻注释行。
+  以上都是**实测值**，不是估算。**同一轮里的两次小基线**：592 项（㉜ 数据搬家，3099 条注释缺口，
+  `wreader/` 9,561 行）→ 618 项（㉝ 自动翻页，3204 条，9,803 行）。
 - **上一次基线（2026-09-25，删掉翻译 / 生词本 / 笔记之后）**：559 项测试 / 29 个 `.py` /
   `wreader/` 8,840 行 / 注释缺口 2771。
 - 2026-09-26 这一轮加了 **`wreader/transfer.py`**（`werd data export/import` 的数据搬家）、
   `library.prune_missing_books` / `clear_library`（`werd prune` / `werd clear`），
   以及 `cli._auto_prune_books` 的全局自动对账；细节见 `activeContext.md` ㉜。
+- **同一晚的第二轮（㉝）：阅读器新增「自动翻页 / 免手翻」** —— `a` 开关、`>`/`<` 调速，
+  配置新增 `reader.auto_scroll_interval` / `reader.auto_scroll_step`（`SCHEMA` 从 16 键变 **18 键**），
+  文档见 `README.md` / `README.en.md` / `使用指南.md`，设计见 `systemPatterns.md` 模式 #13 与坑 #38~#40。
 - 本次复核同时**删掉了翻译 / 生词本 / 笔记三个功能**（详见 `activeContext.md` ㉚ 与
   `progress.md` 的 2026-09-25 决策行）：`translator.py`、`translate/`、`vocab.py`、`notes.py`
   已不存在，老数据文件改为**只读计数**供成就使用。**读到旧记录里提到它们，属于历史。**

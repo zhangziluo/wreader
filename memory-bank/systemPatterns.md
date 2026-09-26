@@ -44,19 +44,19 @@
 其余模块都是**纯函数 + 普通数据**，不依赖终端、不依赖全局状态（除 `config` 的带戳缓存）。
 这让分页数学、章节边界、统计指标、成就条件都能脱离 TTY 测试。
 
-## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 9,561 行）
+## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 9,803 行）
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
 | `wreader/__init__.py` | 22 | `__version__`、模块地图 | 1 个 |
 | `wreader/achievements.py` | 1250 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重、**实时门槛（`metric_thresholds`/`crossed_thresholds`）与基线（`session_metrics`）**、**遗留老数据只读计数（`vocab` / `notes`）**、**跨机合并（`merge_states`，只加不减）** | 31 个（`check_achievements`/`record_event`/`merge_states`…） |
 | `wreader/cli.py` | 1004 | argparse 定义 + 子命令处理函数（`import`/`list`/`search`/`read`/`continue`/`stats`/`achievements`/`config`/`toc`/`data`/`prune`/`clear`/`werd`+`word`）；`_auto_prune_books` 在每个命令前对账一次（`clear` / `prune` 自己跳过） | `["build_parser", "main"]` |
-| `wreader/config.py` | 966 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 16 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
+| `wreader/config.py` | 971 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 18 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/env.py` | 183 | **环境探测**：云主机 / WSL / tmux / 可编辑安装（四个输入全部可注入） | 8 个（`detect`/`flags`/`SIGNAL_NAMES`…） |
 | `wreader/geo.py` | 343 | **地理位置**：ip-api 查询 + 一小时缓存 + 国家→大洲 + 世仇组合；注入式 fetcher、离线降级 | 15 个（`load_location`/`continent_of`/`feud_hit`…） |
 | `wreader/library.py` | 1425 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**阅读统计的落库侧（`accumulate_stats`）**、**书库清理（`prune_missing_books` 摘死记录 / `clear_library` 清书库保成绩）** | **无 `__all__`** |
 | `wreader/lock.py` | 80 | **跨进程文件锁**（POSIX `flock`；Windows 退化为"只有原子替换"） | 3 个 |
-| `wreader/reader.py` | 2799 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 18 个（`Pager`/`open_reader`…） |
+| `wreader/reader.py` | 3036 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、**自动翻页（免手翻）**、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 20 个（`Pager`/`open_reader`/`DEFAULT_AUTO_SCROLL_INTERVAL`…） |
 | `wreader/stats.py` | 817 | 指标、热力图、连续天数、**成就定义加载**、庆祝动画、**遗留数据只读计数（`vocab_legacy_count` / `notes_count`）** | 27 个 |
 | `wreader/toc.py` | 474 | **目录解析**：中文卷/章正则、epub nav/ncx、缓存与失效判定 | 10 个（`build_toc`/`load_toc`…） |
 | `wreader/transfer.py` | 198 | **数据搬家**：把阅读时长 / 每日桶 / 位置 / 书签 / 会话 / 成就解锁打成纯 JSON 包（`BUNDLE_KIND` / `BUNDLE_VERSION`），并把别的机器的包**只加不减**合并进来；坏包抛 `TransferError` | 5 个（`export_data`/`import_data`/`TransferError`…） |
@@ -70,7 +70,7 @@
 - **类型**（`coerce_value` 用 `type(default)` 推断该键该是 int/float/bool/str）
 - **写文件顺序**与**行尾注释**（`COMMENTS`）
 
-加一个设置项 = 在 `SCHEMA` 加一行，其余自动生效。当前是 **4 个 section / 16 个键**。
+加一个设置项 = 在 `SCHEMA` 加一行，其余自动生效。当前是 **4 个 section / 18 个键**。
 用户文件里多出来的键**不报错**：收进 `Config.unknown`，由 `cli._print_config` 打一行警告（见坑 #16）。
 
 ### 2. 行号坐标系统一
@@ -212,6 +212,36 @@
 - ⚠️ **代价：重复导入会把时长翻倍**（没有「谁更新」的可信标记，只加不减是最不坏的策略，
   详见 `progress.md` 的决策行与坑 #34）。
 
+### 13. 自动翻页：定时器只管「什么时候走」，走哪一步复用 `scroll`（2026-09-26 新增）
+
+免手翻（`a` 键）刻意**不写第二套滚动实现**，它就是给「同一个 `Pager`」加了一个闹钟：
+
+- **状态只有四个普通字段**：`auto_scroll`（bool）、`auto_scroll_interval`（秒，默认 5.0，
+  构造时经 `_clamp_auto_interval()` 夹进 0.5~600）、`auto_scroll_step`（屏幕行，默认 1，
+  构造时 `max(1, int(...))`）、`auto_scroll_deadline`（**monotonic 的绝对时刻**，关掉时置 0）。
+  **没有线程、没有 `signal`、没有第二个事件循环** —— 免手翻必须和手动阅读共用同一条绘制、
+  退出、落库路径，否则「自动模式下的退出」会变成另一条没人测的分支。
+- **时间源可注入**：`auto_scroll_wait(now)` / `auto_scroll_tick(now)` / `set_auto_scroll(now)` /
+  `defer_auto_scroll(now)` 都收 `now`，缺省走 `_auto_now()` → `time.monotonic()`。
+  测试直接喂数字推进时间，**绝不断言真实时钟**。
+- **`stdscr.timeout` 由 `_poll_timeout_ms(pager)` 每帧现算**：关着 = 老规矩 `_TICK_MS`（1000ms，
+  时钟与状态栏一秒一刷）；开着 = `min(_TICK_MS, 离下一拍还剩多久 × 1000)`，下限
+  `_AUTO_MIN_POLL_MS`（50ms，免得过点后空转烧 CPU）。**这是「到点就翻」而不是「只在 tick 边界翻」
+  的关键**：间隔 5 秒时不会因为每帧等 1 秒而抖成 5~6 秒。
+- **前进复用 `scroll(n)` / `next_top()`**：`auto_scroll_tick` 先只**算落点**（`next_top(step, viewport_width)`
+  + `clamp(line, total)`）来判断有没有动，再 `move_to(...)`。单位是**屏幕行**，与翻页键、滚轮同一套，
+  所以长段落折行、`read_ranges` 去重、章节计时滚动全都自动一致 —— **位移入口仍然只有 `move_to`**。
+- **推迟而不是暂停**（`defer_auto_scroll()`）：按键（`handle_key` 返回后）、滚轮 / 触摸、
+  `KEY_RESIZE` 三处都把 deadline 推到「现在 + 一整间隔」。正在打字的人不该被抢页，
+  但也不该按一下就退出自动模式（真想停再按一次 `a`）。
+- **到书末自停**：落点与当前位置完全相同 → `set_auto_scroll(False)` + `say("已经读到全书末尾，自动翻页已停")`。
+  静默空转比没有这个模式更糟（用户会以为程序卡了）。
+- **不喂按键成就**：自动翻页不经过 `handle_key`，所以 `Pager.note_key` / `page_streak` /
+  手速类计数天然不受影响 —— 这是**有意**的（那些衡量手动操作），别再"顺手"补上。
+  进度与时长照常：`move_to` 一条链上的 `read_ranges` / `_sync_chapter` 都会走。
+- **提示与发现**：开着时底部消息行由 `_message_row()` 改显示 `_AUTO_HINT.format(pager.auto_scroll_pace())`
+  （`每 5 秒 1 行（12 行/分钟） · a 暂停 > 加速 < 减速`）；`_HELP_LINES` 里也有对应条目。
+
 ## 关键实现路径（改动时必看）
 
 | 场景 | 调用链 |
@@ -222,6 +252,7 @@
 | 画一帧 | `_run` → `_draw` → `Pager.visible_rows(viewport_rows, width-1)` → 逐行 `_draw_text` → `status_segment` + `_draw_status` → `_draw_notice` → `refresh` |
 | 翻页 | `handle_key` → `Pager.next_page` / `previous_page` → `next_top` / `previous_top(page_budget, viewport_width)` → `move_to(行, 段内偏移)` → `_sync_chapter`（章节计时滚动）。`page_budget = round(page_scroll_step × viewport_rows) − page_overlap`，单位是**屏幕行** |
 | 鼠标 / 触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
+| 自动翻页一帧 | `_run` 循环 → `stdscr.timeout(_poll_timeout_ms(pager))`（开着时缩到「离下一拍还剩多久」）→ `get_wch` 超时 → 下一轮 `Pager.auto_scroll_tick()`（`next_top(step, viewport_width)` 先算落点 → 到头则自停 + `say`，否则 `move_to` + 重新排期）→ `_draw`。按键 / `KEY_MOUSE` / `KEY_RESIZE` 三条路各自 `Pager.defer_auto_scroll()`；开关与调速走 `handle_key` → `_toggle_auto_scroll` / `_adjust_auto_scroll` → `Pager.toggle_auto_scroll` / `adjust_auto_scroll_speed`。`open_reader` 从 `settings["reader"]["auto_scroll_interval"/"auto_scroll_step"]` 取初值 |
 | 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` → `save_library`；收尾 `clear_marker` 删掉现场 |
 | 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
 | 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
@@ -385,6 +416,21 @@
     只删书目与 `~/novels/` 下的转换正文，`achievements.json`、阅读时长、`settings.toml` 全不动，
     且输出明确写「阅读时长与成就已保留」。以后给别的命令加确认时别顺手把它也加上，
     否则 `werd clear` 在脚本里会卡住（现状是可以直接跑）。
+38. **自动翻页的排期只能用 `time.monotonic()`，别用 `time.time()`**（2026-09-26）：`auto_scroll_deadline`
+    存的是 monotonic 的**绝对时刻**。用墙钟的话，系统校时 / 手动改时间往回拨一次，
+    `deadline` 立刻"过期"，用户看到的是**刚打开自动翻页就一连翻好几页**。
+    配套纪律：所有 `auto_scroll_*` 方法都能注入 `now`，测试喂数字、**不许断言真实时钟**
+    （否则必然是"偶尔失败"的测试）。
+39. **`stdscr.timeout` 是每帧都要重设的，不是设一次管到底**：`_poll_timeout_ms(pager)` 在 `_run`
+    里出现**两次**（进循环前 + 每帧 `get_wch` 之前），第二次那处删不得 —— 只在循环外设一次的话，
+    中途按 `a` 打开自动翻页仍要等到下一次 tick 才生效（表现："按了 `a` 要愣最多 1 秒"），
+    而且 5 秒的间隔会被量化到 tick 边界上。任何"会改变等待时长"的新模式都要同步这两处。
+    另：帮助页 / 目录浮层 / 标记等模态循环里用的是固定 `_TICK_MS` 并 `finally` 恢复（它们**不参与**
+    自动翻页 —— 浮层里不该偷偷翻页）；恢复成 `_TICK_MS` 没问题，因为 `_run` 下一帧会重新算。
+40. **`_message_row()` 的优先级顺序要守住**：`notice`（成就通知）→ `pager.current_message()`（临时消息）
+    → 自动翻页提示 → 默认 `_HINT`。把自动翻页提示挪到最前面就会盖掉「已加书签：第 12 行」这类
+    即时反馈；它排在默认提示**之前**则是故意的 —— 开着免手翻时，那一行（当前速度 + 调速键）
+    是最该看见的信息。改这一行务必跑 `tools/verify_achievements.py`（通知退化到消息行那条路）。
 
 
 

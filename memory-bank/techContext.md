@@ -64,11 +64,11 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
-## settings.toml 的 4 个 section（共 16 个键）
+## settings.toml 的 4 个 section（共 18 个键）
 
 | section | 键（默认值） |
 | --- | --- |
-| `reader` | `page_scroll_step`=1.0、`page_overlap`=3、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true —— **9 键** |
+| `reader` | `page_scroll_step`=1.0、`page_overlap`=3、`wheel_scroll_step`=1、`touch_scroll`=true、`status_bar_format`=`time\|chapter\|duration`、`auto_save_interval`=60、**`auto_scroll_interval`=5.0**、**`auto_scroll_step`=1**、`page_height`=24、`theme`=`default`（**预留未实现**）、`store_history`=true —— **11 键**（粗体两条是 2026-09-26 新增的自动翻页速度） |
 | `stats` | `daily_goal_minutes`=60、`show_heatmap`=true、`achievement_sound`=true、`geo_lookup`=true（关掉 = 完全不联网，地理成就停住） —— **4 键** |
 | `library` | `novels_dir`（留空 = `~/novels`） —— **1 键** |
 | `toc` | `patterns`（**追加**的章节标题正则，多个用 `\|` 分隔；内置规则始终生效）、`cache_dir`（派生缓存目录，默认跟随数据目录） —— **2 键** |
@@ -85,7 +85,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | --- | --- |
 | `wreader/` | 包本体（**12** 个模块 + `data/achievements.json`） |
 | `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
-| `tests/` | **11 个文件**（10 个测试文件 + `conftest.py`），**592** 项 |
+| `tests/` | **11 个文件**（10 个测试文件 + `conftest.py`），**618** 项 |
 | `tools/` | **开发期校验脚本**（**8** 个 + `README.md`）：文档锚点 / 数字对拍 / 注释覆盖 / 折行 / 绘制 / 配色 / 鼠标 / 成就；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -134,7 +134,7 @@ git add -A && git commit -m "..."             # 提交
 # `git -c http.proxy= push` 这种"绕过"会挂在直连上（实测只能 pkill git-remote-https）
 
 # 开发
-.venv/bin/python -m pytest tests/              # 592 项，约 20 秒
+.venv/bin/python -m pytest tests/              # 618 项，约 8~26 秒（随负载浮动）
 .venv/bin/python -m pytest tests/test_reader.py              # 单文件
 .venv/bin/python -m pytest -k "streak or heatmap"            # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings / 0 informations
@@ -143,7 +143,7 @@ HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 .venv/bin/python -m
 # 开发期校验脚本（tools/，详见 tools/README.md；都能从任意目录运行）
 .venv/bin/python tools/check_docs.py              # 文档锚点 + 代码围栏配对（RESULT: OK）
 .venv/bin/python tools/check_doc_numbers.py       # README 里的行数/测试项数与实际对拍（ALL OK）
-.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 3099）
+.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 3204）
 .venv/bin/python tools/verify_wrap.py             # 折行属性（OK: 40077 checks passed）
 .venv/bin/python tools/verify_draw.py             # 绘制不越界（OK: 140 draw checks passed）
 .venv/bin/python tools/verify_colors.py           # 需 pty：script -q /dev/null .venv/bin/python tools/verify_colors.py
@@ -181,27 +181,30 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
   （成就状态、书库索引）的用例间接覆盖，后者只有 `__version__`。
   想零风险打磨 `lock.py` 的 `fcntl.flock` 窗口，用 `tools/` 下临时加脚本调，**别把新脚本留在 `/tmp`**。
 
-## 当前测试规模（2026-09-26 实测：`592 passed in 22.52s`）
+## 当前测试规模（2026-09-26 实测：`618 passed in 14.59s`）
 
 | 文件 | 项数 | 侧重 |
 | --- | --- | --- |
-| `test_reader.py` | 174 | `Pager`、`FakeStdscr`、折行、滚轮 / 触摸、标记与浮层 |
+| `test_reader.py` | 199 | `Pager`、`FakeStdscr`、折行、滚轮 / 触摸、标记与浮层、**自动翻页（排期 / 调速 / 到末自停）** |
 | `test_library.py` | 132 | 导入 / 书库索引 / 章节 / 正文读写 / `prune` 与 `clear` |
 | `test_stats.py` | 70 | 时长统计、热力图、连续天数、`--json` |
 | `test_achievements.py` | 51 | 表达式求值、事件指标、解锁与去重 / `merge_states` |
-| `test_config.py` | 49 | `SCHEMA`、TOML 读写、旧配置迁移 |
+| `test_config.py` | 50 | `SCHEMA`、TOML 读写、旧配置迁移、**自动翻页两个键的默认值与类型** |
 | `test_cli.py` | 45 | 命令分发与输出形态（含 `data` / `prune` / `clear`） |
 | `test_geo.py` | 31 | 位置解析 / 缓存 / 离线降级 |
 | `test_toc.py` | 18 | 章节正则 / epub 目录 / 缓存失效 |
 | `test_env.py` | 14 | 云主机 / WSL / tmux / 可编辑安装信号 |
 | `test_transfer.py` | 8 | 搬运包导出 / 合并 / 拒绝坏包 / 缺书计数 |
 
-> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 592；
+> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 618；
 > `tools/check_doc_numbers.py` 会把这些数字与 README 表格对拍（当前 `RESULT: ALL OK`）。
 > 2026-09-25 之前是 **832** 项（含 `test_notes` / `test_translate` / `test_translator` / `test_vocab`），
 > 2026-09-25 是 559 项 / 9 个测试文件。
 > 2026-09-26 新增 `test_transfer.py` 8 项，其余增量来自 `test_library.py`（119 → 132）与
 > `test_cli.py`（33 → 45）。
+> 同日晚些的**自动翻页**再加 25 项（`test_reader.py` 174 → 199）+ 1 项（`test_config.py` 49 → 50）
+> → 592 变 **618**；跑全量约 8~26 秒（本会话实测 7.94 / 14.59 / 26.35 秒，随负载浮动，
+> 别拿单次耗时当回归判据）。
 
 ## 开发用样例数据
 

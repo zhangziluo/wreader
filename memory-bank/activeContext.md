@@ -4,19 +4,22 @@
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**592 passed**（本机 22.52s）、`npx pyright` **0 errors / 0 warnings /
+代码库处于**干净、全绿**状态：**618 passed**（本机 8~26 秒，本会话实测 14.59 / 26.35 秒）、`npx pyright` **0 errors / 0 warnings /
 0 informations**、`tools/` 的 **8** 个校验脚本全绿（`check_docs` OK / `check_doc_numbers` ALL OK /
-`check_comments` **3099** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` /
+`check_comments` **3204** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` /
 `verify_mouse` 8 项 / `verify_achievements` 19 项）。
-本会话（2026-09-26）做的是**数据搬家与清理**：新增 `werd data export/import`（把阅读时长 + 成就装进
-一个 JSON 包搬到另一台电脑）、`werd prune`（摘掉正文文件已被删除的失效书目）、`werd clear`
-（清空书库、保留统计），见 ㉜。**代码 + 文档都改完了，还没提交**（下一步就是 commit + push）。
+本会话（2026-09-26，紧接在已提交的 ㉜ 之后）做的是**自动翻页**：阅读器里按 `a` 让正文自己往下走、
+`>` / `<` 调速，配置加 `reader.auto_scroll_interval` / `reader.auto_scroll_step` 两个键，
+中英文档与《使用指南.md》都补了说明，见 ㉝。**代码 + 文档 + 测试 + 记忆库都改完了，还没提交**
+（下一步就是 commit + push）。
 
-- `wreader/` = **12** 个 `.py` / **9,561** 行（新增 `transfer.py` 198 行）；`tests/` = 11 个文件 /
-  **592** 项；`tools/` = 8 个 `.py`。
-- 配置 **4 个 section / 16 个键**；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
-- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3099** 条语句上方没有紧邻注释行
-  （2026-09-25 测得 2771，本会话新增代码把它抬高；口径与处置见 `progress.md` 待办 #1）。
+- `wreader/` = **12** 个 `.py` / **9,803** 行（`reader.py` **3036**、`config.py` **971**）；
+  `tests/` = 11 个文件 / **618** 项；`tools/` = 8 个 `.py`。
+- 配置 **4 个 section / 18 个键**（新增 `reader.auto_scroll_interval` / `reader.auto_scroll_step`）；
+  状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
+- 阅读器新增三个键：`a`（自动翻页开关）、`>` / `+` / `=`（加速）、`<` / `-` / `_`（减速）。
+- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3204** 条语句上方没有紧邻注释行
+  （2026-09-25 是 2771 → ㉜ 之后 3099 → 本会话的新测试又抬高到 3204；口径与处置见 `progress.md` 待办 #1）。
 - ⚠️ 遗留数据（`vocab.json`、`notes/*.md`、旧译文缓存）**仍被只读**，`werd stats --json`
   的 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键仍在（脚本兼容）。
 - ⚠️ IDE 里飘的**幽灵告警**（仓库根那份 **143 行**野生 `cli.py`，见 ㉔ / ㉕）：
@@ -26,7 +29,7 @@
   README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动（⑫）、翻页保留 3 行（⑭）、
   翻页按屏幕行推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)`（⑯）、`werd continue`（⑰）、
   `./install.sh`（⑱）、CLI 改名 `werd`（⑲）、目录浮层 + `werd toc`（⑳）、
-  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
+  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）、自动翻页（㉝）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1208,7 +1211,8 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 1. **源码删净**：删 `wreader/translator.py`、`wreader/translate/`（8 文件）、`wreader/vocab.py`、
    `wreader/notes.py`；`reader.py` 移除 `m` / `o` / `v` / `l` / `c` / `t` / `T` 键与所有标记模式、
    笔记面板、译文弹窗代码；`cli.py` 移除 `translate` / `vocab` / `notes` 三个子命令与 `_HANDLERS` 条目；
-   `config.SCHEMA` 从 7 段 37 键缩到 **4 段 16 键**（`[translator]` / `[translate]` / `[vocab]` 全删）。
+   `config.SCHEMA` 从 7 段 37 键缩到 **4 段 16 键**（`[translator]` / `[translate]` / `[vocab]` 全删；
+   2026-09-26 的 ㉜ / ㉝ 之后是 **18 键**，`[reader]` 段多了自动翻页两条）。
 2. **成就保全**（关键取舍）：**一条成就都不删**。翻译 / 词汇 / 笔记相关的 4 条
    （`vocab_100` 📝 词汇积累、`vocab_500` 🧠 生词狂魔、`note_master` 🖊️ 笔记达人、
    `translate_maniac` 🔤 翻译狂魔）保留原条件，靠两个**只读**函数继续供数：
@@ -1329,7 +1333,7 @@ werd prune（正文在）→ 没有失效书目；rm 掉正文后跑 werd list �
 werd clear → 已清空书库：1 本书及其正文文件已删除 / 阅读时长与成就已保留；之后 werd stats 仍是 10分钟
 ```
 
-**全量验证（2026-09-26）**：`pytest tests/` → **592 passed in 22.52s**；`npx pyright` → 0 / 0 / 0；
+**全量验证（2026-09-26，㉜ 当时）**：`pytest tests/` → **592 passed in 22.52s**；`npx pyright` → 0 / 0 / 0；
 `check_docs` → RESULT: OK；`check_doc_numbers` → RESULT: ALL OK（含 `transfer.py` 198 行与
 `test_transfer.py` 8 项）；`check_comments` → **TOTAL: 3099**；`verify_wrap` → 40077；`verify_draw` → 140；
 `verify_achievements.py`（真 pty）→ 全部通过（改动动了 `achievements.py`，所以照规矩跑了一遍）。
@@ -1339,12 +1343,54 @@ werd clear → 已清空书库：1 本书及其正文文件已删除 / 阅读时
 `systemPatterns.md` 补模式 #12 与坑 #34–#37、模块表补上此前漏列的 `toc.py` 并新增 `transfer.py` 行。
 **已提交并推送**（同一提交 19 个文件 / +1,964 −98；`git status -sb` 为 `## main...origin/main`，无领先/落后）。
 
+> ℹ️ 本段（㉜）里的 **592 项 / 9,561 行 / 注释缺口 3099 / `reader.py` 2799 行 / `config.py` 966 行**
+> 都是**当时**的实测值，已被紧接其后的 ㉝（自动翻页）覆盖：现在是 **618 项 / 9,803 行 /
+> 缺口 3204 / `reader.py` 3036 / `config.py` 971**（见本文件顶部的「当前状态一句话」）。
+> 留着它们是为了说明「这一轮加了多少东西」，引用时请用 ㉝ 的数字。
+
+### ㉝ 自动翻页：免手翻模式（2026-09-26）
+
+**需求**：按一下 `a`，正文自己往下走（吃饭 / 织毛衣 / 跟读书会进度时不用手），能调速、能暂停。
+
+| 改动 | 内容 |
+| --- | --- |
+| `wreader/reader.py`（**2799 → 3036 行**） | `Pager` 新增 `auto_scroll_interval` / `auto_scroll_step` / `auto_scroll` / `auto_scroll_deadline` 与 `set_auto_scroll` / `toggle_auto_scroll` / `defer_auto_scroll` / `auto_scroll_wait` / `auto_scroll_tick` / `auto_scroll_pace` / `adjust_auto_scroll_speed`；常量 `DEFAULT_AUTO_SCROLL_INTERVAL=5.0` / `DEFAULT_AUTO_SCROLL_STEP=1` / `AUTO_SCROLL_MIN_INTERVAL=0.5` / `AUTO_SCROLL_MAX_INTERVAL=600.0`；`_poll_timeout_ms()` 把每帧的 `stdscr.timeout` 收到「离下一拍还剩多久」；`_message_row` 开着时改报速度；`_HINT` / `_HELP_LINES` 补键位 |
+| `wreader/config.py`（**966 → 971 行**） | `SCHEMA` 的 `[reader]` 加 `auto_scroll_interval`（默认 5.0）/ `auto_scroll_step`（默认 1）→ **4 段 18 键**（`reader` 11 键） |
+| `tests/test_reader.py`（**174 → 199 项**） | 默认值 / 范围夹取 / `_format_seconds` / 速度文案 / 排期 / `defer` / tick 前进 / 到书末自停并提示 / 按**屏幕行**走过折行 / 自动模式只算进度不刷按键成就 / `_poll_timeout_ms` / 消息行 / 开关键与调速键 |
+| `tests/test_config.py`（**49 → 50 项**） | `SCHEMA` 含两个新键且默认值对、`coerce_value` 认数字、非数字抛 `ConfigError` |
+| 文档 | `README.md` / `README.en.md`（特性表 + 按键表 + 设置项 + 测试数字）、`使用指南.md`（新增「场景 D：手没空，让它自己翻」+ 总表两行 + 参数示例） |
+
+**口径（都写进文档里了）**：
+- 前进单位是**屏幕行**（`auto_scroll_step`），与 `next_page` / `scroll` 同一套单位 ——
+  超长段落的折行会**一行一行**走过，不会整段跳过；
+- 间隔夹在 **0.5s ~ 600s**；`>` / `+` / `=` 加速（÷2）、`<` / `-` / `_` 减速（×2），调速后**重新排期**；
+- **任何按键 / 滚轮 / 窗口变化都 `defer_auto_scroll()`**，把下一拍推后一整间隔 —— 正在打字的人不该被抢页；
+- 到书末**自动关掉并提示** `已经读到全书末尾，自动翻页已停`（免手模式静默空转比没有更糟）；
+- 自动翻页**照常算阅读进度与时长**，但**不喂** `page_streak` 与按键类成就（那是给手动阅读的）。
+
+**实测（沙箱 `/tmp/wr-as`，不碰真实数据）**：
+
+```
+werd config                                 # 18 键表格，含 reader.auto_scroll_interval=5 / auto_scroll_step=1
+werd config reader.auto_scroll_interval 2   → reader.auto_scroll_interval = 2 (saved)
+werd config reader.auto_scroll_step 3       → reader.auto_scroll_step = 3 (saved)
+grep auto_scroll ~/.wreader/settings.toml   → auto_scroll_interval = 2 / auto_scroll_step = 3（带中文行尾注释）
+werd config reader.auto_scroll_interval abc
+   → error: 'reader.auto_scroll_interval' expects a number, got 'abc'    （退出码 1）
+```
+
+**全量验证（2026-09-26）**：`pytest tests/` → **618 passed**（同一台机器两次：14.59s / 26.35s）；`npx pyright` → **0 / 0 / 0**；
+`check_docs` → OK；`check_doc_numbers` → **ALL OK**（618 总数 + `test_reader` 199 / `test_config` 50 /
+`reader.py` 3036 / `config.py` 971）；`check_comments` → **3204**；`verify_wrap` → 40077；`verify_draw` → 140。
+⚠️ 本会话**没跑** `verify_mouse.py` / `verify_achievements.py` / `verify_colors.py`：没动鼠标与成就逻辑，
+`a` 键也不在 `verify_mouse.py` 的键盘基准里 —— 下次动这三块时补跑。
+
 ## 待办 / 下一步
 
 > 本文件只列"下一步做什么"；每条的理由与实测数字在 `progress.md` 的待办里（不在两处各写一份）。
 
-0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3099** 条缺口
-   （2026-09-26 复测：上一次是 2771，本会话新增的 `transfer.py` 与三个测试文件又添了几百条）。
+0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3204** 条缺口
+   （2026-09-26 复测：上一次是 2771 → ㉜ 之后 3099 → 本会话的自动翻页测试又添了 100 多条）。
    要么正式把口径定为"一段逻辑配一段注释"（文档已如此），要么对改到的文件做 `--strict` 增量门禁。
 1. **`reader.theme` 仍未实现**（预留项，改了没效果）：在 `_init_colors()` 里按主题 `init_pair()`，
    并给正文 / 状态栏 / 书签分配 color pair；务必保住 `use_default_colors()` 的透明背景（背景用 `-1`），

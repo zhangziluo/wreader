@@ -67,8 +67,8 @@
 - 每条逻辑语句上方保留一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"），
   同时保留原有 docstring 与英文注释。
   ⚠️ **实测校正（2026-09-26 复测）**：这条是**目标**，不是既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3099** 条语句上方没有紧邻
-  注释行（最多的是 `test_reader.py` 591、`reader.py` 480、`achievements.py` 256、
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3204** 条语句上方没有紧邻
+  注释行（最多的是 `test_reader.py` 664、`reader.py` 509、`achievements.py` 256、
   `library.py` 233；2026-09-25 复测是 2771）。
   早先记录的 "TOTAL: 0" 是脚本 bug 造成的假绿，别再引用它。
   实务上遵循的是"一段逻辑配一段中文注释"的风格，别执行到每条 `return` / `assert` 都单独加。
