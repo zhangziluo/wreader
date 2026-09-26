@@ -1,6 +1,6 @@
 # Progress — 已完成 / 待办 / 已知问题
 
-> 项目整体进度与决策演变。最后更新：**2026-09-25**。
+> 项目整体进度与决策演变。最后更新：**2026-09-26**。
 > ⚠️ **2026-09-25 的功能裁剪**：翻译 / 生词本 / 笔记三个功能已**整体删除**（源码、测试、工具、
 > 文档全清），老数据文件改为**只读计数**供成就使用。本文里 2026-09-23 及以前提到这三个功能的段落
 > 属于**历史记录**（解释当时为什么那样做），不代表现状；现状以本节及 `projectbrief.md` 为准。
@@ -10,15 +10,15 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **559 passed in 11.76s**，全离线、不碰真实数据 |
+| 测试 | **592 passed in 22.52s**，全离线、不碰真实数据（含新增的 `tests/test_transfer.py` **8** 项） |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **2771** 条语句上方没有紧邻注释行（口径与处置见待办 #4） |
-| 文档 | `README.md`（中文主文档）、`README.en.md`、`使用指南.md`；数字由 `tools/check_doc_numbers.py` 自动对拍（**ALL OK**） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **3099** 条语句上方没有紧邻注释行（2026-09-25 是 2771；口径与处置见待办 #1） |
+| 文档 | `README.md`（中文主文档）、`README.en.md`、`使用指南.md`；两份 README 的数字由 `tools/check_doc_numbers.py` 自动对拍（**ALL OK**），`使用指南.md` 与 memory-bank 的数字靠手工同步（脚本不管） |
 | 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`）（提交数每次提交都会变，故不写死；判据是 `git status` 不显示领先/落后） |
-| CLI 冒烟 | `werd --version` → `werd 0.1.0` |
-| 编译 | `py_compile` 全部 `.py` 通过（wreader **11** + tests **10** + tools **8**） |
-| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、注释报告 2771、折行 40077、绘制 140、鼠标 8 项、成就 19 项、配色干净退出 |
-| 包规模 | `wreader/` **11** 个 `.py` / **8,840** 行 + `data/achievements.json`（348 行 / 48 条） |
+| CLI 冒烟 | `werd --version` → `werd 0.1.0`；`werd data export/import`、`werd prune`、`werd clear` 已在沙箱里跑通全链路（见 `activeContext.md` ㉜） |
+| 编译 | `py_compile` 全部 `.py` 通过（wreader **12** + tests **11** + tools **8**） |
+| 开发期校验 | `tools/` 全绿：文档锚点 OK、数字对拍 ALL OK、注释报告 3099、折行 40077、绘制 140、鼠标 8 项、成就 19 项、配色干净退出 |
+| 包规模 | `wreader/` **12** 个 `.py` / **9,561** 行 + `data/achievements.json`（348 行 / 48 条） |
 
 
 ## 已完成（可用的功能）
@@ -35,6 +35,23 @@
   表格复用 `_book_table`（带 id），把 id 抄给 `werd read` 就能续读；一本都没读过时给提示并返回 `0`。
   纯函数在 `library.recent_books(limit=3)`：跳过 `last_read` 为空的书，时间戳是定长 ISO 字符串，
   所以直接按字典序倒排（不解析 datetime）。
+
+### 数据搬家与书库清理（2026-09-26 新增）
+- **`werd data export <文件>` / `werd data import <文件>`**（`wreader/transfer.py`，**198 行**）：
+  把阅读时长与成就装进一个**纯 UTF-8 JSON 包**（`kind=werd-data` / `version=1` / 导出时间 / 摘要 /
+  阅读记录 / 成就解锁），拷到另一台电脑合并进去 —— 换机、重装系统不再清零。
+- 包里**只收「有阅读痕迹的书」**（有 `last_read` 或 `total_time_seconds`）：只导入、没读过的书不进包。
+- 合并是**只加不减**：时长与每日桶相加、会话按内容去重、书签取并集、`finished` 粘住、
+  位置只在本机没有历史时才采用；本机没有的书记进 `skipped`（提示先 `werd import` 再导一次）。
+  ⚠️ 因此**同一个包导入两次 = 时长翻倍**（已写进三份文档）。
+- 坏包不炸栈：文件不存在 / 是目录 / 不是 JSON / `kind` 不对 / `version` 比本机新 →
+  一行 `error: ...` + 退出码 1。
+- **`werd prune`**：摘掉「正文文件已被删除」的失效书目（`library.prune_missing_books`），
+  且**每个命令运行前自动对账一次**（`cli._auto_prune_books`；`clear` / `prune` 自己跳过，免得白干）。
+- **`werd clear`**：清空书库（删记录 + 删转换后的正文），**保留**阅读时长与成就 ——
+  它忘掉的是「有哪些书」，不是「读了多久」。
+- 测试：新增 `tests/test_transfer.py`（8 项）；`test_cli.py` 33 → **45**、`test_library.py` 119 → **132**。
+- 实测证据（真 CLI + `/tmp` 沙箱，逐条输出）见 `activeContext.md` ㉜。
 
 ### 目录 / 章节跳转（2026-09-23 新增）
 - `wreader/toc.py`：章节提取（内置正则 + `toc.patterns` 自定义）、epub `nav.xhtml` / `toc.ncx` 解析、
@@ -130,19 +147,16 @@
   全程用 `.venv/bin/python -m pip` 而**不 activate**（守住"不污染 PATH"这条约定），
   并自动往 `~/.bashrc` / `~/.zshrc` 写别名 —— 装完重启终端即可用。
   选项：`--dev`（多装 pytest）/ `--no-alias`（不碰 rc）/ `--help`；用 `sh install.sh` 跑会自动 `exec bash` 转交。
-- **559** 项自动化测试（全离线、每测试独立 `tmp_path`；分文件计数见 `techContext.md`）。
+- **592** 项自动化测试（全离线、每测试独立 `tmp_path`；分文件计数见 `techContext.md`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
-- `wreader/` 11 个 + `tests/` 10 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
-  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **2771** 条语句上方没有紧邻注释行），
-  实际遵循的风格是"一段逻辑配一段中文注释"，详见待办 #4。
+- `wreader/` 12 个 + `tests/` 11 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
+  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **3099** 条语句上方没有紧邻注释行），
+  实际遵循的风格是「一段逻辑配一段中文注释」，详见待办 #1。
 - 校验脚本已从 `/tmp` 搬进 **`tools/`**（现共 **8** 个 `.py` + `README.md`）：`check_docs.py`、
   `check_doc_numbers.py`、`check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py`、
   `verify_mouse.py`、`verify_achievements.py`（真 pty 验证成就通知 / 帮助页 / 恢复流程）。
   统一从 `__file__` 推算仓库根（任意目录可跑）、退出码 0/1（可接 CI），并纳入 `[tool.pyright]`。
   ⚠️ 2026-09-25 删功能时**连专用脚本一起删**（`verify_notes.py` 随笔记面板删除，别留死脚本）。
-- **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
-  `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
-  从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
 - **已 git 化并推送到 GitHub**（2026-09-22）：首个提交 `7ecc3eb`，32 文件 / 15,843 行，
   `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
   从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
@@ -153,9 +167,10 @@
 > 校验脚本搬家）—— 那些内容已写进上面的「已完成」或 `activeContext.md`，不再占待办位。
 
 ### 高优先级
-1. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，至今未拍板；2026-09-25 复测 **2771**）：
+1. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，至今未拍板；2026-09-26 复测 **3099**）：
    严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 还有这么多条不满足
-   （最多的是 `test_reader.py`、`reader.py`、`achievements.py`）。
+   （最多的是 `test_reader.py` 591、`reader.py` 480、`achievements.py` 256；2026-09-25 是 2771，
+   新增的 `transfer.py` 28 + `test_transfer.py` 71 与几处改动共添了 300 多条）。
    三个选项：
    (a) 把约定口径正式改成"一段逻辑配一段中文注释"，不再声称 100%
    —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条），但脚本仍按严格口径报告；
@@ -203,6 +218,10 @@
 | 老 `settings.toml` 里的死键不会自动清理 | 每次 `werd config` 都会多打几行 `warning:` | 刻意如此（不报错、不改用户文件）；见待办 #8 |
 | 终端自身限制透明 | 若终端在备用屏幕禁用透明度，应用无法绕过 | 属终端设置，非应用缺陷 |
 | IDE 里有指向**仓库根 `cli.py`** 的幽灵告警（该文件不存在） | 会让人照报错去改 `wreader/cli.py`，白改 | 来源是 `editor` 超长替换"假成功"留下的 143 行野生碎片（坑 #20）；**判据：报错路径 `ls` 不到 → 直接忽略，改看 `npx pyright` + `pytest`** |
+
+| `werd data export/import` 的包**不加密、也不含正文** | 包是明文 JSON，拿到它就能看到书名、阅读时长与位置 | 只装「时长 + 成就 + 位置」，正文要自己拷 `~/novels/`；介意隐私就别把包丢在共享目录 |
+| 搬运包**重复导入会把时长再加一遍** | 同一台机器导两次 = 时长翻倍（实测 600 → 1200 → 1800 秒） | 合并只加不减，没法从数据判断「这段时长是不是我自己的」；三份文档已写明「同一份包导两遍，时长就算两遍」（`README.md` / `README.en.md` / `使用指南.md`） |
+| 从没读过的书**不进搬运包** | 刚导入、还没打开的书在新机器拿不到记录（本来也没有记录） | 位置与时长都是空的，搬过去只能是空壳；重新 `werd import` 更直接 |
 
 ## 决策演变（记录为什么变成现在这样）
 
@@ -268,4 +287,9 @@
 | **2026-09-25** | 老配置里的死键只**警告**、不报错、不改文件（`Config.unknown` → `cli._print_config`） | 用户的 `settings.toml` 里还留着 `[translator]` / `[translate]` / `[vocab]` 三段共 20+ 键。报错等于"升级即打不开"，静默忽略等于"以为还在用"。警告是唯一既诚实又不伤人的做法；`werd config <path> <value>` 写入不存在的键**仍然报错**（打错字必须被发现） |
 | **2026-09-25** | 白名单保留 `word_add` / `note_add`，`werd stats --json` 保留 `vocab_count` / `translations` / `translate_hits` / `notes_count` | 这两类名字已写进 README 与老用户的脚本里。少一个键，别人的解析脚本就 KeyError；少一个事件，引擎会把它当未知事件丢掉。保留的成本是"多两个没人调的常量"，收益是不破坏已文档化的接口 |
 | **2026-09-25** | 词汇/笔记的只读统计函数**吞掉一切异常返回 0**，而不是向上抛 | 它们挂在每次 `werd stats` 与每次成就判定的路径上：老数据文件坏掉、目录没权限、编码不对，都只该让那个数字变成 0，**绝不能让阅读器打不开** |
+| **2026-09-26** | 加 `werd data export/import`（**手动**拷文件），而不是做云同步 / 账号 | 非目标里的「不做云同步 / 账号」是产品边界，而用户真正要的是换机时**不会白读**：一个纯 JSON 包 + 两条命令就够，零服务端、零隐私面。包里的 `version` 字段留给将来升级格式 |
+| **2026-09-26** | 合并**只加不减**（时长相加、会话去重、`finished` 粘住、位置只在本机没有历史时才采用） | 两台机器各自读的时长都该算数，数据本身判不出「哪份更新 / 更全」。代价是重复导入会翻倍 —— 明说比偷偷取 max（会丢时长）更诚实 |
+| **2026-09-26** | 搬运包**只收有阅读痕迹的书** | 位置 / 时长 / 书签全空的记录搬过去也只是空壳，还会让「已合并 N 本」虚高；新书本来就该走 `werd import` |
+| **2026-09-26** | 加 `werd prune`（索引 ↔ 正文目录对账），并让**每个命令启动前自动跑一次**，`clear` / `prune` 自己跳过 | 手删 `~/novels/xxx_utf8.txt` 留下的死记录会让 `werd list` 一直显示、`werd read` 只能报错。自动对账在日常使用里就把脏数据消掉；两个跳过是为了不白干、也不刷两遍提示 |
+| **2026-09-26** | `werd clear` 清书库但**保留**阅读时长与成就 | 用户说「清空书库」时想清的是书，不是自己攒了几百小时的统计与成就。文案直接写明保留了什么，避免误解 |
 

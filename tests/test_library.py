@@ -869,6 +869,275 @@ def test_search_uses_the_stored_library_by_default(imported) -> None:
     assert [book_id for book_id, _ in results] == [imported["zh"]]
 
 
+# ----------------------------------------------- clearing and pruning the shelf
+def test_clear_library_drops_the_books_but_keeps_the_reading_history(imported) -> None:
+    """``clear`` empties the shelf; time spent reading and achievements stay."""
+    # 先攒一点"历史"：累计时长、每日桶、成就段落，稍后都要能活下来
+    document = library.load_library()
+    document["stats"]["total_read_time"] = 3600
+    document["stats"]["daily_read_time"] = {"2026-02-01": 3600}
+    document["achievements"]["unlocked"] = ["name_egg"]
+    library.save_library(document)
+    # 记下两本正文文件的位置：等一下要确认它们真的被删掉了
+    paths = [Path(str(book["file_path"])) for _book_id, book in library.list_books()]
+
+    removed = library.clear_library()
+
+    # 返回被摘掉的 (id, 记录)，按标题排序（英文在前、中文在后）
+    assert [book["title"] for _book_id, book in removed] == [
+        "Jane Austen-Pride and Prejudice",
+        "三体",
+    ]
+    # 书架空了，正文文件也一起没了
+    assert library.list_books() == []
+    assert not any(path.exists() for path in paths)
+    # 只有书目计数归零：阅读时长、每日桶、成就段落原样保留
+    after = library.load_library()
+    assert after["stats"]["total_books"] == 0
+    assert after["stats"]["total_read_time"] == 3600
+    assert after["stats"]["daily_read_time"] == {"2026-02-01": 3600}
+    assert after["achievements"]["unlocked"] == ["name_egg"]
+
+
+def test_clear_library_on_an_empty_shelf_writes_nothing() -> None:
+    # 空书库：直接返回空列表，连索引文件都不该被建出来
+    assert library.clear_library() == []
+    assert not config.library_file().exists()
+
+
+def test_prune_missing_books_drops_only_the_vanished_ones(imported) -> None:
+    # 模拟"在 novels 文件夹里手动 rm"：删掉中文书的正文文件
+    book = library.get_book(imported["zh"])
+    assert book is not None
+    Path(str(book["file_path"])).unlink()
+
+    removed = library.prune_missing_books()
+
+    # 只有那一本被摘掉，索引里也确实没有它了
+    assert [book_id for book_id, _book in removed] == [imported["zh"]]
+    assert [book_id for book_id, _book in library.list_books()] == [imported["en"]]
+    # 再跑一次：没有失效书目，也不再动磁盘
+    assert library.prune_missing_books() == []
+
+
+def test_prune_missing_books_keeps_a_record_without_a_path(isolated_home) -> None:
+    # 手写的记录可能压根没有 file_path：那是"不知道"，不是"已删除"
+    isolated_home.data.mkdir(parents=True, exist_ok=True)
+    config.library_file().write_text(
+        json.dumps({"books": {"hand": {"title": "手抄本"}}}), encoding="utf-8"
+    )
+    assert library.prune_missing_books() == []
+    assert library.get_book("hand") is not None
+
+
+def test_removing_a_book_also_drops_its_cached_toc(imported) -> None:
+    # 目录缓存是可重建的附属品：书没了就顺手删掉，别在 cache/ 里留孤儿文件
+    from wreader import toc
+
+    book = library.get_book(imported["zh"])
+    assert book is not None
+    cache = toc.save_toc(imported["zh"], [{"title": "第一章", "line": 0}], None)
+    assert cache.is_file()
+    # remove_book 走的就是这条清理路径
+    library.remove_book(imported["zh"])
+    assert not cache.exists()
+
+    # prune 同理：再造一份缓存，然后把正文文件删掉
+    other = library.get_book(imported["en"])
+    assert other is not None
+    cache = toc.save_toc(imported["en"], [{"title": "Chapter One", "line": 0}], None)
+    Path(str(other["file_path"])).unlink()
+    library.prune_missing_books()
+    assert not cache.exists()
 
 
 
+# --------------------------------------------------- the transferable data slice
+def test_reading_data_copies_progress_and_the_daily_buckets(imported) -> None:
+    # 给中文书留下完整的阅读痕迹，并攒一点全局时长
+    document = library.load_library()
+    document["stats"]["total_read_time"] = 600
+    document["stats"]["daily_read_time"] = {"2026-02-01": 600}
+    document["books"][imported["zh"]]["progress"].update(
+        {
+            "current_line": 4,
+            "percentage": 50.0,
+            "last_read": "2026-02-01T20:00:00",
+            "total_time_seconds": 600,
+            "sessions": [
+                {
+                    "start": "2026-02-01T19:50:00",
+                    "end": "2026-02-01T20:00:00",
+                    "lines_read": 4,
+                }
+            ],
+            "bookmarks": [{"line": 1, "label": "起点"}],
+        }
+    )
+
+    payload = library.reading_data(document)
+
+    # 全局部分：累计时长 + 每日桶
+    assert payload["total_read_time"] == 600
+    assert payload["daily_read_time"] == {"2026-02-01": 600}
+    # 只有"读过"的那一本进了包（没打开过的英文书没有时长可搬）
+    assert list(payload["books"]) == [imported["zh"]]
+    entry = payload["books"][imported["zh"]]
+    # 标题只为人看，真正的身份是 book_id
+    assert entry["title"] == "三体"
+    assert entry["current_line"] == 4
+    assert entry["total_time_seconds"] == 600
+    assert entry["sessions"][0]["lines_read"] == 4
+    assert entry["bookmarks"] == [{"line": 1, "label": "起点"}]
+
+
+def test_reading_data_skips_books_that_were_never_opened(imported) -> None:
+    # 两本书都还没读过：包里一本书都不带，但空壳结构仍然完整
+    assert library.reading_data(library.load_library()) == {
+        "total_read_time": 0,
+        "daily_read_time": {},
+        "books": {},
+    }
+
+
+def test_reading_data_tolerates_a_broken_document() -> None:
+    # 形状不对的输入（手改坏的 JSON）也要给回空壳，而不是抛异常
+    assert library.reading_data({})["books"] == {}
+    assert library.reading_data({"books": "junk"})["books"] == {}
+
+
+# ---------------------------------------------------------- merging a bundle in
+def test_merge_reading_data_adds_the_durations_and_dedupes_sessions(imported) -> None:
+    # 本机已经读过一点：100 秒、一场会话、第 5 行有个书签
+    document = library.load_library()
+    document["stats"]["total_read_time"] = 100
+    document["stats"]["daily_read_time"] = {"2026-02-01": 100}
+    session = {
+        "start": "2026-02-01T19:00:00",
+        "end": "2026-02-01T19:01:00",
+        "lines_read": 1,
+    }
+    document["books"][imported["zh"]]["progress"].update(
+        {
+            "sessions": [session],
+            "total_time_seconds": 100,
+            "current_line": 6,
+            "bookmarks": [{"line": 5, "label": ""}],
+        }
+    )
+    # 另一台机器导出的包：多了 50 秒、同一场会话（去重）+ 一场新会话、第 2 行的书签
+    payload = {
+        "total_read_time": 50,
+        "daily_read_time": {"2026-02-01": 30, "2026-02-02": 20},
+        "books": {
+            imported["zh"]: {
+                "title": "三体",
+                "sessions": [
+                    dict(session),
+                    {
+                        "start": "2026-02-02T08:00:00",
+                        "end": "2026-02-02T08:05:00",
+                        "lines_read": 2,
+                    },
+                ],
+                "total_time_seconds": 50,
+                "last_read": "2026-02-02T08:05:00",
+                "current_line": 7,
+                "bookmarks": [{"line": 2, "label": ""}],
+                "finished": True,
+            }
+        },
+    }
+
+    summary = library.merge_reading_data(document, payload)
+
+    # 摘要：合并了 1 本、跳过 0 本、搬来 50 秒
+    assert summary == {"books": 1, "skipped": 0, "seconds": 50}
+    # 全局时长与每日桶都相加
+    assert document["stats"]["total_read_time"] == 150
+    assert document["stats"]["daily_read_time"] == {"2026-02-01": 130, "2026-02-02": 20}
+    progress = document["books"][imported["zh"]]["progress"]
+    # 同一场会话只留一条，新的那场按 start 排在后面
+    assert [item["start"] for item in progress["sessions"]] == [
+        "2026-02-01T19:00:00",
+        "2026-02-02T08:00:00",
+    ]
+    assert progress["total_time_seconds"] == 150
+    # 书签取并集：包里的第 2 行 + 本机的第 5 行
+    assert [mark["line"] for mark in progress["bookmarks"]] == [2, 5]
+    # 读完了就是粘性的；位置保持本机的（这本本机读过，不该被对方顶掉）
+    assert progress["finished"] is True
+    assert progress["current_line"] == 6
+
+
+def test_merge_reading_data_adopts_the_position_of_an_untouched_book(imported) -> None:
+    # 本机没读过这本书：位置与百分比一并接过来，接着对方停下的地方读
+    document = library.load_library()
+    payload = {
+        "total_read_time": 10,
+        "daily_read_time": {"2026-02-03": 10},
+        "books": {
+            imported["en"]: {
+                "title": "Pride and Prejudice",
+                "current_line": 5,
+                "percentage": 80.0,
+                "last_read": "2026-02-03T09:00:00",
+                "total_time_seconds": 10,
+                "sessions": [
+                    {
+                        "start": "2026-02-03T08:59:00",
+                        "end": "2026-02-03T09:00:00",
+                        "lines_read": 2,
+                    }
+                ],
+            }
+        },
+    }
+
+    library.merge_reading_data(document, payload)
+
+    progress = document["books"][imported["en"]]["progress"]
+    assert progress["current_line"] == 5
+    assert progress["percentage"] == 80.0
+    assert progress["last_read"] == "2026-02-03T09:00:00"
+
+
+def test_merge_reading_data_counts_the_books_this_machine_does_not_have() -> None:
+    # 包里有一本本机没有的书：没有记录可挂，只计数不报错
+    summary = library.merge_reading_data(
+        library.load_library(),
+        {"total_read_time": 5, "books": {"nowhere": {"total_time_seconds": 5}}},
+    )
+    assert summary == {"books": 0, "skipped": 1, "seconds": 5}
+
+
+def test_merge_reading_data_rebuilds_a_broken_progress_block(imported) -> None:
+    # 进度块被手改成字符串：按"空进度"重建，形状不对的会话丢掉
+    document = library.load_library()
+    document["books"][imported["zh"]]["progress"] = "broken"
+    payload = {
+        "books": {
+            imported["zh"]: {"total_time_seconds": 7, "sessions": ["junk"]}
+        }
+    }
+
+    assert library.merge_reading_data(document, payload)["books"] == 1
+    progress = document["books"][imported["zh"]]["progress"]
+    assert progress["total_time_seconds"] == 7
+    assert progress["sessions"] == []
+
+
+def test_merge_reading_data_ignores_a_junk_payload() -> None:
+    # 手改坏的包：非字典、负数、字符串形式的数字都不该把合并搞崩
+    assert library.merge_reading_data(library.load_library(), None) == {
+        "books": 0,
+        "skipped": 0,
+        "seconds": 0,
+    }
+    assert library.merge_reading_data(library.load_library(), "nope")["seconds"] == 0
+    document = library.load_library()
+    # 字符串形式的秒数当作数字读
+    assert library.merge_reading_data(document, {"total_read_time": "12"})["seconds"] == 12
+    # 负数是手改出来的垃圾：按 0 处理，别把累计时长算少
+    assert library.merge_reading_data(document, {"total_read_time": -99})["seconds"] == 0
+    assert document["stats"]["total_read_time"] == 12

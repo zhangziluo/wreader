@@ -46,6 +46,7 @@
 | 📊 统计 | 总时长 / 今日 / 本周 / 本月 / 每日目标 / 连续天数 / 30 天热力图；`--json` 输出给脚本用 |
 | 🏆 成就 | **48 个**成就（开卷有益、深夜书虫、百日筑基、周末战士……），事件驱动解锁，命令行按分类显示进度条，解锁时有动画和提示音；阅读中按下 `?` 可以翻帮助页 |
 | ⚙️ 配置 | 一个 `settings.toml` 管全部，`werd config` 读写并带拼写纠错提示；旧版 `config.json` 自动迁移 |
+| 💾 数据搬家 | `werd data export` 把阅读时长、进度、书签、成就打包成一份 JSON，换电脑或重装系统后 `werd data import` 合并回来（只加不减）；`werd prune` 清掉正文已被删掉的失效书目，`werd clear` 一键清空书架（时长与成就留着） |
 
 ---
 
@@ -244,6 +245,10 @@ imported 2 book(s), skipped 0 duplicate(s), 0 failed
 | `werd stats` | 阅读统计 + 热力图（`--json` 给脚本用） |
 | `werd achievements` | 成就清单与解锁进度 |
 | `werd toc <book_id>` | 查看某本书的目录（章节 + 进度百分比）；`--rebuild` 强制重解析 |
+| `werd data export <文件>` | 把阅读时长与成就导出成一个 JSON 数据包 |
+| `werd data import <文件>` | 把数据包合并进本机（只加不减） |
+| `werd prune` | 清掉正文文件已不存在的失效书目 |
+| `werd clear` | 清空书库（正文一起删；阅读时长与成就保留） |
 | `werd werd` / `werd word` / `werd --werd` | 名字彩蛋（顺手解锁「名字彩蛋」成就） |
 | `werd config` | 查看 / 修改设置 |
 
@@ -417,6 +422,83 @@ werd toc 3e027c4de949 --rebuild  # 忽略缓存，重新解析正文并覆写缓
   ```
 - 阅读器里按 `Tab` 打开的目录与这里同源（多一个实时过滤）。
 
+### `werd data export <文件>` / `werd data import <文件>`
+
+```bash
+werd data export ~/werd-data.json     # 打成一个 JSON 数据包
+# 把文件拷到新电脑（U 盘 / 网盘 / scp 都行），然后在新机器上：
+werd data import ~/werd-data.json     # 合并进本机数据，只加不减
+```
+
+包里装的是**阅读成绩**：累计与每日时长、每本书的进度（行号、百分比、时长）与书签、
+成就解锁状态与事件计数。**不含正文，也不含设置**（正文到新机器上重新 `werd import` 一遍即可）。
+
+- 合并是**只加不减**的：时长与事件计数相加（同一份包导两遍就会算两遍，这是"增量合并"的口径），
+  会话按内容去重（导两遍不会多出一场），书签取并集，每本书"读完"的标记一旦为真就不再改回，
+  阅读位置只在**本机这本书还没有任何记录**时才采纳。
+- 只导入过、**一次都没读过**的书不进包（没有进度、时长、书签可搬），所以包里的本数可能比 `werd list` 少。
+- 书的身份是 `book_id`（正文的 SHA-1），**正文一样、书号就一样**。所以两台机器要先各自
+  `werd import` 同一本书，记录才接得上；本机没有的书会被跳过并计数，提示你补导入后再导一次
+  （全局时长照样接过来，不会白跑一趟）。
+- 数据包就是纯 UTF-8 JSON，一眼能看懂，也能手改：
+
+```json
+{
+  "kind": "werd-data",
+  "version": 1,
+  "exported_at": "2026-09-26T21:03:11",
+  "summary": { "books": 2, "unlocked": 7, "total_read_time": 43200 },
+  "reading": {
+    "total_read_time": 43200,
+    "daily_read_time": { "2026-09-26": 3600 },
+    "books": {
+      "3e027c4de949": {
+        "title": "三体",
+        "total_time_seconds": 3600,
+        "current_line": 120,
+        "percentage": 42.7,
+        "bookmarks": [120],
+        "finished": false,
+        "sessions": [{ "start": "2026-09-26T20:00:00", "end": "2026-09-26T21:00:00", "lines_read": 120 }]
+      }
+    }
+  },
+  "achievements": { "version": 1, "unlocked": [], "counters": {}, "metrics": {}, "books": {} }
+}
+```
+
+- 导错文件也不会弄坏数据：文件不存在、语法坏掉、不是 `werd` 的数据包，或者 `version` 比本程序新时，
+  命令打一行 `error: ...` 并返回 `1`，本地数据一个字节都不动。
+
+### `werd prune`
+
+```bash
+werd prune
+```
+
+```
+已清理 1 个失效书目（正文文件已被删除）：
+  三体 3e027c4de949
+```
+
+`file_path` 是书目的唯一凭据：你在 `~/novels` 里手删了转换后的正文，这条记录就再也读不了了。
+`werd prune` 把这类失效书目从索引里摘掉。其实**每条命令启动前都会先自动对一次账**并打一行提示，
+所以平时用不上它，想显式清理（或看看都少了哪些）时才敲。
+
+### `werd clear`
+
+```bash
+werd clear
+```
+
+```
+已清空书库：2 本书及其正文文件已删除
+阅读时长与成就已保留（werd stats 仍然可用）
+```
+
+清空书架：索引里的书全删，**转换后的正文文件也一起删**（原始电子书放在别处，不归 werd 管）。
+累计时长、每日桶、成就状态全都留着：这个命令忘掉的是"你有哪些书"，不是"你读了多久"。
+
 ---
 
 ## 阅读器快捷键
@@ -541,6 +623,9 @@ q退出 j/space翻页 g跳行 [/]章节 Tab目录 /搜索 n下一个 b书签 ?�
 | 小说正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
 
 Windows 下数据目录是 `%APPDATA%\wreader`。
+
+`werd data export` 写出的数据包**不**在这里：它是个普通的 JSON 文件，放哪由你在命令行里指定
+（见上方「命令手册」里的 `werd data export` / `werd data import`）。
 
 两个环境变量：
 
@@ -841,30 +926,32 @@ wreader/
 ├── tools/                   开发期校验脚本：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标/成就（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
-│   ├── __init__.py          __version__ 和模块地图（21 行）
-│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1165 行）
-│   ├── cli.py               argparse 定义 + 各子命令处理函数（833 行）
+│   ├── __init__.py          __version__ 和模块地图（22 行）
+│   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1250 行）
+│   ├── cli.py               argparse 定义 + 各子命令处理函数（1004 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（966 行）
 │   ├── env.py               环境探测：云主机 / WSL / tmux / 可编辑安装（183 行）
 │   ├── geo.py               地理位置：ip-api 查询 + 一小时缓存，国家→大洲、世仇组合（343 行）
-│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1159 行）
+│   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1425 行）
 │   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（80 行）
 │   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、目录浮层、帮助页与成就通知（2799 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（817 行）
 │   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
+│   ├── transfer.py          `werd data` 的数据包：把时长/成就导出成 JSON、按「只加不减」合并回来（198 行）
 │   └── data/
 │       └── achievements.json  48 个成就的定义（348 行）
-└── tests/                   559 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   592 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、馆藏样例、epub 构造器
     ├── test_achievements.py 51 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定、实时门槛与地理/环境指标
-    ├── test_cli.py          33 项 —— 参数解析、各子命令输出、退出码、成就横幅、名字彩蛋
+    ├── test_cli.py          45 项 —— 参数解析、各子命令输出、退出码、成就横幅、名字彩蛋、清空/清理与数据包导入导出
     ├── test_config.py       49 项 —— 默认值、类型校验、旧配置迁移、数据目录搬迁、目录解析
     ├── test_env.py          14 项 —— 云主机 / WSL / tmux / 可编辑安装探测（全部注入，不看本机）
     ├── test_geo.py          31 项 —— 国家→大洲、世仇组合、ip-api 响应解析、缓存与离线降级
-    ├── test_library.py      119 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读
+    ├── test_library.py      132 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读、清空/清理、数据包合并
     ├── test_reader.py       174 项 —— 分页数学、Pager、状态栏、按键、会话落库、折行、滚轮、目录浮层、帮助页、成就通知与恢复流程
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
-    └── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
+    ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
+    └── test_transfer.py      8 项 —— 导出数据包、在新机器上导入、只加不减的合并、各类错误输入
 ```
 
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
@@ -913,7 +1000,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 559 项，约 15 秒
+pytest                      # 592 项，约 15 秒
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -1045,7 +1132,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 该模块已随翻译功能一起删除，问题不复存在。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings（`translator.py` / `vocab.py` 已随功能移除）。
-- ~~没有自动化测试~~ → 已补 **559 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **592 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 该代码路径已随翻译功能移除（当年补测试时的发现：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`）。
 - ~~带 BOM 的损坏文件会让整次导入崩掉~~ → 已修：BOM 认 UTF-8/16/32 且宽编码优先（UTF-32 的 BOM 以

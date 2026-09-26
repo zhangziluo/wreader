@@ -5,7 +5,8 @@ declared in :func:`build_parser` and wired to a handler function through
 ``_HANDLERS``.
 
 Every command is wired up: ``import``, ``list``, ``search``, ``read``,
-``continue``, ``stats``, ``achievements``, ``config`` and ``toc``.
+``continue``, ``stats``, ``achievements``, ``config``, ``toc``, ``prune``,
+``clear`` and ``data``.
 """
 
 # 延迟求值类型注解，避免运行时解析注解带来的开销和顺序问题
@@ -205,6 +206,40 @@ def build_parser() -> argparse.ArgumentParser:
     # werd werd / werd word：名字彩蛋（两个写法都留着，反正就是同一个玩笑）
     subparsers.add_parser("werd", help="the name easter egg")
     subparsers.add_parser("word", help="the name easter egg (the other spelling)")
+
+    # werd prune：清理正文文件已被删掉的书目（每个命令运行前也会自动做一次）
+    subparsers.add_parser(
+        "prune", help="drop books whose converted text file was deleted",
+    )
+
+    # werd clear：清空书库（删记录 + 删转换后的正文），保留阅读时长与成就
+    subparsers.add_parser(
+        "clear",
+        help="remove every book and its text file (reading time is kept)",
+    )
+
+    # werd data export <file> / werd data import <file>：把时长与成就搬到另一台电脑
+    data_parser = subparsers.add_parser(
+        "data", help="export or import reading time and achievements",
+    )
+    # 二级子命令容器：export / import（required=True，写错就报用法错误）
+    data_subparsers = data_parser.add_subparsers(
+        dest="data_command",
+        metavar="<export|import>",
+        required=True,
+    )
+    # werd data export <file>：把本机的时长与成就写成一个 JSON 包
+    data_export_parser = data_subparsers.add_parser(
+        "export", help="write reading time and achievements to a JSON file",
+    )
+    # 位置参数 path：包的落点（文件，不是目录）
+    data_export_parser.add_argument("path", help="file to write the bundle to")
+    # werd data import <file>：把包里的时长与成就并进本机
+    data_import_parser = data_subparsers.add_parser(
+        "import", help="merge a bundle written by `werd data export`",
+    )
+    # 位置参数 path：要合并的包
+    data_import_parser.add_argument("path", help="bundle to merge into this machine")
 
     # 把组装好的解析器交还给调用方
     return parser
@@ -527,6 +562,135 @@ def cmd_toc(args: argparse.Namespace) -> int:
     return 0
 
 
+def _book_names(removed: Sequence[Tuple[str, Dict[str, Any]]], limit: int = 3) -> str:
+    """Render at most *limit* titles from removed ``(book_id, record)`` pairs."""
+    # 只列前几本的标题，剩下的用"等 N 本"带过，免得一行刷满屏幕
+    names = [str(book.get("title") or "untitled") for _id, book in removed[:limit]]
+    # 标题是空的就退回到 book_id（手写的记录可能没有标题）
+    if not names:
+        names = [str(book_id) for book_id, _book in removed[:limit]]
+    # 还有更多时补一句
+    if len(removed) > limit:
+        return "{} 等 {} 本".format("、".join(names), len(removed))
+    return "、".join(names)
+
+
+def _auto_prune_books() -> None:
+    """Reconcile the index with the novels folder before a command runs.
+
+    Deleting a converted text by hand (``rm ~/novels/xxx_utf8.txt``) used to leave
+    a dead record behind that ``werd list`` kept showing and ``werd read`` could
+    only fail on.  Every invocation now cleans those up first; the notice is a
+    single line so it cannot drown the output of the command that follows.
+    """
+    try:
+        # 对账 + 落盘都在 library 里；返回被摘掉的 (id, 记录)
+        removed = library.prune_missing_books()
+    except (config.ConfigError, library.LibraryError):
+        # 索引或配置读不出来：交给用户真正要跑的那个命令去报错
+        return
+    # 没有变化就一句话都不说
+    if not removed:
+        return
+    # 一行说明：清掉了几个、都是哪几本
+    console.print(
+        "[yellow]已清理 {} 个失效书目（正文文件已被删除）：{}[/yellow]".format(
+            len(removed), _book_names(removed)
+        )
+    )
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Handle ``werd prune`` -- drop books whose text file is gone."""
+    # 对账逻辑在 library 里（每个命令运行前也会自动调一次）
+    removed = library.prune_missing_books()
+    # 一本都没少：明确说一句，免得用户以为命令没生效
+    if not removed:
+        console.print("没有失效书目：所有书的正文文件都还在")
+        return 0
+    # 有变化就逐本列出标题和 id，方便对着书本文件夹核对
+    console.print(
+        "[yellow]已清理 {} 个失效书目（正文文件已被删除）：[/yellow]".format(
+            len(removed)
+        )
+    )
+    for book_id, book in removed:
+        console.print(
+            "  [bold]{}[/bold] [dim]{}[/dim]".format(
+                str(book.get("title") or "untitled"), book_id
+            )
+        )
+    return 0
+
+
+def cmd_clear(args: argparse.Namespace) -> int:
+    """Handle ``werd clear`` -- empty the library (books and their text files).
+
+    Reading statistics and achievements are left untouched on purpose: the command
+    forgets *which books* you have, not how long you have read them.
+    """
+    # 删记录 + 删转换后的正文，都在 library 里
+    removed = library.clear_library()
+    # 本来就是空书库：什么都不用做，退出码仍是 0
+    if not removed:
+        console.print("书库本来就是空的")
+        return 0
+    console.print(
+        "[yellow]已清空书库：{} 本书及其正文文件已删除[/yellow]".format(len(removed))
+    )
+    # 说清楚什么被保留了，免得用户以为统计也没了
+    console.print("[dim]阅读时长与成就已保留（werd stats 仍然可用）[/dim]")
+    return 0
+
+
+def cmd_data(args: argparse.Namespace) -> int:
+    """Handle ``werd data export|import <file>`` -- move time + achievements.
+
+    Never exits with a traceback on a bad bundle: :class:`wreader.transfer.
+    TransferError` is turned into the usual one line ``error: ...``.
+    """
+    # 延迟导入 transfer：平时用不到这个命令就不加载
+    from . import transfer
+
+    # export：把本机的时长与成就写成一个 JSON 包
+    if args.data_command == "export":
+        try:
+            summary = transfer.export_data(args.path)
+        except transfer.TransferError as exc:
+            return _fail(str(exc))
+        console.print(
+            "已导出 [bold]{}[/bold] 本书的阅读记录与 [bold]{}[/bold] 个成就 → {}".format(
+                summary["books"], summary["unlocked"], summary["path"]
+            )
+        )
+        # 累计时长用统计模块的格式化，和 `werd stats` 显示的口径一致
+        console.print(
+            "[dim]累计时长 {}\n拷到另一台电脑后跑 werd data import <文件> 即可[/dim]".format(
+                stats.format_hours(summary["seconds"])
+            )
+        )
+        return 0
+    # 其余情况就是 import（argparse 的 required=True 保证了这一点）
+    try:
+        summary = transfer.import_data(args.path)
+    except transfer.TransferError as exc:
+        return _fail(str(exc))
+    # 合并结果：几本书的记录、跳过几本、成就总数
+    console.print(
+        "已合并 [bold]{}[/bold] 本书的阅读记录，成就共 [bold]{}[/bold] 个".format(
+            summary["books"], summary["unlocked"]
+        )
+    )
+    # 有跳过的书就提示补做一步（先导入书，再导一次包）
+    if summary["skipped"]:
+        console.print(
+            "[dim]{} 本本机还没有的书被跳过：先 werd import 再导一次即可补上[/dim]".format(
+                summary["skipped"]
+            )
+        )
+    return 0
+
+
 def _report_unlocked(newly: Sequence[Dict[str, Any]]) -> None:
     """Name the achievements that just unlocked -- a line, not a fanfare."""
     # 没有新成就不用打印任何东西
@@ -793,6 +957,9 @@ _HANDLERS: Dict[str, Callable[[argparse.Namespace], int]] = {
     "achievements": cmd_achievements,
     "config": cmd_config,
     "toc": cmd_toc,
+    "prune": cmd_prune,
+    "clear": cmd_clear,
+    "data": cmd_data,
     "werd": cmd_werd,
     "word": cmd_word,
 }
@@ -812,6 +979,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # 一个子命令都没给：按 argparse 的老样子报错（用法提示 + 退出码 2 都不变）
     if args.command is None:
         parser.error("the following arguments are required: <command>")
+    # 每次运行都先对账一次：正文文件被删掉的书，索引里的记录也该跟着消失
+    # （clear 会清掉一切、prune 自己就对账，这两个跳过，免得白干还可能刷两遍提示）
+    if args.command not in ("clear", "prune"):
+        _auto_prune_books()
     # 按子命令名取出对应的处理函数
     handler = _HANDLERS[args.command]
     try:

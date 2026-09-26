@@ -1,21 +1,22 @@
 # Active Context — 当前焦点与最近改动
 
-> 每次会话结束前更新这个文件。最后更新：**2026-09-25**。
+> 每次会话结束前更新这个文件。最后更新：**2026-09-26**。
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**559 passed**（本机 12–20 秒）、`npx pyright` **0 errors / 0 warnings**、
-`tools/` 的 **8** 个校验脚本全绿（`check_docs` / `check_doc_numbers` / `check_comments` /
-`verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` / `verify_mouse` 8 项 /
-`verify_achievements` 19 项）、`git status` 干净且与 `origin/main` 同步。
-本会话（2026-09-25）做的是**功能裁剪**：翻译 / 生词本 / 笔记三个功能已从源码、测试、工具、
-文档里**整体删除**，成就靠**遗留数据只读计数**保住（见 ㉚）。
+代码库处于**干净、全绿**状态：**592 passed**（本机 22.52s）、`npx pyright` **0 errors / 0 warnings /
+0 informations**、`tools/` 的 **8** 个校验脚本全绿（`check_docs` OK / `check_doc_numbers` ALL OK /
+`check_comments` **3099** / `verify_wrap` 40077 / `verify_draw` 140 / `verify_colors` /
+`verify_mouse` 8 项 / `verify_achievements` 19 项）。
+本会话（2026-09-26）做的是**数据搬家与清理**：新增 `werd data export/import`（把阅读时长 + 成就装进
+一个 JSON 包搬到另一台电脑）、`werd prune`（摘掉正文文件已被删除的失效书目）、`werd clear`
+（清空书库、保留统计），见 ㉜。**代码 + 文档都改完了，还没提交**（下一步就是 commit + push）。
 
-- `wreader/` = **11** 个 `.py` / **8,840** 行；`tests/` = 10 个文件 / **559** 项；`tools/` = 8 个 `.py`。
+- `wreader/` = **12** 个 `.py` / **9,561** 行（新增 `transfer.py` 198 行）；`tests/` = 11 个文件 /
+  **592** 项；`tools/` = 8 个 `.py`。
 - 配置 **4 个 section / 16 个键**；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
-- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **2771** 条语句上方没有紧邻注释行
-  （最多：`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 223；
-  口径与处置见 `progress.md` 待办 #1）。
+- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3099** 条语句上方没有紧邻注释行
+  （2026-09-25 测得 2771，本会话新增代码把它抬高；口径与处置见 `progress.md` 待办 #1）。
 - ⚠️ 遗留数据（`vocab.json`、`notes/*.md`、旧译文缓存）**仍被只读**，`werd stats --json`
   的 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键仍在（脚本兼容）。
 - ⚠️ IDE 里飘的**幽灵告警**（仓库根那份 **143 行**野生 `cli.py`，见 ㉔ / ㉕）：
@@ -25,7 +26,7 @@
   README 数字同步、校验脚本进 `tools/`、鼠标滚轮 / 触摸拖动（⑫）、翻页保留 3 行（⑭）、
   翻页按屏幕行推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)`（⑯）、`werd continue`（⑰）、
   `./install.sh`（⑱）、CLI 改名 `werd`（⑲）、目录浮层 + `werd toc`（⑳）、
-  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
+  成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1288,11 +1289,57 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
 结论写进协议了：写文件只用 `editor`，提交信息落成文件再 `git commit -F <file>`。
 最终这次提交是 **47 个文件 / -11,240 / +1,163 行**，已推上 `origin/main`（`git status -sb` 无领先/落后）。
 
+### ㉜ 数据搬家与书库清理（2026-09-26）
+
+**问题**：阅读时长与成就只存在本机（`library.json` + `achievements.json`），换电脑 / 重装系统就归零。
+**做法**：`werd data export <文件>` 打一个纯 JSON 包，拷到新机器 `werd data import <文件>` 合并进去；
+顺带补两个清理入口 `werd prune` / `werd clear`。
+
+| 改动 | 内容 |
+| --- | --- |
+| `wreader/transfer.py`（**新，198 行**） | `BUNDLE_KIND="werd-data"` / `BUNDLE_VERSION=1`；`export_data(path)` 挑**有阅读痕迹的书**（有 `last_read` 或 `total_time_seconds`）连同时长、每日桶、位置、会话、书签打包，成就解锁记录原样放入；`import_data(path)` 只加不减地合并；坏包一律 `TransferError` |
+| `wreader/library.py` | 新增 `clear_library()`（删记录 + 删正文，**保留时长与成就**）、`prune_missing_books()`（索引 ↔ 正文目录对账）、`save_library()` 的合并侧配套改动 |
+| `wreader/achievements.py` | 新增 `merge_states()`（解锁按 id 取并集、进度计数取较大值），供导入用 |
+| `wreader/cli.py` | 新子命令 `data export/import`、`prune`、`clear` + `_HANDLERS` 三条新条目 + `_auto_prune_books()` |
+| 文档 | `README.md` / `README.en.md` / `使用指南.md` 三处同步：命令表、三节用法、「从没读过的书不进包」「重复导入会把时长再加一遍」「Windows 上包放哪」 |
+| 测试 | 新增 `tests/test_transfer.py`（**8 项**）；`test_cli.py` 33 → **45**、`test_library.py` 119 → **132** |
+
+**合并语义（都写进了文档，用户必须知道）**：全局时长与每日桶**相加**、书的 `total_time_seconds` 相加、
+`sessions` 按内容去重、书签取并集、`finished` 一旦为真就粘住、位置**只在本机没有历史时**才采用；
+本机没有的 `book_id` 记进 `skipped`（提示"先 `werd import` 再导一次"）。所以**同一个包导入两次 = 时长翻倍**。
+
+**实测（2026-09-26，真 CLI + 沙箱 `/tmp/wr-smoke`，不碰真实数据）**：
+
+```
+# 本机：导入一本书 → 手工写进 600 秒阅读痕迹
+werd data export /tmp/wr-smoke/bundle.json
+  → 已导出 1 本书的阅读记录与 1 个成就 → ...；累计时长 10分钟
+  → 包首行 kind=werd-data / version=1 / exported_at / summary{books:1,unlocked:1,total_read_time:600}
+werd data export /tmp/wr-smoke            # 目标是目录
+  → error: /tmp/wr-smoke is a directory, give a file name   （退出码 1）
+# 第二台机器（另一套 $WREADER_HOME/$WREADER_NOVELS_DIR）
+werd data import bundle.json              # 书还没导入
+  → 已合并 0 本书的阅读记录，成就共 1 个 / 1 本本机还没有的书被跳过
+werd import book.txt && werd data import bundle.json
+  → 已合并 1 本书的阅读记录，成就共 1 个；stats 0 → 20分钟（两次全包，含被跳过那次也算了全局时长）
+第三次导同一个包 → 1800 秒，证实"累加"语义
+缺包 → error: no such data file: ...（1）；非 JSON → error: ... cannot be read: ...（1）；
+       kind 不对 → error: ... is not a werd data file（1）
+werd prune（正文在）→ 没有失效书目；rm 掉正文后跑 werd list → 已清理 1 个失效书目（正文已被删除）：book
+werd clear → 已清空书库：1 本书及其正文文件已删除 / 阅读时长与成就已保留；之后 werd stats 仍是 10分钟
+```
+
+**全量验证（2026-09-26）**：`pytest tests/` → **592 passed in 22.52s**；`npx pyright` → 0 / 0 / 0；
+`check_docs` → RESULT: OK；`check_doc_numbers` → RESULT: ALL OK（含 `transfer.py` 198 行与
+`test_transfer.py` 8 项）；`check_comments` → **TOTAL: 3099**；`verify_wrap` → 40077；`verify_draw` → 140；
+`verify_achievements.py`（真 pty）→ 全部通过（改动动了 `achievements.py`，所以照规矩跑了一遍）。
+
 ## 待办 / 下一步
 
 > 本文件只列"下一步做什么"；每条的理由与实测数字在 `progress.md` 的待办里（不在两处各写一份）。
 
-0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **2771** 条缺口。
+0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3099** 条缺口
+   （2026-09-26 复测：上一次是 2771，本会话新增的 `transfer.py` 与三个测试文件又添了几百条）。
    要么正式把口径定为"一段逻辑配一段注释"（文档已如此），要么对改到的文件做 `--strict` 增量门禁。
 1. **`reader.theme` 仍未实现**（预留项，改了没效果）：在 `_init_colors()` 里按主题 `init_pair()`，
    并给正文 / 状态栏 / 书签分配 color pair；务必保住 `use_default_colors()` 的透明背景（背景用 `-1`），
@@ -1307,8 +1354,10 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
    （`pip install -e ".[windows]"` + 在 `$PROFILE` 里加函数）。要补就写 `install.ps1`，
    做同样几件事（PowerShell 的别名是 function 而不是 alias）。
 6. 可选：**遗留数据没有清理入口**（`~/.wreader/vocab.json`、`notes/`、旧译文缓存
-   `cache/<book_id>/ch*_en.txt`）。要么在 `werd stats` 里标一句"遗留数据，只读"，
+   `cache/<book_id>/ch*_en.txt`）。要么在 `werd stats` 里标一句「遗留数据，只读」，
    要么加 `werd clean`（删之前必须问一次）。
+   ⚠️ 2026-09-26 加的 `werd clear` **不是**这个入口：它清的是**书库**（书目记录 + 转换后的正文），
+   遗留数据文件一个都没动。
 7. 可选：老 `settings.toml` 里的死键只在 `werd config` 列表时警告，不会从文件里删掉（刻意如此）。
    若要做清理向导，挂在 `werd config --reset` 上，默认别动用户的文件。
 8. 可选：成就侧两处已无调用方的常量 —— `EVENTS` 里的 `word_add` / `note_add` 与 `check`
@@ -1359,3 +1408,15 @@ VS Code 的 `workspaceStorage` / `User/History` / `Backups` 里都已搜不到�
   代理没开也不挡任何验证工作：测试、`pyright`、`tools/` 全离线可跑，提交先留在本地等代理起来。
 - **在旧终端里验证 CLI 用 `.venv/bin/python -m wreader.cli ...` 最稳**：`install.sh` 往
   `~/.zshrc` / `~/.bashrc` 写的别名只在**新开的** shell 里生效。
+- ⚠️ **活体验证要在沙箱里做**：`export WREADER_HOME=/tmp/wr-smoke/home WREADER_NOVELS_DIR=/tmp/wr-smoke/novels`
+  之后再跑 `.venv/bin/werd ...`，动的就是 `/tmp` 里的假数据。2026-09-26 用这套跑通了
+  `data export` → 第二台机器 `data import` → `prune` → `clear` 的全链路（证据见 ㉜）。
+- ⚠️ **别把「删目录」和「依赖它的命令」放进同一个并行批次**：2026-09-26 一次把 `rm -rf /tmp/wr-smoke`
+  与随后的 `import` / `data export` 同时发出（同一批 `run_commands`），于是出现
+  「包明明导出了却 `head` 不到」「书库明明是空的」这类**假失败**，白查一轮。
+  有先后依赖的命令串成一个 `&&` 链条，或者分两次调用。
+- ⚠️ **`tools/check_doc_numbers.py` 只管 `README.md` 与 `README.en.md`**：`使用指南.md` 与
+  memory-bank 里的行数 / 测试项数**没有任何脚本替你守**，改完代码必须自己重数（本会话手改了 3 处文档）。
+- ⚠️ **用 `editor` 写中文段落时别夹英文双引号**：2026-09-26 实测，`new_text` 里出现的英文双引号会被落成
+  「反斜杠 + 双引号」原样写进文件，肉眼扫 diff 容易漏过去。判据：扫一遍 `chr(92)+chr(34)` 所在行号；
+  改用「」就没事。

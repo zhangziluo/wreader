@@ -1,12 +1,13 @@
 # Project Brief — wreader
 
 > MemoryBank 的根基文件：项目是什么、必须满足哪些硬性要求、边界在哪。
-> 其他文件都从这里派生。最后更新：**2026-09-25**。
+> 其他文件都从这里派生。最后更新：**2026-09-26**。
 
 ## 一句话
 
 `wreader` 是一个**终端里的中文小说阅读器**：把 txt/epub 导入成本地书库，在 TTY 里全屏分页阅读，
-带目录、搜索、书签、阅读统计与 **48 个成就**。
+带目录、搜索、书签、阅读统计与 **48 个成就**；数据全在本地，换机可以用 `werd data export/import`
+整包搬走。
 
 > ⚠️ **2026-09-25 的功能裁剪**：翻译、生词本（词汇笔记本）、笔记三个功能已**整体删除**
 > （源码、测试、工具、文档全部清掉）。老版本留下的 `~/.wreader/vocab.json` 与
@@ -24,7 +25,7 @@
 | 安装 | **`./install.sh`**（克隆后一条命令：建 venv + 装依赖 + 配别名）；手动步骤见 README |
 | 打包 | setuptools（`[tool.setuptools.package-data]` 带 `data/*.json`） |
 | 运行时依赖 | 只有 **3 个**：`chardet`、`rich`、`requests`（后者只服务地理成就的可选联网） |
-| 规模（2026-09-25 实测） | `wreader/` **11** 个 `.py`（**8,840** 行）+ `data/achievements.json`（348 行 / 48 条）；`tests/` **9** 个测试文件 + `conftest.py`，**559** 项测试；`tools/` **8** 个校验脚本 |
+| 规模（2026-09-26 实测） | `wreader/` **12** 个 `.py`（**9,561** 行）+ `data/achievements.json`（348 行 / 48 条）；`tests/` **10** 个测试文件 + `conftest.py`，**592** 项测试；`tools/` **8** 个校验脚本 |
 | 版本控制 | **git 仓库**（2026-09-22 建）：`main` → `origin` = `https://github.com/zhangziluo/wreader`；判据是 `git status` 不显示领先/落后（不写提交数） |
 | 文档 | `README.md`（中文，主文档）、`README.en.md`、`使用指南.md`（小白教程） |
 
@@ -58,6 +59,11 @@
    - 老 `library.json` 里 `stats.translations` → 指标 `translations`（「双语者」），
      并作为 `werd stats --json` 的遗留键输出；`translate_hits`（「翻译狂魔」）继续从成就状态里读；
    - 程序**只读不写**这三个位置，用户随时可以删（指标立刻归零，已解锁的成就不会掉）。
+8. **数据搬家与清理（2026-09-26）**：`werd data export <文件>` 把阅读时长、每日桶、位置、书签、会话
+   与成就解锁写成一个**纯 UTF-8 JSON 包**（`kind=werd-data` / `version=1`），`werd data import <文件>`
+   在另一台机器上**只加不减**地合并；本机没有的 `book_id` 记进 `skipped`。
+   配套两个清理入口：`werd prune`（摘掉正文文件已删的失效书目，每个命令启动前也会自动对账一次）、
+   `werd clear`（清空书库与正文文件，**保留**阅读时长与成就）。**不做云同步 / 账号**（见「非目标」）。
 
 ## 硬性技术约束（不要破坏）
 
@@ -76,10 +82,10 @@
 - **静态检查**：`npx pyright` 必须 **0 errors / 0 warnings**（`wreader/`、`tests/`、`tools/` 都纳入）。
 - **注释规范**：每条逻辑语句上方都要有一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"）；
   同时保留原有 docstring 与英文注释。
-  ⚠️ **实测校正（2026-09-25）**：这条目前是**目标**而非既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2771** 条语句上方没有紧邻注释行
-  （`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 223、
-  `wreader/library.py` 170、`tests/test_library.py` 165 最多）。
+  ⚠️ **实测校正（2026-09-26 复测）**：这条目前是**目标**而非既成事实 ——
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3099** 条语句上方没有紧邻注释行
+  （`tests/test_reader.py` 591、`wreader/reader.py` 480、`wreader/achievements.py` 256、
+  `wreader/library.py` 233、`tests/test_library.py` 229 最多；2026-09-25 测得 2771）。
   早先记录的 "TOTAL: 0" 是校验脚本自身 bug 造成的假绿，不可再引用。
   实际遵循的风格是"一段逻辑配一段中文注释"，别执行到每条 `return` / `assert` 都单独加。
 - **已删除的功能不许复活、老数据只许读**：`wreader/` 里不再有翻译 / 生词本 / 笔记的实现，
@@ -90,7 +96,9 @@
 - 不做 GUI / Web / **手机 App**，只做终端 —— 但**要能在手机上的终端里用**：
   Termux 等移动终端已支持触摸拖动 / 滚轮逐行翻页。
 - 不做电子书格式转换器：EPUB 优先交给 Calibre 的 `ebook-convert`，没装才用内置提取器。
-- 不做云同步 / 账号 / 多设备。
+- 不做云同步 / 账号 / **自动**多设备同步 —— 换机靠用户自己拷一个 JSON 包
+  （`werd data export/import`）：服务端、登录、后台同步都不做。
+  注意：**手动搬包不是云同步**，它是本地命令的延伸（见核心功能需求 #8）。
 - **不做翻译、不做生词本、不做笔记**（2026-09-25 明确移除）：这是产品边界，不是"还没做"。
   老数据文件仍会被成就引擎只读计数，但不会新增任何写入路径。
 - `reader.theme` 是**预留项，未实现**，改了没有任何效果。

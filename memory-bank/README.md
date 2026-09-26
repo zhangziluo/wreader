@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | `projectbrief.md` | **根基**：项目定位、核心功能需求、硬性技术约束、明确的非目标 | 任何任务开始前 |
 | `productContext.md` | 为什么做、给谁用、体验目标、关键产品决策与理由、迁移兼容承诺 | 涉及需求取舍时 |
-| `systemPatterns.md` | 分层架构、模块职责表、**11** 个关键设计模式、关键调用链、必踩的坑 | 改代码之前 |
+| `systemPatterns.md` | 分层架构、模块职责表、**12** 个关键设计模式、关键调用链、必踩的坑 | 改代码之前 |
 | `techContext.md` | 依赖、环境、环境变量、文件位置、配置项清单、常用命令、测试基础设施 | 装环境 / 跑命令时 |
 | `activeContext.md` | **当前焦点**：最近改动、验证证据、待办优先级、会话级注意事项 | 每次开始工作前 |
 | `progress.md` | 整体状态、已完成功能清单、待办、已知问题表、决策演变史 | 汇报进度 / 排优先级时 |
@@ -29,12 +29,17 @@
   后来被发现是**假绿**的（每个文件只检查第 1 行，见 `activeContext.md` ⑪），
   所以早期"16 个文件注释全覆盖"的说法**不再成立**。
   现行口径与处置见 `projectbrief.md` 的「注释规范」与 `progress.md` 待办 #1。
-- **全量复核基线快照（2026-09-25，最新）**：**559** 项测试 / `pyright` **0 errors, 0 warnings** /
-  **29** 个 `.py`（`wreader/` 11 + `tests/` 10 + `tools/` 8，另 `install.sh` 是 bash）；
-  `wreader/` 共 **8,840** 行；`tools/` 的 **8** 个校验脚本全绿（含真 pty 的
+- **全量复核基线快照（2026-09-26，最新）**：**592** 项测试 / `pyright` **0 errors, 0 warnings** /
+  **31** 个 `.py`（`wreader/` 12 + `tests/` 11 + `tools/` 8，另 `install.sh` 是 bash）；
+  `wreader/` 共 **9,561** 行；`tools/` 的 **8** 个校验脚本全绿（含真 pty 的
   `verify_achievements.py` 19 项、`verify_mouse.py` 8 项）。
-  ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **2771** 条语句上方没有紧邻注释行。
+  ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3099** 条语句上方没有紧邻注释行。
   以上都是**实测值**，不是估算。
+- **上一次基线（2026-09-25，删掉翻译 / 生词本 / 笔记之后）**：559 项测试 / 29 个 `.py` /
+  `wreader/` 8,840 行 / 注释缺口 2771。
+- 2026-09-26 这一轮加了 **`wreader/transfer.py`**（`werd data export/import` 的数据搬家）、
+  `library.prune_missing_books` / `clear_library`（`werd prune` / `werd clear`），
+  以及 `cli._auto_prune_books` 的全局自动对账；细节见 `activeContext.md` ㉜。
 - 本次复核同时**删掉了翻译 / 生词本 / 笔记三个功能**（详见 `activeContext.md` ㉚ 与
   `progress.md` 的 2026-09-25 决策行）：`translator.py`、`translate/`、`vocab.py`、`notes.py`
   已不存在，老数据文件改为**只读计数**供成就使用。**读到旧记录里提到它们，属于历史。**

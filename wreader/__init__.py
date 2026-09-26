@@ -9,6 +9,7 @@ Module layout:
 * :mod:`wreader.achievements` -- event driven achievements: state, unlocks, file lock
 * :mod:`wreader.config`      -- user configuration handling
 * :mod:`wreader.toc`         -- chapter table detection and its cache
+* :mod:`wreader.transfer`    -- the ``werd data`` bundle: export and merge reading history
 * :mod:`wreader.lock`        -- the file lock the state stores share
 * :mod:`wreader.env`         -- environment probes behind the achievements
 * :mod:`wreader.geo`         -- optional geo lookup behind the achievements

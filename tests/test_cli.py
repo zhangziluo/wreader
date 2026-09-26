@@ -21,8 +21,8 @@ from pathlib import Path
 # pytest.raises
 import pytest
 
-# 被测模块 + 断言时要用到的配置/书库/成就引擎
-from wreader import achievements, cli, config, library
+# 被测模块 + 断言时要用到的配置/书库/成就引擎/数据搬运
+from wreader import achievements, cli, config, library, transfer
 
 # 复用 conftest 里的样例正文
 from conftest import BOOK_LINES
@@ -53,6 +53,9 @@ def test_build_parser_knows_every_command() -> None:
         "achievements",
         "config",
         "toc",
+        "prune",
+        "clear",
+        "data",
         "werd",
         "word",
     ):
@@ -69,7 +72,17 @@ def _required_argument(command: str) -> list:
         "search": ["x"],
         "read": ["id"],
         "toc": ["id"],
+        # data 还要带二级子命令与文件路径
+        "data": ["export", "bundle.json"],
     }.get(command, [])
+
+
+def test_data_requires_a_subcommand() -> None:
+    # `werd data` 后面必须跟 export / import，否则由 argparse 报用法错误
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["data"])
+    assert excinfo.value.code == 2
 
 
 def test_version_flag_exits_cleanly(capsys) -> None:
@@ -383,3 +396,174 @@ def test_eleven_views_unlock_the_achievement_hunter(capsys) -> None:
     assert achievements.load_state()["metrics"]["achievement_views"] == 11
 
 
+
+# ------------------------------------- clearing, pruning and moving a library
+def _seed_history(book_id: str, seconds: int = 900) -> None:
+    """Give *book_id* a position, one session and matching global totals."""
+    # 直接改索引：这是"读过一段"最省事的模拟方式（不经过 curses 前端）
+    document = library.load_library()
+    document["stats"]["total_read_time"] = seconds
+    document["stats"]["daily_read_time"] = {"2026-02-01": seconds}
+    document["books"][book_id]["progress"].update(
+        {
+            "current_line": 3,
+            "total_time_seconds": seconds,
+            "last_read": "2026-02-01T20:00:00",
+            "sessions": [
+                {
+                    "start": "2026-02-01T19:45:00",
+                    "end": "2026-02-01T20:00:00",
+                    "lines_read": 3,
+                }
+            ],
+        }
+    )
+    library.save_library(document)
+
+
+def test_clear_empties_the_library_but_keeps_the_reading_time(capsys, imported) -> None:
+    # 先攒一段时长，好验证"清空书目"不会顺手抹掉阅读成绩
+    _seed_history(imported["zh"])
+    # 清空前记下正文路径，一会儿要确认它没被删
+    book = library.get_book(imported["zh"])
+    assert book is not None
+    path = Path(str(book["file_path"]))
+
+    assert cli.main(["clear"]) == 0
+
+    out = _stdout(capsys)
+    # 报告里说清掉了几本、正文文件一并删了、成绩保住了
+    assert "已清空书库：2 本书及其正文文件已删除" in out
+    assert "阅读时长与成就已保留" in out
+    # 索引空了，但累计时长照旧
+    assert library.list_books() == []
+    assert library.load_library()["stats"]["total_read_time"] == 900
+    # 转换后的正文文件也跟着删了（原始电子书不归 werd 管）
+    assert not path.is_file()
+
+
+def test_clear_on_an_empty_library_says_so(capsys) -> None:
+    # 空书库：明确说一句"本来就是空的"，退出码仍是 0
+    assert cli.main(["clear"]) == 0
+    assert "书库本来就是空的" in _stdout(capsys)
+
+
+def test_prune_reports_the_books_whose_files_are_gone(capsys, imported) -> None:
+    # 手动删掉中文书的正文，再跑 werd prune
+    book = library.get_book(imported["zh"])
+    assert book is not None
+    Path(str(book["file_path"])).unlink()
+
+    assert cli.main(["prune"]) == 0
+
+    out = _stdout(capsys)
+    # 输出里点名了被清理的那本书
+    assert "已清理 1 个失效书目" in out
+    assert imported["zh"] in out
+    # 记录真的没了；另一本不受影响
+    assert library.get_book(imported["zh"]) is None
+    assert library.get_book(imported["en"]) is not None
+
+
+def test_prune_with_nothing_to_do(capsys, imported) -> None:
+    # 没失效书目：只说一句，退出码 0
+    assert cli.main(["prune"]) == 0
+    assert "没有失效书目" in _stdout(capsys)
+
+
+def test_every_command_cleans_up_the_dead_records(capsys, imported) -> None:
+    # 模拟用户在 novels 文件夹里手删正文：索引里会留下一条死记录
+    book = library.get_book(imported["zh"])
+    assert book is not None
+    Path(str(book["file_path"])).unlink()
+
+    # 随便跑哪条命令都会先对账一次，并给一行提示
+    assert cli.main(["list"]) == 0
+
+    out = _stdout(capsys)
+    assert "已清理 1 个失效书目" in out
+    # 这条命令自己的输出里也就只剩一本书了
+    assert "library (1 book(s))" in out
+    assert library.get_book(imported["zh"]) is None
+
+
+def test_auto_prune_stays_quiet_when_nothing_is_missing(capsys, imported) -> None:
+    # 没有失效书目就不该多嘴，否则每条命令都白白多一行噪音
+    assert cli.main(["list"]) == 0
+    assert "已清理" not in _stdout(capsys)
+
+
+# ---------------------------------------------------- `werd data export|import`
+def test_data_export_reports_what_went_into_the_bundle(capsys, imported, tmp_path) -> None:
+    # 给中文书攒一小时（格式化后正好是 "1小时"）
+    _seed_history(imported["zh"], seconds=3600)
+    # 故意用还没建的子目录：导出应当自己建出来
+    target = tmp_path / "nested" / "bundle.json"
+
+    assert cli.main(["data", "export", str(target)]) == 0
+
+    out = _stdout(capsys)
+    # 摘要一行：几本书、几个成就、写到哪儿
+    # （跑命令时 cli 会顺手评估一次成就，所以个数照状态文件数，不写死）
+    unlocked = achievements.load_state()["unlocked"]
+    assert "已导出 1 本书的阅读记录与 {} 个成就".format(len(unlocked)) in out
+    # 累计时长与 `werd stats` 同一个口径（路径会被 rich 折行，改用文件本身验证）
+    assert "累计时长 1小时" in out
+    assert target.is_file()
+
+
+def test_data_export_reports_a_directory_target(capsys, imported, tmp_path) -> None:
+    # 目标是目录：一条 error 行 + 退出码 1，而不是 Python 回溯
+    assert cli.main(["data", "export", str(tmp_path)]) == 1
+    assert "is a directory" in capsys.readouterr().err
+
+
+def test_data_import_merges_the_bundle_into_this_machine(
+    capsys, imported, tmp_path
+) -> None:
+    # 本机攒一小时，导出成包
+    _seed_history(imported["zh"], seconds=3600)
+    target = tmp_path / "bundle.json"
+    assert cli.main(["data", "export", str(target)]) == 0
+    capsys.readouterr()
+
+    # 再把包导回同一台机器：书 id 对得上，所以没有跳过的
+    assert cli.main(["data", "import", str(target)]) == 0
+
+    out = _stdout(capsys)
+    assert "已合并 1 本书的阅读记录" in out
+    assert "被跳过" not in out
+    # 时长是增量相加的口径：导自己的包等于把这一小时再记一遍
+    assert library.load_library()["stats"]["total_read_time"] == 7200
+
+
+def test_data_import_hints_about_the_books_it_could_not_attach(
+    capsys, tmp_path
+) -> None:
+    # 手写一个包：里面的 book_id 是本机没有的（来自另一台电脑）
+    bundle = {
+        "kind": transfer.BUNDLE_KIND,
+        "version": transfer.BUNDLE_VERSION,
+        "reading": {
+            "total_read_time": 60,
+            "daily_read_time": {},
+            "books": {"nowhere": {"total_time_seconds": 60}},
+        },
+        "achievements": {},
+    }
+    target = tmp_path / "bundle.json"
+    target.write_text(json.dumps(bundle), encoding="utf-8")
+
+    assert cli.main(["data", "import", str(target)]) == 0
+
+    out = _stdout(capsys)
+    # 没有记录可以挂：计数为 0 并提示补一步，但全局时长照样接过来
+    assert "已合并 0 本书的阅读记录" in out
+    assert "1 本本机还没有的书被跳过" in out
+    assert library.load_library()["stats"]["total_read_time"] == 60
+
+
+def test_data_import_reports_a_missing_file(capsys, tmp_path) -> None:
+    # 路径打错：error 行 + 退出码 1
+    assert cli.main(["data", "import", str(tmp_path / "nope.json")]) == 1
+    assert "no such data file" in capsys.readouterr().err

@@ -71,6 +71,7 @@ __all__ = [
     "load_definitions",
     "load_state",
     "merge_ranges",
+    "merge_states",
     "metric_thresholds",
     "save_state",
     "session_metrics",
@@ -607,6 +608,90 @@ def save_state(state: Dict[str, Any], path: Optional[Path] = None) -> Path:
             pass
         raise
     return target
+
+
+def merge_states(base: Any, incoming: Any) -> Dict[str, Any]:
+    """Return *base* with the unlock state of *incoming* folded in.
+
+    This is what ``werd data import`` uses to move an achievement history to
+    another machine.  Both sides are normalised first (so a hand edited file
+    cannot smuggle bad values in), then merged field by field: unlocks and the
+    "seen" lists are united, counters are added, peak metrics keep the larger
+    value and the per day buckets are added.  Nothing is ever removed, so a bundle
+    that is imported twice can only ever add what is still missing.
+    """
+    # 两边先各自规整：手改坏的值在这里就被吸收掉
+    left = _normalise_state(base)
+    right = _normalise_state(incoming)
+    merged = empty_state()
+    # 已解锁：按 id 取并集；两边都有时保留原来那份（名字/时间戳不被覆盖）
+    unlocked: Dict[str, Dict[str, Any]] = {}
+    for entry in list(left["unlocked"]) + list(right["unlocked"]):
+        unlocked.setdefault(str(entry["id"]), entry)
+    merged["unlocked"] = list(unlocked.values())
+    # 事件计数：两边相加
+    counters: Dict[str, int] = dict(left["counters"])
+    for name, value in right["counters"].items():
+        counters[name] = counters.get(name, 0) + value
+    merged["counters"] = counters
+    # 指标：开关取或、峰值取大、其余计数相加
+    metrics: Dict[str, Any] = {}
+    for name in _INT_METRICS:
+        first, second = left["metrics"][name], right["metrics"][name]
+        if name in _FLAG_METRICS:
+            metrics[name] = 1 if (first or second) else 0
+        elif name in MAX_METRICS:
+            metrics[name] = max(first, second)
+        else:
+            metrics[name] = first + second
+    # 列表类指标（去过的国家、打开过的日期……）取并集
+    for name in _LIST_METRICS:
+        metrics[name] = sorted(
+            set(left["metrics"][name]) | set(right["metrics"][name])
+        )
+    # 周末时长是按天的桶：按天相加
+    bucket: Dict[str, int] = dict(left["metrics"]["weekend_seconds"])
+    for day, seconds in right["metrics"]["weekend_seconds"].items():
+        bucket[day] = bucket.get(day, 0) + seconds
+    metrics["weekend_seconds"] = bucket
+    # 每本书：读过的行区间取并集；字数取大而不是相加
+    # （两台机器读过同几页时，相加会把同一段字算两遍）
+    books: Dict[str, Dict[str, Any]] = {}
+    order = list(left["books"]) + [
+        book_id for book_id in right["books"] if book_id not in left["books"]
+    ]
+    for book_id in order:
+        first = left["books"].get(book_id) or {"words": 0, "counted": []}
+        second = right["books"].get(book_id) or {"words": 0, "counted": []}
+        counted = merge_ranges(list(first["counted"]) + list(second["counted"]))
+        books[book_id] = {
+            "words": max(int(first["words"]), int(second["words"])),
+            # 统一成 list[list[int]]：内存里的形状与写盘后的 JSON 一致
+            "counted": [[start, end] for start, end in counted],
+        }
+    merged["books"] = books
+    # 全局字数指标要跟着各书的字数和走（正常情况下两者本就相等）；
+    # 取三个值的最大值，既不倒退也不会因区间重叠而虚高
+    metrics["words_read"] = max(
+        sum(int(book["words"]) for book in books.values()),
+        left["metrics"]["words_read"],
+        right["metrics"]["words_read"],
+    )
+    merged["metrics"] = metrics
+    # 进度快照：当前值取大，门槛优先用先有的那份
+    progress: Dict[str, Dict[str, int]] = {}
+    order = list(left["progress"]) + [
+        key for key in right["progress"] if key not in left["progress"]
+    ]
+    for key in order:
+        first = left["progress"].get(key, {"current": 0, "required": 0})
+        second = right["progress"].get(key, {"current": 0, "required": 0})
+        progress[key] = {
+            "current": max(first["current"], second["current"]),
+            "required": first["required"] or second["required"],
+        }
+    merged["progress"] = progress
+    return merged
 
 
 # 分类的展示顺序：与 specification 里的四组 + 隐藏类一致

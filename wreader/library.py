@@ -370,6 +370,42 @@ def human_words(count: int) -> str:
     return str(value)
 
 
+def _delete_text_file(book: Dict[str, Any]) -> bool:
+    """Delete the converted text file of *book*; ``False`` when there was none.
+
+    The index is authoritative, so a missing or unreadable file is not an error:
+    it only means there was nothing left to delete.
+    """
+    # file_path 缺失或为空串：没有可删的东西（空路径的 name 也是空，跳过以免误删）
+    target = Path(str(book.get("file_path") or ""))
+    if not target.name:
+        return False
+    try:
+        # 删掉导入时写下的 UTF-8 正文
+        target.unlink()
+    except OSError:
+        # 文件早就不在了（或没权限）：删不掉不算错误
+        return False
+    return True
+
+
+def _drop_toc_cache(book_id: str) -> None:
+    """Best effort: delete the cached chapter table of *book_id*.
+
+    The cache is rebuildable, so every failure (no config, no cache file, no
+    permission) is swallowed -- it must never block removing a book.
+    """
+    try:
+        # 延迟导入：toc 依赖 library，模块级互相 import 会打结
+        from . import toc
+
+        # 缓存文件固定叫 <cache>/<book_id>_toc.json
+        toc.toc_cache_path(str(book_id)).unlink()
+    except (config.ConfigError, LibraryError, OSError):
+        # 反正是可重建的附属品：删不掉就留着
+        return
+
+
 def remove_book(book_id: str) -> Optional[Dict[str, Any]]:
     """Drop *book_id* from the index and delete its converted text file."""
     # 读出整个索引
@@ -380,15 +416,245 @@ def remove_book(book_id: str) -> Optional[Dict[str, Any]]:
         return None
     # 先把索引写回（索引是权威数据源）
     save_library(document)
-    # 再删掉转换后的正文文件
-    target = Path(str(book.get("file_path") or ""))
-    # 空路径（""）的 name 也是空，跳过以免误删
-    if target.name:
-        try:
-            target.unlink()
-        except OSError:
-            pass  # the index is authoritative, a missing file is not fatal
+    # 再删掉转换后的正文文件与目录缓存；删不掉也不回退，索引优先
+    _delete_text_file(book)
+    _drop_toc_cache(str(book_id))
     return book
+
+
+def clear_library() -> List[Tuple[str, Dict[str, Any]]]:
+    """Remove every book record together with its converted text file.
+
+    Reading statistics and the achievements state are deliberately left alone:
+    clearing the library is about *which books you have*, not about how long you
+    have read them.  Returns the removed ``(book_id, record)`` pairs in title
+    order, so callers can report what went away.
+    """
+    # 读出索引，准备把书目一次性清空
+    document = load_library()
+    # 先拍一份快照：后面要按标题排序、还要照着它删文件
+    removed = [(str(book_id), book) for book_id, book in document["books"].items()]
+    # 本来就是空书库：什么都不用做（也不用写盘）
+    if not removed:
+        return []
+    # 先清空 books 再落盘；save_library 会顺手把 stats.total_books 归零
+    document["books"] = {}
+    save_library(document)
+    # 再删正文文件与目录缓存（同上，索引已经写好了，删不掉也不回退）
+    for book_id, book in removed:
+        _delete_text_file(book)
+        _drop_toc_cache(book_id)
+    return sorted(removed, key=_title_key)
+
+
+def prune_missing_books() -> List[Tuple[str, Dict[str, Any]]]:
+    """Drop records whose converted text file no longer exists.
+
+    This is the reconciliation behind "I deleted the file from the novels folder,
+    why does ``werd list`` still show it?": ``file_path`` is the only evidence a
+    book has, so a record pointing at a file that is gone has nothing left to
+    read.  A record **without** a path is kept -- an empty path means "unknown",
+    not "deleted", and guessing there could throw away a hand written record.
+
+    Returns the removed ``(book_id, record)`` pairs in title order.
+    """
+    # 读出索引，逐本核对正文文件还在不在
+    document = load_library()
+    missing: List[Tuple[str, Dict[str, Any]]] = []
+    for book_id, book in list(document["books"].items()):
+        # 正文文件路径（load_library 保证键存在，但可能是个空串）
+        path = str(book.get("file_path") or "")
+        # 空路径：没有任何线索可查，宁可保留
+        if not path:
+            continue
+        # 文件还在：这本不用动
+        if Path(path).is_file():
+            continue
+        # 文件没了：摘掉记录（正文早就不在了，不需要再删文件）
+        missing.append((str(book_id), document["books"].pop(book_id)))
+    # 一本都没少：不碰磁盘，免得每次运行都重写索引
+    if not missing:
+        return []
+    # 有变化才落盘
+    save_library(document)
+    # 顺手清掉这些书留下的目录缓存
+    for book_id, _book in missing:
+        _drop_toc_cache(book_id)
+    return sorted(missing, key=_title_key)
+
+
+# 转移包（``werd data export``）里每本书带的字段：进度块中与阅读历史有关的那些
+#: Progress keys copied by :func:`reading_data`.
+_READING_PROGRESS_KEYS: Tuple[str, ...] = (
+    "current_line",
+    "percentage",
+    "last_read",
+    "total_time_seconds",
+    "sessions",
+    "bookmarks",
+    "finished",
+)
+
+
+def _has_reading_history(progress: Dict[str, Any]) -> bool:
+    """Return ``True`` when *progress* carries at least one sign of reading."""
+    # 下面任何一种痕迹都算"读过"：会话、累计时长、位置、书签、读完、上次阅读时间
+    return bool(
+        progress.get("sessions")
+        or int(progress.get("total_time_seconds") or 0)
+        or int(progress.get("current_line") or 0)
+        or progress.get("bookmarks")
+        or progress.get("finished")
+        or progress.get("last_read")
+    )
+
+
+def reading_data(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the *reading history* of *document* in a transferable shape.
+
+    Only the parts describing time spent reading are copied: the global ``stats``
+    block plus, per book, the ``progress`` fields behind the totals.  File paths
+    and chapter tables are left out on purpose -- the other machine keeps its own
+    copy of the book, and ``book_id`` is the SHA-1 of the converted text, so the
+    two sides line up without any extra bookkeeping.
+    """
+    # 防御性取值：文档结构不对时返回一份空壳，而不是炸掉
+    stats = document.get("stats") if isinstance(document, dict) else None
+    stats = stats if isinstance(stats, dict) else {}
+    # 每日时长桶（连续天数与热力图都读它）
+    daily = stats.get("daily_read_time")
+    daily = daily if isinstance(daily, dict) else {}
+    # 全局部分：累计时长 + 每日桶
+    payload: Dict[str, Any] = {
+        "total_read_time": int(stats.get("total_read_time") or 0),
+        "daily_read_time": {
+            str(day): int(seconds or 0) for day, seconds in daily.items()
+        },
+        "books": {},
+    }
+    # 只带走有阅读痕迹的书：没打开过的书没有时长/会话可搬
+    books = document.get("books") if isinstance(document, dict) else None
+    books = books if isinstance(books, dict) else {}
+    # 先筛掉形状不对的记录，再按标题排序，导出的包稳定可读
+    records = [
+        (str(book_id), book)
+        for book_id, book in books.items()
+        if isinstance(book, dict)
+    ]
+    for book_id, book in sorted(records, key=_title_key):
+        progress = book.get("progress")
+        progress = progress if isinstance(progress, dict) else {}
+        # 从没读过：这本不用进包
+        if not _has_reading_history(progress):
+            continue
+        # 标题只为人看，真正的身份是 book_id
+        entry: Dict[str, Any] = {"title": str(book.get("title") or "")}
+        # 只带出现过的字段：缺的由合并方当作"没有"，也避免多份空列表共享同一个对象
+        for key in _READING_PROGRESS_KEYS:
+            if key in progress:
+                entry[key] = progress[key]
+        payload["books"][book_id] = entry
+    return payload
+
+
+# 把另一个包里的阅读数据并进本机文档（只加不减：时长相加、会话去重、书签取并集）
+def merge_reading_data(document: Dict[str, Any], incoming: Any) -> Dict[str, int]:
+    """Fold *incoming* reading data (see :func:`reading_data`) into *document*.
+
+    Durations add up, sessions are appended (each one only once, so importing the
+    same bundle twice is harmless), and a book's position is adopted only when the
+    local record has no reading history of its own.  Books this library does not
+    know about are skipped -- without the book there is nowhere to attach them --
+    and counted in the returned summary.  *document* is modified in place, in the
+    same spirit as :func:`wreader.reader.accumulate_stats`.
+    """
+    # 进来的不是字典（手改坏的包）：什么都不合并
+    payload = incoming if isinstance(incoming, dict) else {}
+    # 书库与统计段落：load_library 之后一定存在，这里再兜一层
+    books = document.setdefault("books", {})
+    stats = document.setdefault("stats", {})
+    stats.setdefault("daily_read_time", {})
+    # 汇总：合并了几本书、跳过几本、搬过来多少秒（CLI 直接拿去打印）
+    summary = {"books": 0, "skipped": 0, "seconds": 0}
+    # 全局累计时长：两边相加
+    seconds = max(0, int(payload.get("total_read_time") or 0))
+    stats["total_read_time"] = int(stats.get("total_read_time") or 0) + seconds
+    summary["seconds"] = seconds
+    # 每日时长桶：按天相加（日期键统一成字符串，防手改出非字符串键）
+    daily = payload.get("daily_read_time")
+    if isinstance(daily, dict):
+        for day, value in daily.items():
+            key = str(day)
+            current = int(stats["daily_read_time"].get(key) or 0)
+            stats["daily_read_time"][key] = current + int(value or 0)
+    # 每本书：并会话、加时长、并书签
+    incoming_books = payload.get("books")
+    incoming_books = incoming_books if isinstance(incoming_books, dict) else {}
+    for book_id, entry in incoming_books.items():
+        book = books.get(str(book_id))
+        entry = entry if isinstance(entry, dict) else {}
+        # 本机还没有这本书：没有记录可挂，记一笔跳过
+        if not isinstance(book, dict):
+            summary["skipped"] += 1
+            continue
+        progress = book.get("progress")
+        if not isinstance(progress, dict):
+            progress = empty_progress()
+        # 本地完全没有阅读痕迹时，连对方的阅读位置一起接过来
+        fresh = not _has_reading_history(progress)
+        # 会话：按内容去重后追加（同一份包导两次不会把会话翻倍）
+        sessions = progress.get("sessions")
+        sessions = list(sessions) if isinstance(sessions, list) else []
+        known = {
+            json.dumps(item, ensure_ascii=False, sort_keys=True)
+            for item in sessions
+            if isinstance(item, dict)
+        }
+        for item in entry.get("sessions") or []:
+            # 形状不对的会话直接丢掉
+            if not isinstance(item, dict):
+                continue
+            # 序列化成键来判重：不预设字段，多一个少一个都能比较
+            marker = json.dumps(item, ensure_ascii=False, sort_keys=True)
+            if marker in known:
+                continue
+            known.add(marker)
+            sessions.append(item)
+        # 起点是定长 ISO 字符串，字典序就是时间序
+        sessions.sort(
+            key=lambda item: str(item.get("start") or "")
+            if isinstance(item, dict)
+            else ""
+        )
+        progress["sessions"] = sessions
+        # 本书累计时长相加
+        progress["total_time_seconds"] = int(
+            progress.get("total_time_seconds") or 0
+        ) + int(entry.get("total_time_seconds") or 0)
+        # 书签取并集（normalise_bookmarks 负责按行号去重排序）
+        marks = list(progress.get("bookmarks") or [])
+        if isinstance(entry.get("bookmarks"), list):
+            marks.extend(entry["bookmarks"])
+        progress["bookmarks"] = normalise_bookmarks(marks)
+        # 读完了就一直是读完
+        progress["finished"] = bool(progress.get("finished")) or bool(
+            entry.get("finished")
+        )
+        # 上次阅读时间取更晚的那个（ISO 字符串比较即时间比较）
+        last = max(
+            str(progress.get("last_read") or ""), str(entry.get("last_read") or "")
+        )
+        progress["last_read"] = last or None
+        # 本机从没读过这本书：位置与百分比一并接过来，接着对方停下的地方读
+        if fresh:
+            progress["current_line"] = int(entry.get("current_line") or 0)
+            percentage = entry.get("percentage")
+            # 只接受真正的数字，字符串（手改的包）忽略
+            if isinstance(percentage, (int, float)):
+                progress["percentage"] = float(percentage)
+        book["progress"] = progress
+        summary["books"] += 1
+    return summary
 
 
 # 各种"换行/分段"字符：Windows CRLF、老 Mac CR、Unicode 行分隔符、垂直制表等

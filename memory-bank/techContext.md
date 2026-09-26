@@ -1,6 +1,6 @@
 # Tech Context — 技术栈、环境与命令
 
-> 用什么技术、怎么装、什么约束、跑哪些命令。最后更新：**2026-09-25**。
+> 用什么技术、怎么装、什么约束、跑哪些命令。最后更新：**2026-09-26**。
 
 ## 运行时依赖（`pyproject.toml`）
 
@@ -60,6 +60,7 @@ NR_HOME / NR_NOVELS_DIR            # 改名前的旧名，兜底（仅在新名�
 | 正文（UTF-8） | `~/novels/<书名>_utf8.txt` | `$WREADER_NOVELS_DIR`、`library.novels_dir` |
 | **老数据（只读，程序不写也不删）** | `~/.wreader/vocab.json`（老生词本）、`~/.wreader/notes/*.md`（老笔记） | `$WREADER_HOME` |
 | **老译文缓存（无人读取）** | `~/.wreader/cache/<book_id>/ch{N}_en.txt`、`ch{N}_bilingual.txt` —— 代码里已没有读取路径，用户可自行删 | 旧 `translator.cache_dir` |
+| **搬运包（`werd data export` 的输出）** | **用户指定的文件路径**（不是目录），习惯放 `~/werd-data.json`；Windows 上常放 `%APPDATA%\wreader\` | 命令里给（不写死、不自动放进数据目录） |
 
 Windows 数据目录：`%APPDATA%\wreader`。
 
@@ -82,15 +83,15 @@ Windows 数据目录：`%APPDATA%\wreader`。
 
 | 路径 | 说明 |
 | --- | --- |
-| `wreader/` | 包本体（**11** 个模块 + `data/achievements.json`） |
+| `wreader/` | 包本体（**12** 个模块 + `data/achievements.json`） |
 | `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
-| `tests/` | **10 个文件**（9 个测试文件 + `conftest.py`），**559** 项 |
+| `tests/` | **11 个文件**（10 个测试文件 + `conftest.py`），**592** 项 |
 | `tools/` | **开发期校验脚本**（**8** 个 + `README.md`）：文档锚点 / 数字对拍 / 注释覆盖 / 折行 / 绘制 / 配色 / 鼠标 / 成就；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
 | `book/` | 开发用真实电子书样例（体积极大，不属于分发包，已被 `.gitignore`） |
 | `pyproject.toml` | 打包、依赖、`[project.scripts]`、`[tool.pytest]`、`[tool.pyright]` |
-| `README.md` / `README.en.md` / `使用指南.md` | 中文主文档 / 英文文档 / 小白教程（数字由 `tools/check_doc_numbers.py` 对拍，当前 ALL OK） |
+| `README.md` / `README.en.md` / `使用指南.md` | 中文主文档 / 英文文档 / 小白教程（前两份的数字由 `tools/check_doc_numbers.py` 对拍，当前 ALL OK；**`使用指南.md` 不在脚本覆盖范围**） |
 | `.vscode/settings.json` | 把 Pylance 与终端指向 `.venv` |
 | `.gitignore` | Python / venv / 工具缓存 / `.DS_Store` / `*.log` / **`book/`**（**不排除** `memory-bank/` 与 `.clinerules/`） |
 | `.git/` + 远端 | git 仓库本体（2026-09-22 建）。`origin` = `https://github.com/zhangziluo/wreader`，`main` 为默认分支 |
@@ -119,16 +120,21 @@ werd stats [--json]           # 阅读统计（--json 里仍保留 vocab_count /
 werd achievements             # 成就清单与进度
 werd config [<section.key> [value]] [--path] [--reset]
 werd toc <book_id> [--rebuild]  # 查看目录（章节表）；--rebuild 强制重解析并覆写缓存
+werd data export <文件>        # 把阅读时长 + 成就写成一个 JSON 包（换机、备份用）
+werd data import <文件>        # 把包并进本机（只加不减；本机没有的书进 skipped）
+werd prune                     # 摘掉正文文件已被删除的失效书目（每个命令启动前也会自动对账）
+werd clear                     # 清空书库（书目 + 转换后的正文），保留阅读时长与成就
 werd werd                     # 名字彩蛋（等同 werd word / werd --werd）
 
 # 版本控制（2026-09-22 起，仓库已在 GitHub 上）
 git status                                    # 动手前先看工作区是否干净
 git diff                                      # "只加注释、没动逻辑"必须靠它证明，别再靠猜
 git add -A && git commit -m "..."             # 提交
-git -c http.proxy= push                       # 代理没开时的兜底（见 activeContext 注意事项）
+# 代理没开时**不要**推：`curl -x http://127.0.0.1:7897 https://github.com` 返回 200 才推得了；
+# `git -c http.proxy= push` 这种"绕过"会挂在直连上（实测只能 pkill git-remote-https）
 
 # 开发
-.venv/bin/python -m pytest tests/              # 559 项，约 12 秒
+.venv/bin/python -m pytest tests/              # 592 项，约 20 秒
 .venv/bin/python -m pytest tests/test_reader.py              # 单文件
 .venv/bin/python -m pytest -k "streak or heatmap"            # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings / 0 informations
@@ -137,7 +143,7 @@ HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 .venv/bin/python -m
 # 开发期校验脚本（tools/，详见 tools/README.md；都能从任意目录运行）
 .venv/bin/python tools/check_docs.py              # 文档锚点 + 代码围栏配对（RESULT: OK）
 .venv/bin/python tools/check_doc_numbers.py       # README 里的行数/测试项数与实际对拍（ALL OK）
-.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 2771）
+.venv/bin/python tools/check_comments.py          # 注释覆盖（默认只报告；TOTAL: 3099）
 .venv/bin/python tools/verify_wrap.py             # 折行属性（OK: 40077 checks passed）
 .venv/bin/python tools/verify_draw.py             # 绘制不越界（OK: 140 draw checks passed）
 .venv/bin/python tools/verify_colors.py           # 需 pty：script -q /dev/null .venv/bin/python tools/verify_colors.py
@@ -175,23 +181,27 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
   （成就状态、书库索引）的用例间接覆盖，后者只有 `__version__`。
   想零风险打磨 `lock.py` 的 `fcntl.flock` 窗口，用 `tools/` 下临时加脚本调，**别把新脚本留在 `/tmp`**。
 
-## 当前测试规模（2026-09-25 实测：`559 passed in 11.76s`）
+## 当前测试规模（2026-09-26 实测：`592 passed in 22.52s`）
 
 | 文件 | 项数 | 侧重 |
 | --- | --- | --- |
 | `test_reader.py` | 174 | `Pager`、`FakeStdscr`、折行、滚轮 / 触摸、标记与浮层 |
-| `test_library.py` | 119 | 导入 / 书库索引 / 章节 / 正文读写 |
+| `test_library.py` | 132 | 导入 / 书库索引 / 章节 / 正文读写 / `prune` 与 `clear` |
 | `test_stats.py` | 70 | 时长统计、热力图、连续天数、`--json` |
-| `test_achievements.py` | 51 | 表达式求值、事件指标、解锁与去重 |
+| `test_achievements.py` | 51 | 表达式求值、事件指标、解锁与去重 / `merge_states` |
 | `test_config.py` | 49 | `SCHEMA`、TOML 读写、旧配置迁移 |
-| `test_cli.py` | 33 | 命令分发与输出形态 |
+| `test_cli.py` | 45 | 命令分发与输出形态（含 `data` / `prune` / `clear`） |
 | `test_geo.py` | 31 | 位置解析 / 缓存 / 离线降级 |
 | `test_toc.py` | 18 | 章节正则 / epub 目录 / 缓存失效 |
 | `test_env.py` | 14 | 云主机 / WSL / tmux / 可编辑安装信号 |
+| `test_transfer.py` | 8 | 搬运包导出 / 合并 / 拒绝坏包 / 缺书计数 |
 
-> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 559；
+> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 592；
 > `tools/check_doc_numbers.py` 会把这些数字与 README 表格对拍（当前 `RESULT: ALL OK`）。
-> 2026-09-25 之前是 **832** 项（含 `test_notes` / `test_translate` / `test_translator` / `test_vocab`）。
+> 2026-09-25 之前是 **832** 项（含 `test_notes` / `test_translate` / `test_translator` / `test_vocab`），
+> 2026-09-25 是 559 项 / 9 个测试文件。
+> 2026-09-26 新增 `test_transfer.py` 8 项，其余增量来自 `test_library.py`（119 → 132）与
+> `test_cli.py`（33 → 45）。
 
 ## 开发用样例数据
 

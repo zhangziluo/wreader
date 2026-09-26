@@ -46,6 +46,7 @@ the next launch resumes exactly where you stopped.
 | 📊 Statistics | Total / today / this week / this month / daily goal / streak / a 30-day heatmap; `--json` for scripts |
 | 🏆 Achievements | **48** achievements (first book, night owl, hundred-day streak, weekend warrior, …) unlocked by **events**, with per-category progress bars, an unlock animation and a bell; press `?` inside the reader for the help page |
 | ⚙️ Settings | One `settings.toml` for everything; `werd config` reads and writes it with typo suggestions; the old `config.json` is migrated automatically |
+| 💾 Moving data | `werd data export` packs your reading time, progress, bookmarks and achievements into one JSON file, and `werd data import` merges it back on another machine (add-only); `werd prune` drops records whose text file is gone, `werd clear` empties the shelf (time and achievements stay) |
 
 ---
 
@@ -254,6 +255,10 @@ At a glance:
 | `werd achievements` | Achievement list and unlock progress |
 | `werd werd` / `werd word` / `werd --werd` | The name easter egg (and the 名字彩蛋 achievement) |
 | `werd toc <book_id>` | Show a book's table of contents (chapters + progress %); `--rebuild` re-parses it |
+| `werd data export <file>` | Pack your reading time and achievements into one JSON file |
+| `werd data import <file>` | Merge that bundle into this machine (add-only) |
+| `werd prune` | Drop records whose converted text file no longer exists |
+| `werd clear` | Empty the library (text files included; reading time and achievements are kept) |
 | `werd config` | View or edit settings |
 
 Exit codes: `0` on success; `1` for a bad argument or nothing found (`no book matches ...`)
@@ -443,6 +448,96 @@ werd toc 3e027c4de949 --rebuild  # ignore the cache, re-parse the text and rewri
   ```
 - `Tab` in the reader opens the very same table of contents (plus a live filter).
 
+### `werd data export <file>` / `werd data import <file>`
+
+```bash
+werd data export ~/werd-data.json     # pack reading time and achievements into one JSON file
+# copy the file to the new machine (USB stick / cloud drive / scp), then run:
+werd data import ~/werd-data.json     # merge it into this machine, add-only
+```
+
+The bundle carries your **reading record**: total and daily time, per-book progress (line, percentage,
+time) and bookmarks, plus the achievement state and event counters. It contains **no book text and no
+settings** — run `werd import` for the books themselves on the new machine.
+
+- Merging is **add-only**: durations and event counters add up (importing the same bundle twice counts it
+  twice — that is the "incremental merge" reading), sessions are deduplicated by content (a second import
+  does not add a phantom session), bookmarks are unioned, a book's "finished" flag never flips back once
+  true, and a reading position is adopted only when this machine has **no record at all** for that book.
+- A book you imported but **never actually read** does not go into the bundle (there is no progress, time
+  or bookmark to move), so the count inside the bundle can be lower than in `werd list`.
+- A book is identified by `book_id` (the SHA-1 of its text), so **same text, same id**: run `werd import`
+  on both machines and the records line up. Books that this machine does not have are skipped and counted,
+  so you can import the books and run the command once more (the global time is merged either way, so the
+  trip is not wasted).
+- The bundle is plain UTF-8 JSON — readable at a glance and editable by hand:
+
+```json
+{
+  "kind": "werd-data",
+  "version": 1,
+  "exported_at": "2026-09-26T21:03:11",
+  "summary": { "books": 2, "unlocked": 7, "total_read_time": 43200 },
+  "reading": {
+    "total_read_time": 43200,
+    "daily_read_time": { "2026-09-26": 3600 },
+    "books": {
+      "3e027c4de949": {
+        "title": "三体",
+        "total_time_seconds": 3600,
+        "current_line": 120,
+        "percentage": 42.7,
+        "bookmarks": [120],
+        "finished": false,
+        "sessions": [{ "start": "2026-09-26T20:00:00", "end": "2026-09-26T21:00:00", "lines_read": 120 }]
+      }
+    }
+  },
+  "achievements": { "version": 1, "unlocked": [], "counters": {}, "metrics": {}, "books": {} }
+}
+```
+
+- Importing the wrong file cannot break anything: a missing file, broken syntax, a file that is not a
+  `werd` bundle, or a `version` newer than this build makes the command print one `error: ...` line and
+  exit `1`, leaving your local data untouched.
+
+### `werd prune`
+
+```bash
+werd prune
+```
+
+```
+已清理 1 个失效书目（正文文件已被删除）：
+  三体 3e027c4de949
+```
+
+(The output is Chinese: "pruned 1 dead record (its text file was deleted): 三体 3e027c4de949".)
+
+`file_path` is a record's only evidence: once you delete the converted text from `~/novels` by hand, that
+record can never be read again. `werd prune` drops those dead records from the index. In practice you
+rarely need it — **every command reconciles the index first** and prints a one-line notice — so use it when
+you want an explicit cleanup, or to see which titles went away.
+
+### `werd clear`
+
+```bash
+werd clear
+```
+
+```
+已清空书库：2 本书及其正文文件已删除
+阅读时长与成就已保留（werd stats 仍然可用）
+```
+
+("Library emptied: 2 books and their text files were deleted. Reading time and achievements kept, so
+`werd stats` still works.")
+
+This empties the shelf: every book in the index goes, **and so do the converted text files** (the original
+ebooks live wherever you keep them and are none of `werd`'s business). Total time, the daily buckets and
+the achievement state all stay: what the command forgets is *which books you have*, not *how long you
+read*.
+
 ---
 
 ## Reader key bindings
@@ -573,6 +668,9 @@ never cut in half.
 | Book text (UTF-8) | `~/novels/<title>_utf8.txt` | `$WREADER_NOVELS_DIR`, `library.novels_dir` |
 
 On Windows the data directory is `%APPDATA%\wreader`.
+
+The file written by `werd data export` is **not** in there: it is an ordinary JSON file and you choose
+where it goes on the command line (see `werd data export` / `werd data import` above).
 
 Two environment variables:
 
@@ -832,31 +930,33 @@ wreader/
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
-│   ├── __init__.py          __version__ and the module map (21 lines)
-│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1165 lines)
-│   ├── cli.py               argparse definition + one handler per sub-command (833 lines)
+│   ├── __init__.py          __version__ and the module map (22 lines)
+│   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1250 lines)
+│   ├── cli.py               argparse definition + one handler per sub-command (1004 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (966 lines)
 │   ├── env.py               environment probe: cloud host / WSL / tmux / editable install (183 lines)
 │   ├── geo.py               location: ip-api lookup + a one hour cache, country → continent, feud pairs (343 lines)
-│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1159 lines)
+│   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1425 lines)
 │   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (80 lines)
 │   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, toc overlay, help page and notices (2799 lines)
 │   ├── stats.py             metrics, heatmap, achievement definitions, celebration (817 lines)
 │   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
+│   ├── transfer.py          the `werd data` bundle: export reading time + achievements to JSON, merge add-only (198 lines)
 │   └── data/
 │       └── achievements.json  the 48 achievement definitions (348 lines)
-└── tests/                   559 tests, all offline (see "Running the tests" below)
+└── tests/                   592 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, library samples, epub builder
     ├── test_achievements.py 51 tests — word counting, range dedup, event accounting, state file, locking, unlock checks, live thresholds, geo/env metrics
-    ├── test_cli.py          33 tests — argument parsing, every sub-command's output, exit codes, the achievement banner, the name egg
+    ├── test_cli.py          45 tests — argument parsing, every sub-command's output, exit codes, the achievement banner, the name egg
     ├── test_config.py       49 tests — defaults, type checks, legacy migration, data dir adoption, directory resolution
     ├── test_env.py          14 tests — cloud host / WSL / tmux / editable install probing (all injected)
     ├── test_geo.py          31 tests — country → continent, feud pairs, ip-api parsing, caching, offline fallback
-    ├── test_library.py      119 tests — encodings, chapters, epub, dedup, file names, search, recent books
+    ├── test_library.py      132 tests — encodings, chapters, epub, dedup, file names, search, recent books, clear/prune, merging a bundle
     ├── test_reader.py       174 tests — paging maths, Pager, status bar, keys, sessions, wrapping, wheel, toc overlay,
     │                          help page, achievement notice, recovery flow
     ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
-    └── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
+    ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
+    └── test_transfer.py      8 tests — exporting a bundle, importing on a fresh machine, add-only merging, error cases
 ```
 
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,
@@ -906,7 +1006,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 559 tests, about 15 seconds
+pytest                      # 592 tests, about 15 seconds
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -1055,7 +1155,7 @@ Ten former issues that are now fixed, kept here so they are not mistaken for pen
   the translation feature, so the problem no longer exists.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings (`translator.py` / `vocab.py` went away with the feature).
-- ~~No automated tests~~ → 559 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 592 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → that code path was
   removed together with the translation feature (the discovery back then, while writing the tests:
   `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN`).

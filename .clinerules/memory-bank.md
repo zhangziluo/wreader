@@ -66,9 +66,10 @@
 - `npx pyright` 保持 **0 errors / 0 warnings**（`wreader/`、`tests/`、`tools/` 都纳入）。
 - 每条逻辑语句上方保留一行**口语化中文注释**（讲清"在干嘛 + 类型/副作用/边界"），
   同时保留原有 docstring 与英文注释。
-  ⚠️ **实测校正（2026-09-25 复测）**：这条是**目标**，不是既成事实 ——
-  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **2771** 条语句上方没有紧邻
-  注释行（最多的是 `test_reader.py` 591、`reader.py` 480、`achievements.py` 223）。
+  ⚠️ **实测校正（2026-09-26 复测）**：这条是**目标**，不是既成事实 ——
+  `tools/check_comments.py` 严格测出 `wreader/` + `tests/` 仍有 **3099** 条语句上方没有紧邻
+  注释行（最多的是 `test_reader.py` 591、`reader.py` 480、`achievements.py` 256、
+  `library.py` 233；2026-09-25 复测是 2771）。
   早先记录的 "TOTAL: 0" 是脚本 bug 造成的假绿，别再引用它。
   实务上遵循的是"一段逻辑配一段中文注释"的风格，别执行到每条 `return` / `assert` 都单独加。
 
@@ -104,6 +105,12 @@
   `verify_colors.py` / `verify_mouse.py` / `verify_achievements.py`。
   改完对应代码顺手跑一下，它们都自己推算仓库根，在哪个目录运行都行，退出码 0 = 通过。
   删功能时**连它的专用脚本一起删**（别留没人维护的死脚本）。
+- **数据搬家与清理的既定行为**（2026-09-26 起）：`werd data export/import` 的包是**明文 UTF-8 JSON**
+  （`kind=werd-data` / `version=1`），合并**只加不减** —— 时长与每日桶相加、会话按内容去重、
+  书签取并集、`finished` 粘住、位置只在本机没有历史时才采用。
+  ⚠️ **同一个包导两次，时长就翻倍，这是有意取舍，别当 bug 修**（理由见 `progress.md` 决策行与
+  `systemPatterns.md` 模式 #12 / 坑 #34）。`werd clear` **只清书库、保留时长与成就**，且**没有二次确认**；
+  `cli._auto_prune_books` 的自动对账会跳过 `clear` / `prune` 自己（坑 #35）。
 - ⚠️ **改文件只用 `editor` 工具，提交信息也不要走 heredoc**：本环境对 heredoc 的处理不可靠 ——
   实测 `cat > file <<EOF` **文件一个字节都没写**（看着像成功），而 `git commit -F - <<MSG`
   消息虽然进了提交，命令却**挂到 300 秒以上**不返回。规矩：写文件用 `editor`，

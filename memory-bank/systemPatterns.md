@@ -44,20 +44,22 @@
 其余模块都是**纯函数 + 普通数据**，不依赖终端、不依赖全局状态（除 `config` 的带戳缓存）。
 这让分页数学、章节边界、统计指标、成就条件都能脱离 TTY 测试。
 
-## 模块职责与规模（2026-09-25 实测：11 个 `.py` 共 8,840 行）
+## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 9,561 行）
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
-| `wreader/__init__.py` | 21 | `__version__`、模块地图 | 1 个 |
-| `wreader/achievements.py` | 1165 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重、**实时门槛（`metric_thresholds`/`crossed_thresholds`）与基线（`session_metrics`）**、**遗留老数据只读计数（`vocab` / `notes`）** | 30 个（`check_achievements`/`record_event`/`metric_thresholds`…） |
-| `wreader/cli.py` | 833 | argparse 定义 + 子命令处理函数（`import`/`list`/`search`/`read`/`continue`/`stats`/`achievements`/`config`/`toc`/`werd`+`word`） | `["build_parser", "main"]` |
+| `wreader/__init__.py` | 22 | `__version__`、模块地图 | 1 个 |
+| `wreader/achievements.py` | 1250 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重、**实时门槛（`metric_thresholds`/`crossed_thresholds`）与基线（`session_metrics`）**、**遗留老数据只读计数（`vocab` / `notes`）**、**跨机合并（`merge_states`，只加不减）** | 31 个（`check_achievements`/`record_event`/`merge_states`…） |
+| `wreader/cli.py` | 1004 | argparse 定义 + 子命令处理函数（`import`/`list`/`search`/`read`/`continue`/`stats`/`achievements`/`config`/`toc`/`data`/`prune`/`clear`/`werd`+`word`）；`_auto_prune_books` 在每个命令前对账一次（`clear` / `prune` 自己跳过） | `["build_parser", "main"]` |
 | `wreader/config.py` | 966 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 16 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/env.py` | 183 | **环境探测**：云主机 / WSL / tmux / 可编辑安装（四个输入全部可注入） | 8 个（`detect`/`flags`/`SIGNAL_NAMES`…） |
 | `wreader/geo.py` | 343 | **地理位置**：ip-api 查询 + 一小时缓存 + 国家→大洲 + 世仇组合；注入式 fetcher、离线降级 | 15 个（`load_location`/`continent_of`/`feud_hit`…） |
-| `wreader/library.py` | 1159 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**阅读统计的落库侧（`accumulate_stats`）** | **无 `__all__`** |
+| `wreader/library.py` | 1425 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**阅读统计的落库侧（`accumulate_stats`）**、**书库清理（`prune_missing_books` 摘死记录 / `clear_library` 清书库保成绩）** | **无 `__all__`** |
 | `wreader/lock.py` | 80 | **跨进程文件锁**（POSIX `flock`；Windows 退化为"只有原子替换"） | 3 个 |
 | `wreader/reader.py` | 2799 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 18 个（`Pager`/`open_reader`…） |
 | `wreader/stats.py` | 817 | 指标、热力图、连续天数、**成就定义加载**、庆祝动画、**遗留数据只读计数（`vocab_legacy_count` / `notes_count`）** | 27 个 |
+| `wreader/toc.py` | 474 | **目录解析**：中文卷/章正则、epub nav/ncx、缓存与失效判定 | 10 个（`build_toc`/`load_toc`…） |
+| `wreader/transfer.py` | 198 | **数据搬家**：把阅读时长 / 每日桶 / 位置 / 书签 / 会话 / 成就解锁打成纯 JSON 包（`BUNDLE_KIND` / `BUNDLE_VERSION`），并把别的机器的包**只加不减**合并进来；坏包抛 `TransferError` | 5 个（`export_data`/`import_data`/`TransferError`…） |
 | `wreader/data/achievements.json` | 348 | **48 个**成就定义（可被 `$WREADER_HOME` 下的同名文件覆盖） | — |
 
 ## 关键设计模式
@@ -191,6 +193,25 @@
   只有老用户拿着旧计数；「双语者」「词汇积累」「生词狂魔」「笔记达人」只对**还留着老数据文件**的用户可解锁。
   这是刻意的取舍：宁可少数成就"封存"，也不虚构指标。
 
+### 12. 数据搬家：包 + 「只加不减」的合并（2026-09-26 新增）
+
+跨机器搬「阅读时长 + 成就」不引入服务端：`transfer.py` 把状态**导出成一个纯 UTF-8 JSON 包**，
+在另一台机器上再**合并**回来。
+
+- **包的形状（`kind` / `version` 是硬判据）**：`{"kind": "werd-data", "version": 1, "exported_at": …,
+  "books": {<book_id>: {progress, stats, sessions, bookmarks}}, "achievements": {…}}`。
+  `book_id` 就是正文 SHA-1 前 12 位，所以**两台机器只要导入了同一份内容，id 自然对上**，不靠书名匹配。
+- **只收有阅读痕迹的书**：`progress.last_read` 为空**且** `total_time_seconds == 0` 的书不进包
+  （刚导入还没读过的书搬过去只是空壳，还会让「已合并 N 本」虚高）。
+- **合并语义（`library` 侧 + `achievements.merge_states`）**：时长与每日桶**相加**、
+  `sessions` 按内容**去重**、`bookmarks` 取**并集**、`finished` **粘住**（任一侧为真就是真）、
+  位置**只在本机没有任何历史时才采用**；成就 `unlocked` 取并集、`counters` 取 max。
+- **本机没有的书进 `skipped`**（`transfer.import_data` 的返回值里带计数，CLI 打印出来），不静默丢弃。
+- **坏包一律拒绝**：文件不存在 / 是目录 / 不是 JSON / `kind` 不是 `werd-data` / `version` 比本机新
+  → 抛 `TransferError` → `cli` 统一打印 `error: …` 并 `exit 1`。
+- ⚠️ **代价：重复导入会把时长翻倍**（没有「谁更新」的可信标记，只加不减是最不坏的策略，
+  详见 `progress.md` 的决策行与坑 #34）。
+
 ## 关键实现路径（改动时必看）
 
 | 场景 | 调用链 |
@@ -212,6 +233,10 @@
 | 环境 / 位置探测 | `open_reader` → `_prepare_achievements`（门槛 + 基线 + 预标记）→ `_probe_achievements("env", {"flags": env.flags()})` → `_probe_geo(pager, settings)` →（`geo.load_location` 命中缓存就不联网）→ `_probe_achievements("geo_change", location)` |
 | 名字彩蛋 | `cli.main`（`--werd`）或 `_HANDLERS["werd"/"word"]` → `_word_egg(name)` → `_record_achievements("name_egg", {"egg": name})` |
 | **遗留数据计数** | `cli.cmd_stats` → `stats.build_report` → `stats.compute_metrics` → `stats._vocab_file_size()`（数 `vocab.json`）；成就侧 `achievements.compute_metrics` → `achievements._note_total()`（数 `notes/*.md`）。**两条路都只读** |
+| 导出搬运包 | `cli.cmd_data`（`data export`）→ `transfer.export_data(path)` → 读 `library.json` + `achievements.json`（缺失按空处理）→ **只留有阅读痕迹的书** → `path.write_text(json.dumps(..., ensure_ascii=False))`，返回 `{"books": n, "path": …}` |
+| 导入搬运包 | `cli.cmd_data`（`data import`）→ `transfer.import_data(path)` → 校验 `kind` / `version` → 逐本对 `book_id` 合并（时长与每日桶相加、`sessions` 去重、书签并集、位置按需采用）→ `achievements.merge_states` → `save_library`；返回 `{"books": n, "skipped": m, …}` |
+| 书库对账 | 每个命令 `cli.main` 顶部 → `if args.command not in ("clear", "prune"): _auto_prune_books()` → `library.prune_missing_books()` → `file_path` 指向的文件已不存在的记录摘掉（空路径保留）→ 有变化才 `save_library` 并打一行提示 |
+| 清空书库 | `cli.cmd_clear` → `library.clear_library()` → `books = {}` 落盘 → 逐本 `_delete_text_file` + `_drop_toc_cache`；**不碰** `achievements.json` 与阅读时长（打一行说明保留了它们） |
 | 终端流控 | `_run` → `_disable_flow_control()`（POSIX 用 `termios` 清 `IXON\|IXOFF`；`endwin()` 负责还原） |
 
 ## 值得记住的坑（血泪）
@@ -343,6 +368,23 @@
     所以那两处的数字要么实测后手写、要么写判据（例如"`git status` 不显示领先/落后"）。
     另外它按 `wreader/<文件名>` 认条目，子包里的同名文件会被错算到包根那份上 ——
     所以 README 里的**子包条目不写行数**（现在包内没有子包了，这条留给将来）。
+34. **搬运包的合并是「只加不减」，同一个包导两次会把时长加两遍**（2026-09-26）：实测
+    `total_time_seconds` 600 → 1200 → 1800。这不是 bug 而是取舍（数据里没有「谁更新」的可信标记，
+    取 max 会丢时长），所以三份文档（`README.md` / `README.en.md` / `使用指南.md`）都写明了
+    「同一份包导两遍，时长就算两遍」。
+    `test_importing_the_same_bundle_twice_does_not_duplicate_sessions` 只保证**会话不重复计数**，
+    时长那部分**是有意相加的** —— 别把它当 bug「修好」。
+35. **自动对账必须跳过 `clear` / `prune` 自己**（2026-09-26）：`cli.main` 里是
+    `if args.command not in ("clear", "prune"): _auto_prune_books()`。漏掉这个白名单，
+    `werd prune` 会先被自动对账摘干净、自己再跑一遍只剩「没有失效书目」（看着像命令失效），
+    `werd clear` 则会多刷一行「已清理 N 个失效书目」的噪音。
+36. **`prune` 只认 `file_path` 这一条证据**：路径为**空串**的记录**保留**（空 = 未知，
+    不等于已删除）；手写的、没走过导入流程的记录不能被「猜」成死记录抹掉。
+    另：摘记录**先把索引落盘再删文件**（`clear_library` 同理），删文件失败不回退索引。
+37. **`werd clear` 没有二次确认**（2026-09-26 现状）：命令直接执行，风险由两点兜住 ——
+    只删书目与 `~/novels/` 下的转换正文，`achievements.json`、阅读时长、`settings.toml` 全不动，
+    且输出明确写「阅读时长与成就已保留」。以后给别的命令加确认时别顺手把它也加上，
+    否则 `werd clear` 在脚本里会卡住（现状是可以直接跑）。
 
 
 
