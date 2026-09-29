@@ -204,6 +204,7 @@
   位置 / 时长 / 成就经同一个边车与同一个 `session.py` 落库，与终端阅读器完全一致。
 - 详细状态、四条踩坑（epub.js 用不上 / FTS5 中文分词 / rustc 1.87 MSRV / async 命令撞 sqlx）
   与"没做什么"，见 `activeContext.md` ㊲ 与那边的 `README.md`。
+- 验证：`npx tsc --noEmit` 0 错误、`npm run build` 通过、`cargo test` **20 passed**、`cargo build` 出可执行文件。
 
 ## 待办
 

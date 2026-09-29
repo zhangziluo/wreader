@@ -110,7 +110,7 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | 它的缓存 | SQLite（`sqlx`，非 `tauri-plugin-sql`）：书架快照 / FTS5 全文索引 / GUI 位置 / GUI 设置 —— **可随时删，`~/.wreader` 才是权威** |
 | 与本仓库的接口 | **只经 JSON-RPC 边车** `python -m wreader.serve`（`$WREADER_CORE_PYTHON` 或开发布局的 `../wreader/.venv/bin/python`） |
 | 本机工具链 | node **v24.18.0** / npm **11.16.0** / cargo & rustc **1.87.0**（< 部分依赖要求的 1.88，见它的 README 坑 3）；**没装** PyInstaller |
-| 它的验证 | `npx tsc --noEmit` 0 错误、`npm run build` 通过、`cargo test` **18 passed**（含真拉起本仓库边车的契约测试） |
+| 它的验证 | `npx tsc --noEmit` 0 错误、`npm run build` 通过、`cargo test` **20 passed**、`cargo build` 出可执行文件（含真拉起本仓库边车的契约测试与线格式契约） |
 
 **它不复制本仓库的任何逻辑**：进度百分比用 `library.position_percentage` 的算法、
 时间戳用内核的"本地时间 + 秒级"格式、行区间交给 `achievements` 去重、位置与时长经

@@ -1576,7 +1576,15 @@ React (src/)  ──invoke──▶  Rust (src-tauri/src/lib.rs)
   一屏 40 行，跳章走 `toc`，每分钟 `position`、退出时 `session` 记时长与成就并显示新解锁）、
   本地 FTS5 搜索（每本书先点一次「建立索引」，因为内核不提供全文检索接口）。
 - **验证**：`npx tsc --noEmit` **0 错误**、`npm run build` 通过（`dist/` 227.7 kB JS / 1.7 kB CSS）、
-  `cargo test` **18 passed**（含真拉起 Python 内核的 6 项契约测试、中文全文检索端到端、切块与分词纯函数）。
+  `cargo test` **20 passed**、`cargo build` 成功产出 30 MB 可执行文件。
+  20 项里包含 6 项**真拉起 Python 内核**的契约测试、中文全文检索端到端、切块与分词的纯函数用例，
+  以及 2 项**线格式契约测试**（`BookRow` 能吃下 `serve.py::_book_rows` 的真实形状、
+  `Position` 的字段名与 `src/lib/types.ts` 一字不差 —— 这是前端↔Rust 唯一没人守的边界）。
+- **端到端线格式实测**（临时脚本，跑完即删）：在一个临时 `$WREADER_HOME` 里让 sidecar 导入一本书，
+  再用 `src/lib/core.ts` **原样拼出的载荷**发 `position` / `session` / `text` / `toc`，然后回头读 `library.json`：
+  `position -> {'saved': True}`、`session -> saved=True unlocked=['first_book','book_finished']`、
+  `library -> current_line=8 / percentage=100.0 / sessions=1 / total_time_seconds=600 / finished=True`，
+  关掉 stdin 后 sidecar `exit 0`。**这证明 GUI 写的确实是终端阅读器读写的那份数据与那套成就。**
 
 **四条经验（都写进了 GUI 的 README 与代码注释）**：
 
