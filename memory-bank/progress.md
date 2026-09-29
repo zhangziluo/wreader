@@ -1,6 +1,6 @@
 # Progress — 已完成 / 待办 / 已知问题
 
-> 项目整体进度与决策演变。最后更新：**2026-09-26**。
+> 项目整体进度与决策演变。最后更新：**2026-09-29**。
 > ⚠️ **2026-09-25 的功能裁剪**：翻译 / 生词本 / 笔记三个功能已**整体删除**（源码、测试、工具、
 > 文档全清），老数据文件改为**只读计数**供成就使用。本文里 2026-09-23 及以前提到这三个功能的段落
 > 属于**历史记录**（解释当时为什么那样做），不代表现状；现状以本节及 `projectbrief.md` 为准。
@@ -10,15 +10,16 @@
 | 维度 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0`（Pre-Alpha，`Development Status :: 2 - Pre-Alpha`） |
-| 测试 | **633 passed**（本机 8~44 秒；全离线、不碰真实数据，`test_reader.py` 213 项 / `test_config.py` 51 项） |
+| 测试 | **682 passed**（本机 16~34 秒；全离线、不碰真实数据，`test_reader.py` 213 项 / `test_library.py` 132 项 / `test_serve.py` 34 项 / `test_session.py` 15 项） |
 | 类型检查 | `npx pyright` → **0 errors, 0 warnings, 0 informations**（`wreader/`、`tests/`、`tools/` 都纳入） |
-| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **3403** 条语句上方没有紧邻注释行（2026-09-25 是 2771 → ㉜ 后 3099 → ㉝ 后 3204；口径与处置见待办 #1） |
+| 注释覆盖 | `tools/check_comments.py` 实测：`wreader/` + `tests/` 有 **3544** 条语句上方没有紧邻注释行（2026-09-25 是 2771 → ㉜ 后 3099 → ㉝ 后 3204 → ㉞ 后 3403 → ㊱ 加 141 条；逐文件明细与处置见待办 #1） |
 | 文档 | `README.md`（中文主文档）、`README.en.md`、`使用指南.md`；两份 README 的数字由 `tools/check_doc_numbers.py` 自动对拍（**ALL OK**），`使用指南.md` 与 memory-bank 的数字靠手工同步（脚本不管） |
 | 版本控制 | **git 仓库**，`main` 跟踪 `origin/main`（GitHub: `zhangziluo/wreader`）（提交数每次提交都会变，故不写死；判据是 `git status` 不显示领先/落后） |
 | CLI 冒烟 | `werd --version` → `werd 0.1.0`；`werd data export/import`、`werd prune`、`werd clear` 已在沙箱里跑通全链路（见 `activeContext.md` ㉜） |
-| 编译 | `py_compile` 全部 `.py` 通过（wreader **12** + tests **11** + tools **8**） |
-| 开发期校验 | `tools/` **8 个脚本全绿**（本会话实测）：文档锚点 OK、数字对拍 ALL OK、注释报告 3403、折行 40077、绘制 140、`verify_achievements` 19 项、`verify_mouse` 8 项、`verify_colors` 干净退出 |
-| 包规模 | `wreader/` **12** 个 `.py` / **10,182** 行 + `data/achievements.json`（348 行 / 48 条） |
+| 无头内核 | `echo '{"id":1,"method":"ping"}' \| .venv/bin/python -m wreader.serve` → `{"id": 1, "result": {"pong": true, "version": "0.1.0"}}`；22 个方法，**不加载 `curses` / `rich`**（有测试在干净解释器里证明） |
+| 编译 | `py_compile` 全部 `.py` 通过（wreader **14** + tests **13** + tools **8**） |
+| 开发期校验 | `tools/` **8 个脚本全绿**（2026-09-29 实测）：文档锚点 OK、数字对拍 ALL OK、注释报告 3544、折行 40077、绘制 140、`verify_achievements` 19 项、`verify_mouse` 8 项、`verify_colors` 干净退出 |
+| 包规模 | `wreader/` **14** 个 `.py` / **10,965** 行 + `data/achievements.json`（348 行 / 48 条） |
 
 
 ## 已完成（可用的功能）
@@ -163,10 +164,10 @@
   全程用 `.venv/bin/python -m pip` 而**不 activate**（守住"不污染 PATH"这条约定），
   并自动往 `~/.bashrc` / `~/.zshrc` 写别名 —— 装完重启终端即可用。
   选项：`--dev`（多装 pytest）/ `--no-alias`（不碰 rc）/ `--help`；用 `sh install.sh` 跑会自动 `exec bash` 转交。
-- **633** 项自动化测试（全离线、每测试独立 `tmp_path`；分文件计数见 `techContext.md`）。
+- **682** 项自动化测试（全离线、每测试独立 `tmp_path`；分文件计数见 `techContext.md`）。
 - pyright 0 告警；`.vscode/settings.json` 与 `[tool.pyright]` 双轨配置（`wreader/` + `tests/` + `tools/`）。
-- `wreader/` 12 个 + `tests/` 11 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
-  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **3403** 条语句上方没有紧邻注释行），
+- `wreader/` 14 个 + `tests/` 13 个 Python 文件在 2026-09 大幅补过一轮口语化中文注释；
+  ⚠️ 但**严格口径下没做到 100%**（`tools/check_comments.py` 实测还有 **3544** 条语句上方没有紧邻注释行），
   实际遵循的风格是「一段逻辑配一段中文注释」，详见待办 #1。
 - 校验脚本已从 `/tmp` 搬进 **`tools/`**（现共 **8** 个 `.py` + `README.md`）：`check_docs.py`、
   `check_doc_numbers.py`、`check_comments.py`、`verify_wrap.py`、`verify_draw.py`、`verify_colors.py`、
@@ -177,16 +178,41 @@
   `main` 跟踪 `origin/main`；`book/`（367 MB 真实电子书样例）被 `.gitignore` 挡在版本控制之外。
   从此"只加注释、不动逻辑"这类改动可以用 `git diff` 直接证明。
 
+### 无头内核与共享会话内核（2026-09-29 新增）
+- **`wreader/session.py`（248 行）**：把原本和 curses 混在 `reader.py` 里的纯逻辑抽出来 ——
+  `read_lines`（正文切行）、`build_session`、`accumulate_stats`、`apply_position` /
+  `write_position`（只存位置、不动统计）/ `write_session`（粘性 `finished` + `record_history` 开关）。
+  `reader.py` 只留薄包装（`Pager` → 普通值），`reader.read_lines` / `build_session` /
+  `accumulate_stats` 变成 **import 别名**，所以 `tests/test_reader.py` 的既有调用一行没改。
+  顺带把 `toc._read_lines` 那份**副本**删掉，改调 `session.read_lines`（它当年是因为"不能 import reader"才复制的）。
+- **`wreader/serve.py`（601 行）**：无头 **JSON-RPC 边车**，一行一个 JSON 请求 / 响应，
+  22 个方法（`ping`/`version`/`paths`/`list`/`recent`/`search`/`get_book`/`toc`/`text`/
+  `position`/`session`/`event`/`daily_open`/`import`/`stats`/`achievements`/`config_get`/
+  `config_set`/`export`/`import_data`/`prune`/`clear`）。坏 JSON / 未知方法 / 参数类型不对
+  **只回一条 error**，进程继续跑。**不 import `reader` / `cli`**。
+- **测试 49 项**：`tests/test_serve.py` 34（协议 + 每个方法 + 隔离证明）、`tests/test_session.py` 15。
+  隔离证明走的是**干净解释器**（subprocess），因为 pytest 进程里 `reader` 早被 `test_reader.py` 导进来了。
+- **改动规模**：`wreader/` 12 → **14** 个模块、10,182 → **10,965** 行；测试 633 → **682**。
+  `py_compile` / `pytest` / `pyright` / `check_docs` / `check_doc_numbers` / `check_comments` 全绿。
+
 ## 待办
 
 > 2026-09-25 删功能时顺带**清掉了一批已完成条目**（笔记落盘、成就 Phase 2/3、README 数字更正、
 > 校验脚本搬家）—— 那些内容已写进上面的「已完成」或 `activeContext.md`，不再占待办位。
 
 ### 高优先级
-1. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，至今未拍板；2026-09-26 复测 **3403**）：
-   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 还有这么多条不满足
-   （2026-09-26 实测明细：`test_reader.py` 777、`reader.py` 588、`achievements.py` 256、`library.py` 233、
-   `test_library.py` 229；2026-09-25 是 2771，㉜ 的搬运功能 + ㉝ 的自动翻页 + ㉞ 的防作弊校验共添了 600 多条）。
+1. **决定「注释覆盖率」怎么处理**（2026-09-22 新发现，至今未拍板；2026-09-29 复测 **3544**）：
+   严格按「每条逻辑语句上方一行注释」测，`wreader/` + `tests/` 还有这么多条不满足。
+   **2026-09-29 逐文件实测**（本文件是唯一一份明细，别处只引用）：
+   `test_reader.py` 777、`reader.py` 566、`achievements.py` 256、`library.py` 233、
+   `test_library.py` 229、`test_achievements.py` 180、`test_config.py` 146、`cli.py` 130、
+   `toc.py` 126、`test_cli.py` 120、`stats.py` 106、`config.py` 91、`test_serve.py` 82、
+   `test_stats.py` 82、`test_toc.py` 80、`test_transfer.py` 71、`test_geo.py` 47、
+   `serve.py` 45、`test_session.py` 31、`transfer.py` 28、`session.py` 7、`lock.py` 19、
+   `env.py` 17、`test_env.py` 15、`conftest.py` 14、`geo.py` 46、`__init__.py` 0。
+   演变：2026-09-25 是 2771 → ㉜ 后 3099 → ㉝ 后 3204 → ㉞ 后 3403 →
+   ㊱（无头边车 + 会话内核）**加 141**：新增 `serve.py` 45 + `session.py` 7 + `test_serve.py` 82 +
+   `test_session.py` 31 = 165，同时把 `reader.py` 588 → 566、`toc.py` 128 → 126（各降 22 / 2）。
    三个选项：
    (a) 把约定口径正式改成"一段逻辑配一段中文注释"，不再声称 100%
    —— **文档已按 (a) 校正**（`projectbrief.md` / `.clinerules` / 本条），但脚本仍按严格口径报告；
@@ -325,4 +351,8 @@
 | **2026-09-26** | 校验时钟量的是「**自动翻页连续开了多久**」，读者按键 / 滚轮 / 改窗口都不重置它 | 若按键就重置，任何人随手敲一下就能永久躲过校验（那等于没有防作弊）。代价是本就在认真读的人十分钟也会被问一次 —— 可以用 `auto_scroll_check_minutes` 调长或设 0 关掉 |
 | **2026-09-26** | 分钟数用 **float**（`auto_scroll_check_minutes`=10.0），不是 int | 两个理由：一是能设 `0.5` 分钟这样的小数（试效果 / 自动化的端到端验证要秒级周期）；二是 int 型键会被 `coerce_value` 直接拒掉 `"0.05"`（实测 `expects an integer`），坑 #44 |
 | **2026-09-26** | 记忆库里的**逐文件注释缺口明细只写一份**（放 `progress.md` 待办 #1），其余文件只引用不重复 | 同一批数字被抄进 `projectbrief.md`、`.clinerules/memory-bank.md`、`tools/README.md` 后，各自漂成了不同年份的旧值（`reader.py` 585 / 509 并存）。协议本来就要求「不制造第二个事实来源」，这次把违反它的三处一起改回来 |
+| **2026-09-29** | 隔离 CLI 阅读器的办法是**加一层进程接口**（`serve.py`，行分隔 JSON-RPC），而**不是搬文件、也不是重写内核** | 用户目标：GUI 复用同一份书库/时长/成就，但终端阅读器不能被拆坏。内核本来就是纯函数，缺的只是「一条不碰终端、不碰 curses 的入口」。用进程边界做隔离，GUI 不必懂 Python、内核不必知道 GUI 存在；代价是多一层协议 + 一个常驻进程，收益是 `werd` 一行没改、633 项既有测试全绿 |
+| **2026-09-29** | 新增 **`wreader/session.py`** 把会话落库从 `reader.py` 里抽出来，而不是让 `serve.py` 复制一份 | `read_lines` / `accumulate_stats` / `_write_position` / `save_session` 与终端无关，却和 curses 住在同一文件；`toc.py` 已经因此**复制过一份** `_read_lines`（注释里写着"不能 import reader：它有 curses"）。再做第二个前端就变成同一事实三份 —— 先抽内核，再让 reader / serve / toc 共用 |
+| **2026-09-29** | `serve.py` **绝不 import `reader` / `cli`**，并用「干净解释器」测试守住这条约束 | 功能上 import 了照样能跑（`import curses` 不需要 TTY），所以**肉眼看不出问题** —— 只能靠测试守。否则无头内核启动时要付一个全屏 UI 的代价，在没 curses 的平台上还会直接 ImportError。之所以要开子进程验证：pytest 进程里 `reader` 早被 `test_reader.py` 导进来了，查 `sys.modules` 等于什么都没查 |
+| **2026-09-29** | GUI 与 CLI 的**位置坐标允许不对齐**（行号 ↔ epub.js 的 CFI），只保证书库 / 时长 / 成就共享 | 两套坐标无法无损互转，硬要精确对齐只会两边都不准。定下的口径：**时长与成就必须精确**（它们经 `session.py` 走同一份代码），**位置在各自前端精确**（GUI 存 CFI、CLI 存行号），GUI 只把「CFI → 近似百分比/行号」喂回内核 |
 

@@ -1,32 +1,27 @@
 # Active Context — 当前焦点与最近改动
 
-> 每次会话结束前更新这个文件。最后更新：**2026-09-26**。
+> 每次会话结束前更新这个文件。最后更新：**2026-09-29**。
 
 ## 当前状态一句话
 
-代码库处于**干净、全绿**状态：**633 passed**（本机 8~44 秒，本会话四次实测 11.58 / 21.97 / 23.76 / 43.84 秒）、
-`npx pyright` **0 errors / 0 warnings / 0 informations**、`tools/` 的 **8** 个校验脚本全绿
-（`check_docs` OK / `check_doc_numbers` ALL OK / `check_comments` **3403** / `verify_wrap` 40077 /
+代码库处于**干净、全绿**状态：**682 passed**（本机 16.0 ~ 33.5 秒，本会话三次实测 15.96 / 33.48 / 7.62 秒
+只跑新文件）、`npx pyright` **0 errors / 0 warnings / 0 informations**、`tools/` 的 **8** 个校验脚本全绿
+（`check_docs` OK / `check_doc_numbers` ALL OK / `check_comments` **3544** / `verify_wrap` 40077 /
 `verify_draw` 140 / `verify_colors` 干净退出（`-1/-1` 可用）/ `verify_mouse` 8 项 /
-`verify_achievements` 19 项），`git status -sb` 收尾是 `## main...origin/main`（没有领先 / 落后）。
+`verify_achievements` 19 项）。
 
-最近两轮工作都是 **2026-09-26、都围绕自动翻页**，而且**都已提交并推送**：
-㉞（提交 `feat(reader): 自动翻页久了弹一道算术题防作弊`）给自动翻页加了**防作弊校验** ——
-连续自动翻页 10 分钟后弹一道 100 以内加减乘除的四选一题，按 `1`~`4` 选一个才继续、
-没作答（`Esc` / 别的键 / 超时）就停，配置加 `reader.auto_scroll_check_minutes` /
-`reader.auto_scroll_check_seconds` 两个键；㉟（提交 `chore(memory-bank): 同步防作弊校验（㉞）的实测数字与踩坑`）
-是它的收尾复核 —— 三个真 pty 脚本补跑、一个「探针假警报」的澄清、记忆库全量对账。
-**没有半成品悬着**：下个会话直接挑待办里的事项做即可（`reader.theme` 或注释口径拍板）。
+**上一轮（㊱，2026-09-29）做的事**：把命令行阅读器的内核**隔离**出来给图形界面复用 ——
+新增 `wreader/session.py`（会话内核，无 curses）与 `wreader/serve.py`（无头 JSON-RPC 边车，22 个方法），
+`reader.py` / `toc.py` 改成调它们，`werd` 与既有 633 项测试一行没动。
+**已提交并推送**（见下方 ㊱ 的提交号）。
 
-- `wreader/` = **12** 个 `.py` / **10,182** 行（`reader.py` **3411**、`config.py` **975**）；
-  `tests/` = 11 个文件 / **633** 项；`tools/` = 8 个 `.py`。
-- 配置 **4 个 section / 20 个键**（本会话新增 `reader.auto_scroll_check_minutes` /
-  `reader.auto_scroll_check_seconds`）；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
-- 阅读器新增两个键：`a`（自动翻页开关）、`>` / `+` / `=`（加速）、`<` / `-` / `_`（减速）；
-  校验题**不用新键**，直接按 `1`~`4` 作答。
-- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3403** 条语句上方没有紧邻注释行
-  （2026-09-25 是 2771 → ㉜ 之后 3099 → ㉝ 之后 3204 → 本会话的新代码与新测试又加到 3403；
-  口径与处置见 `progress.md` 待办 #1）。
+- `wreader/` = **14** 个 `.py` / **10,965** 行（`reader.py` **3349**、`serve.py` **601**、`session.py` **248**、
+  `library.py` **1425**、`cli.py` **1004**、`config.py` **975**）；`tests/` = 13 个文件 / **682** 项；
+  `tools/` = 8 个 `.py`。
+- 配置 **4 个 section / 20 个键**；状态栏 **9** 个 token 可用；成就 **48** 条；`EVENTS` 白名单 **16** 个。
+- ⚠️ 注释覆盖**不是** 100%：严格口径下 `wreader/` + `tests/` 有 **3544** 条语句上方没有紧邻注释行
+  （2026-09-25 是 2771 → ㉜ 之后 3099 → ㉝ 之后 3204 → ㉞ 之后 3403 → ㊱ 之后 3544；
+  逐文件明细只在 `progress.md` 待办 #1 里）。
 - ⚠️ 遗留数据（`vocab.json`、`notes/*.md`、旧译文缓存）**仍被只读**，`werd stats --json`
   的 `vocab_count` / `translations` / `translate_hits` / `notes_count` 四个键仍在（脚本兼容）。
 - ⚠️ IDE 里飘的**幽灵告警**（仓库根那份 **143 行**野生 `cli.py`，见 ㉔ / ㉕）：
@@ -37,7 +32,7 @@
   翻页按屏幕行推进（⑮）、屏顶坐标升级为 `(源行号, 段内偏移)`（⑯）、`werd continue`（⑰）、
   `./install.sh`（⑱）、CLI 改名 `werd`（⑲）、目录浮层 + `werd toc`（⑳）、
   成就引擎 Phase 1（㉖）、成就 Phase 2/3（㉙）、数据搬家与清理（㉜）、自动翻页（㉝）、
-  自动翻页防作弊校验（㉞）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
+  自动翻页防作弊校验（㉞）、无头内核与会话内核（㊱）。**已删除**：笔记（㉑ / ㉘）、翻译（㉒ / ㉓）。
 
 ## 最近改动（2026-09-22 起，按时间顺序）
 
@@ -1489,10 +1484,84 @@ RESULT: ALL OK
    明细只留 `progress.md` 待办 #1）、`projectbrief.md` 与 `progress.md`（`reader.py` 缺口
    `585` → **588**）、`memory-bank/README.md`（模式数 `12` → **14**，补上坑 **46** 条）。
 
+### ㊱ 隔离阅读器内核：会话内核 `session.py` + 无头 JSON-RPC 边车 `serve.py`（2026-09-29）
+
+**背景（用户目标）**：要做一个**图形阅读器**（Tauri v2 + React/TS + SQLite + epub.js），
+与终端阅读器**共用同一份** `~/.wreader` 数据（书库、时长、成就），并要求**把命令行阅读器隔离出去**。
+拍板的做法是：**不动 `werd`、不重写内核**，而是给纯函数内核加一层**进程接口**。
+
+1. **`wreader/session.py`（248 行，新文件）**——阅读会话内核，**不 import `curses` / `rich`**：
+   `read_lines`（正文切行，行号唯一的来源）、`build_session`、`accumulate_stats`、
+   `iso` / `now`、`apply_position`（纯函数：把位置/书签/百分比写进文档，粘性 `finished`）、
+   `write_position`（只落位置、不动统计）、`write_session`（位置 + 会话明细 + 时长，含 `record_history` 开关）。
+   `__all__` 8 个。
+2. **`wreader/reader.py`（3411 → 3349 行）**——只留薄包装：`_write_position(document, book_id, pager, moment)`
+   把 `Pager` 拆成普通值后调 `session.apply_position`；`save_position` / `save_session` 同理；
+   `read_lines` / `build_session` / `accumulate_stats` 变成 **import 别名**，
+   `_now` / `_iso` 也改成 `from .session import iso as _iso, now as _now`。
+   → `tests/test_reader.py` 里 `reader.accumulate_stats(...)` 这类既有调用**一行没改**，213 项全绿。
+3. **`wreader/toc.py`（474 → 470 行）**——删掉 `_read_lines` 那份**副本**（它当年的注释写着
+   「这里不能 import reader：它有 curses」），改成 `session.read_lines` + 把 `LibraryError` 翻成空列表。
+   **这是本次最值钱的顺手修复：同一事实终于只有一份。**
+4. **`wreader/serve.py`（601 行，新文件）**——无头 JSON-RPC 边车，`python -m wreader.serve`：
+   - 协议：stdin 一行 `{"id","method","params"}` → stdout 一行 `{"id","result"}` /
+     `{"id","error":{"type","message"}}`；空行跳过；**一问一答、按顺序、立即 flush**。
+   - 22 个方法：`ping` `version` `paths` `list` `recent` `search` `get_book` `toc` `text` `position`
+     `session` `event` `daily_open` `import` `stats` `achievements` `config_get` `config_set`
+     `export` `import_data` `prune` `clear`。
+   - **绝不退出**：坏 JSON（`id` 回 `null`）/ 未知方法 / `params` 不是对象 / 参数类型不对
+     → 都只回一条 error；兜底的 `except Exception` 把消息写 **stderr**（stdout 是协议，不能污染）。
+   - **不 import `reader` / `cli`**：实测 `import wreader.serve` 之后 `curses` / `rich` /
+     `wreader.reader` / `wreader.cli` **都不在 `sys.modules`** 里。
+   - `_book_rows` 把嵌套索引记录**拍平**成一行一书的 JSON（`id`/`title`/`author`/`total_lines`/
+     `current_line`/`percentage`/`last_read`/`total_time_seconds`/`finished`/`bookmarks`/`chapter_count`/…），
+     `list` / `recent` / `search` 共用同一形状。
+   - `text` 一次最多 `_MAX_TEXT_COUNT`=2000 行、缺省 `_DEFAULT_TEXT_COUNT`=200 行（防客户端一次要走整本书）。
+   - `session` 的 `ranges`（读过的行区间）只在非空时才去读整本正文结算字数（大书很贵）。
+5. **测试 +49 项**：`tests/test_serve.py` 34（协议 + 每个方法 + `_book` 小助手 + **干净解释器隔离证明**）、
+   `tests/test_session.py` 15。**共 633 → 682**。
+6. **文档同步**：两份 README 的模块表（+`serve.py` / `session.py`，`reader.py` 3411→3349、`toc.py` 474→470、
+   `__init__.py` 22→24）、测试表（+2 行，总数 633→682）、新增「无头内核：`python -m wreader.serve`」小节、
+   分层约定补一段「共享内核」；`wreader/__init__.py` 的模块地图加两行；
+   `tools/check_comments.py` 里那份**已漂移的历史数字**（2771）改成指向 `progress.md` 待办 #1。
+   记忆库：`systemPatterns.md`（模块表 + 模式 #15/#16 + **坑 #47/#48/#49**）、`techContext.md`、
+   `progress.md`、本文件。
+7. **写测试时踩的三个坑（三处都是测试**自己**写错，不是代码）**，值得记住：
+   - `library.normalise_newlines` 会 `rstrip("\n")` **丢掉末尾空行**，所以 `"a\r\nb\r\n"` → `["a","b"]`（不是三行）；
+   - `_handle_text` **先校验书、再解析参数**，所以「参数类型不对」的用例必须传一个**真的** book_id，
+     否则先撞上 `unknown book id`；
+   - `reader.page_height` 的默认值是 **24**（不是 20）—— 测试改成与 `config.default_for(...)` 对拍，
+     不把默认值抄死。
+8. **验证（全部实跑）**：`py_compile` OK；`pytest tests/` → **682 passed**（15.96 / 33.48 秒两次全量）；
+   `npx pyright` → **0 errors, 0 warnings, 0 informations**（新文件也纳入，含 `tests/`）；
+   `tools/check_docs.py` → `RESULT: OK`；`tools/check_doc_numbers.py` → `RESULT: ALL OK`；
+   `tools/check_comments.py` → **3544**（新文件 165 条，同时 `reader.py` 588→566、`toc.py` 128→126）。
+   隔离佐证（手工跑过两次）：`import wreader.serve` 后四个模块名都不在 `sys.modules`；
+   `printf` 五行（含坏 JSON 与空行）喂给 `python -m wreader.serve` → 四条响应、进程不退出。
+9. **开工前先处理了一处工作区脏状态**：`README.en.md` 与 `memory-bank/activeContext.md` 有未提交改动，
+   而它们是**更旧的一版快照**（`activeContext` 写着 592 项、缺 ㉝/㉞ 自动翻页，而 HEAD 是 633 那一版）。
+   已 `git stash push -m "stale docs snapshot before GUI work..."` 保住它们，恢复干净基线后开工
+   —— 下个会话若在 `git stash list` 里看到它，那是**旧快照备胎**，不是待恢复的成果。
+
+**已提交并推送**（见 `activeContext.md` 顶部状态、`git log`）。
+
 ## 待办 / 下一步
 
-0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3403** 条缺口
-   （2026-09-26 复测：上一次是 2771 → ㉜ 之后 3099 → ㉝ 之后 3204 → 本会话的防作弊校验又添了 199 条）。
+> **交接给下个会话的第一件事：图形阅读器（用户当前主线）。**
+> 内核那一半（阶段 1）已完成并推送 —— `wreader/serve.py` 就是给 GUI 用的接口。剩下的都在
+> **`wreader` 仓库之外**的新目录里（用户指定的做法：放在非 GitHub 目录，物理上不可能被推上去）：
+> - **阶段 2**：`npm create tauri-app`（React + TS 模板）+ `epubjs` / `@tauri-apps/api` /
+>   `@tauri-apps/plugin-sql`；Rust 侧 `core_client.rs`（开发期用 `<repo>/.venv/bin/python -m wreader.serve`
+>   起子进程，按行读写 JSON）、`db.rs`（SQLite：`books` / FTS5 全文索引 / `positions`(CFI) / `gui_settings`）。
+>   ⚠️ **SQLite 只是缓存与索引，`~/.wreader` 的 JSON 才是唯一事实来源，随时可重建。**
+> - **阶段 3**：把导入 / 阅读 / 统计 / 搜索接上内核（走 `serve.py` 的方法表）。
+> - **阶段 4（可选）**：PyInstaller 把内核打成 `werd-core` 当 Tauri 的 `externalBin`，再 `tauri build`。
+>   ⚠️ 本机**没装** Tauri CLI（`cargo tauri` / `tauri` 都没有）、**没装** PyInstaller —— 阶段 4 要先装。
+> - ⚠️ 坐标口径见 `systemPatterns.md` 模式 #15 最后一条：**时长与成就必须精确，位置允许近似**
+>   （GUI 存 CFI，只把「CFI → 近似百分比/行号」喂回内核）。
+
+0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3544** 条缺口
+   （2026-09-29 复测：上一次 2771 → ㉜ 后 3099 → ㉝ 后 3204 → ㉞ 后 3403 → ㊱ 后 3544）。
    要么正式把口径定为"一段逻辑配一段注释"（文档已如此），要么对改到的文件做 `--strict` 增量门禁。
 1. **`reader.theme` 仍未实现**（预留项，改了没效果）：在 `_init_colors()` 里按主题 `init_pair()`，
    并给正文 / 状态栏 / 书签分配 color pair；务必保住 `use_default_colors()` 的透明背景（背景用 `-1`），

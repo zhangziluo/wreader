@@ -1,12 +1,12 @@
 # System Patterns — 架构与关键设计
 
-> 系统怎么搭的、关键设计模式、组件关系、容易踩的实现路径。最后更新：**2026-09-25**。
+> 系统怎么搭的、关键设计模式、组件关系、容易踩的实现路径。最后更新：**2026-09-29**。
 
 ## 分层架构
 
 ```
                     ┌──────────────────────────────┐
-  用户 ──命令──▶    │ cli.py    argparse + 子命令   │  ← 唯一对外入口（含 rich 渲染）
+  用户 ──命令──▶    │ cli.py    argparse + 子命令   │  ← 终端入口（含 rich 渲染）
                     └───────┬──────────────────────┘
                             │ 调用纯函数式 API
         ┌───────────────────┼───────────────────┐
@@ -28,13 +28,20 @@
                               reading_session.json, geo.json, cache/}
                   ~/novels/<书名>_utf8.txt
 
-  纯数据层之外的特例：
+  纯数据层之外的特例（都只在真 TTY / 只在被调用时跑）：
   reader.py ── curses 全屏前端（Pager + 绘制 + 按键），只在真 TTY 里跑
                │
                ├──▶ toc.py      ← 目录浮层用的章节表
                └──▶ 探索支线（开书时各探一次）：
                     env.py   ← 纯读环境变量 / platform.release() / direct_url.json
                     geo.py   ← ip-api（一小时缓存，可注入 fetcher，离线返回空）
+                    ⚠️ env.py / geo.py 现在由 session.py 的 session_end 载荷经
+                       serve.py 也能上报，但**探测仍在阅读器侧触发**
+
+  session.py ── 阅读会话内核（无 curses）：正文切行 + 位置/会话落库
+               ▲                    ▲
+               │ 调用同一份写法      │
+        reader.py（终端）      serve.py ── 无头 JSON-RPC 边车（stdin/stdout，给 GUI 用）
 
   ⚠️ 2026-09-25 起不再有 translator.py / translate/ / vocab.py / notes.py，
      也没有任何"引擎可插拔层"；成就引擎只把老 vocab.json / notes/*.md **只读**数一遍。
@@ -44,21 +51,27 @@
 其余模块都是**纯函数 + 普通数据**，不依赖终端、不依赖全局状态（除 `config` 的带戳缓存）。
 这让分页数学、章节边界、统计指标、成就条件都能脱离 TTY 测试。
 
-## 模块职责与规模（2026-09-26 实测：12 个 `.py` 共 10,182 行）
+`serve.py` 是这条约定的**受益者也是守卫者**：它把同一批纯函数暴露成 JSON-RPC，
+自己**不 import `reader` / `cli`**（`tests/test_serve.py` 会在一个干净解释器里
+断言 `curses` / `rich` / `wreader.reader` / `wreader.cli` 都没被加载）。
+
+## 模块职责与规模（2026-09-29 实测：14 个 `.py` 共 10,965 行）
 
 | 文件 | 行数 | 职责 | `__all__` |
 | --- | --- | --- | --- |
-| `wreader/__init__.py` | 22 | `__version__`、模块地图 | 1 个 |
+| `wreader/__init__.py` | 24 | `__version__`、模块地图 | 1 个 |
 | `wreader/achievements.py` | 1250 | **事件驱动成就引擎**：状态文件、事件累加、解锁判定、字数去重、**实时门槛（`metric_thresholds`/`crossed_thresholds`）与基线（`session_metrics`）**、**遗留老数据只读计数（`vocab` / `notes`）**、**跨机合并（`merge_states`，只加不减）** | 31 个（`check_achievements`/`record_event`/`merge_states`…） |
 | `wreader/cli.py` | 1004 | argparse 定义 + 子命令处理函数（`import`/`list`/`search`/`read`/`continue`/`stats`/`achievements`/`config`/`toc`/`data`/`prune`/`clear`/`werd`+`word`）；`_auto_prune_books` 在每个命令前对账一次（`clear` / `prune` 自己跳过） | `["build_parser", "main"]` |
 | `wreader/config.py` | 975 | settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁；`SCHEMA` 是 4 section / 20 键的单一事实来源 | 44 个（`SCHEMA`/`DEFAULTS`/`Config`…） |
 | `wreader/env.py` | 183 | **环境探测**：云主机 / WSL / tmux / 可编辑安装（四个输入全部可注入） | 8 个（`detect`/`flags`/`SIGNAL_NAMES`…） |
 | `wreader/geo.py` | 343 | **地理位置**：ip-api 查询 + 一小时缓存 + 国家→大洲 + 世仇组合；注入式 fetcher、离线降级 | 15 个（`load_location`/`continent_of`/`feud_hit`…） |
-| `wreader/library.py` | 1425 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**阅读统计的落库侧（`accumulate_stats`）**、**书库清理（`prune_missing_books` 摘死记录 / `clear_library` 清书库保成绩）** | **无 `__all__`** |
+| `wreader/library.py` | 1425 | txt/epub 导入、编码识别、书名解析、索引、模糊搜索、最近在读、**书库清理（`prune_missing_books` 摘死记录 / `clear_library` 清书库保成绩）**、`normalise_newlines` | **无 `__all__`** |
 | `wreader/lock.py` | 80 | **跨进程文件锁**（POSIX `flock`；Windows 退化为"只有原子替换"） | 3 个 |
-| `wreader/reader.py` | 3411 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、**自动翻页（免手翻 + 防作弊校验）**、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复** | 20 个（`Pager`/`open_reader`/`DEFAULT_AUTO_SCROLL_INTERVAL`…） |
+| `wreader/reader.py` | 3349 | curses 分页阅读器：视图、搜索、书签、状态栏、绘制、滚轮/触摸、**自动翻页（免手翻 + 防作弊校验）**、目录浮层、**标记选字（仅引用缓冲区）**、**帮助页、成就通知、中断恢复**；位置/会话落库已**委托**给 `session.py` | 20 个（`Pager`/`open_reader`/`DEFAULT_AUTO_SCROLL_INTERVAL`…） |
+| `wreader/serve.py` | 601 | **无头 JSON-RPC 边车**：一行一个 JSON 请求/响应（`{"id","method","params"}` → `{"id","result"}` / `{"id","error":{...}}`），22 个方法覆盖书库/目录/正文/位置/会话/事件/统计/成就/设置/导出导入/清理；**不 import `reader` / `cli`**，坏行只回 error 不退出 | 4 个（`handle_request`/`serve`/`main`/`ServeError`） |
+| `wreader/session.py` | 248 | **阅读会话内核（无 curses）**：`read_lines` 切正文、`build_session`、`accumulate_stats`、`apply_position`/`write_position`/`write_session`（粘性 `finished`、`record_history` 开关）；**reader 与 serve 共用这唯一一份写法** | 8 个（`read_lines`/`write_session`/`apply_position`…） |
 | `wreader/stats.py` | 817 | 指标、热力图、连续天数、**成就定义加载**、庆祝动画、**遗留数据只读计数（`vocab_legacy_count` / `notes_count`）** | 27 个 |
-| `wreader/toc.py` | 474 | **目录解析**：中文卷/章正则、epub nav/ncx、缓存与失效判定 | 10 个（`build_toc`/`load_toc`…） |
+| `wreader/toc.py` | 470 | **目录解析**：中文卷/章正则、epub nav/ncx、缓存与失效判定；`_read_lines` 现在直接调 `session.read_lines` | 10 个（`build_toc`/`load_toc`…） |
 | `wreader/transfer.py` | 198 | **数据搬家**：把阅读时长 / 每日桶 / 位置 / 书签 / 会话 / 成就解锁打成纯 JSON 包（`BUNDLE_KIND` / `BUNDLE_VERSION`），并把别的机器的包**只加不减**合并进来；坏包抛 `TransferError` | 5 个（`export_data`/`import_data`/`TransferError`…） |
 | `wreader/data/achievements.json` | 348 | **48 个**成就定义（可被 `$WREADER_HOME` 下的同名文件覆盖） | — |
 
@@ -270,6 +283,45 @@
 2. **计时量的是「自动翻页连续开了多久」**，读者按键 / 滚轮 / 改窗口都**不重置**它
    （`defer_auto_scroll` 只推后下一拍翻页）。若按键就重置，敲一下键就能永久躲过校验。
 
+### 15. 无头边车：同一批纯函数 + 一行一个 JSON（2026-09-29 新增）
+
+图形界面（Tauri + React + epub.js）要复用「书库 / 目录 / 位置 / 时长 / 统计 / 成就」，
+但**不能**把 curses 前端搬过去，也**不想**把阅读数学写第二遍。做法是把纯函数按
+**行分隔 JSON（line-delimited JSON-RPC）**暴露出来：
+
+```
+客户端 ──写一行──▶ {"id":7,"method":"session","params":{...}}
+       ◀─读一行── {"id":7,"result":{"saved":true,"unlocked":[...]}}
+```
+
+- **协议最小**：请求 `{"id","method","params"}`，成功 `{"id","result"}`，
+  失败 `{"id","error":{"type","message"}}`。`id` 原样回带，`params` 不是对象就按 `{}` 算。
+- **绝不退出**：坏 JSON / 未知方法 / 参数类型不对 → 只回一条 error（坏 JSON 的 `id` 是 `null`）。
+  兜底的 `except Exception` 把 traceback 写 **stderr**（stdout 是协议，污染了就废了）。
+- **写路径与 CLI 同源**：`position` / `session` 都转手给 `wreader/session.py`，
+  所以不存在「GUI 写的库 CLI 读不懂」。
+- **隔离是可验证的**：`serve.py` 只 import `achievements/config/library/session/stats/toc/transfer`，
+  `tests/test_serve.py` 用一个**干净解释器**断言 `curses` / `rich` / `wreader.reader` / `wreader.cli`
+  都没进 `sys.modules` —— 别在 `serve.py` 里 import `reader`，那条测试会立刻红。
+- **坐标不可对齐时的取舍**：CLI 的位置是**行号**，epub.js 的位置是 **CFI**。
+  两边共用书库/时长/成就，但 GUI 只把「CFI → 大概百分比 → 近似行号」喂给内核，
+  位置允许有误差，**时长与成就不允许**。
+
+### 16. 会话内核：把「落库」从 curses 里抽出来（2026-09-29 新增）
+
+`read_lines` / `build_session` / `accumulate_stats` / `_write_position` / `save_position` /
+`save_session` 原本都住在 `reader.py` 里（和 curses 同文件），于是 `toc.py` 当年还专门写了
+一份 `_read_lines` 的副本，理由是「不能 import reader：它有 curses」。
+
+现在这些纯逻辑住在 **`wreader/session.py`**（不 import curses / rich），`reader.py` 只留薄包装：
+
+- `reader.read_lines` / `reader.build_session` / `reader.accumulate_stats` 是 **import 进来的别名**
+  （`tests/test_reader.py` 里那些 `reader.accumulate_stats(...)` 调用因此原样继续可用）；
+- `reader._write_position(document, book_id, pager, moment)` 把 `Pager` 拆成普通值后调
+  `session.apply_position(...)`；`reader.save_position` / `reader.save_session` 同理；
+- `toc._read_lines` 改成调 `session.read_lines` 并把 `LibraryError` 翻成空列表。
+- **别把 `_now` / `_iso` 再定义一遍**：`reader.py` 里只剩 `from .session import iso as _iso, now as _now`。
+
 ## 关键实现路径（改动时必看）
 
 | 场景 | 调用链 |
@@ -282,7 +334,10 @@
 | 鼠标 / 触摸 | `_run` 首行 `_enable_mouse()`（`mouseinterval(0)` + `mousemask`）→ `get_wch` 返回 `KEY_MOUSE` → `_mouse_event_delta` → `curses.getmouse()` → `_mouse_scroll_delta`（滚轮按 `wheel_scroll_step`、拖动按手指位移）→ `Pager.scroll` |
 | 自动翻页一帧 | `_run` 循环 → `stdscr.timeout(_poll_timeout_ms(pager))`（开着时缩到「离下一拍还剩多久」）→ `get_wch` 超时 → 下一轮 `Pager.auto_scroll_tick()`（`next_top(step, viewport_width)` 先算落点 → 到头则自停 + `say`，否则 `move_to` + 重新排期）→ `_draw`。按键 / `KEY_MOUSE` / `KEY_RESIZE` 三条路各自 `Pager.defer_auto_scroll()`；开关与调速走 `handle_key` → `_toggle_auto_scroll` / `_adjust_auto_scroll` → `Pager.toggle_auto_scroll` / `adjust_auto_scroll_speed`。`open_reader` 从 `settings["reader"]["auto_scroll_interval"/"auto_scroll_step"]` 取初值 |
 | 自动翻页校验一题 | `_run` 每帧 `_draw` 之后 → `Pager.auto_check_due()`（`auto_scroll` 开着 + 排过期 + 到点 + 屏上没题）→ `_auto_check_overlay` → `_make_auto_check_question()` → `Pager.begin_auto_check()`（记题、起倒计时、把 `auto_scroll_deadline` 清零＝弹题期间不翻页）→ 循环 `_auto_check_lines` + `_draw_auto_check` + `get_wch`（200ms 轮询）→ `_auto_check_choice(key, 4)` → `Pager.resolve_auto_check(choice)`：有作答就 `set_auto_scroll(True)` + `defer_auto_scroll()` + 重排下次校验，没作答就 `set_auto_scroll(False)` + `say("校验题没有作答…")`；`finally` 恢复 `_TICK_MS`。排期入口是 `set_auto_scroll` → `_schedule_auto_check`（**已排过就不动**，见坑 #42） |
-| 退出落库 | `open_reader` → `save_session` → `_write_position` + `accumulate_stats` → `save_library`；收尾 `clear_marker` 删掉现场 |
+| 退出落库 | `open_reader` → `save_session`（薄包装）→ `session.write_session` → `apply_position` + `build_session` + `accumulate_stats` → `save_library`；收尾 `clear_marker` 删掉现场 |
+| GUI 读一本书（边车） | 客户端写一行 → `serve.serve`（`for raw in instream`）→ `handle_request` → `_METHODS[name]`；取书单 `_handle_list`/`_handle_recent`/`_handle_search` → `_book_rows(library.*)`，取正文 `_handle_text` → `_require_book` + `session.read_lines`（**切片前先读完整个文件**，行号才与 CLI 一致） |
+| GUI 退出落库（边车） | `{"method":"session"}` → `_handle_session` → `session.write_session(...)` + `_session_unlocked`（`achievements.check_achievements("session_end", 含 ranges/lines)`）→ 回 `{"saved":..., "unlocked":[...]}` |
+| GUI 只存位置（边车） | `{"method":"position"}` → `_handle_position` → `session.write_position(...)`：**不建会话、不动统计**（对应终端的自动保存） |
 | 目录浮层跳转 | `handle_key`（`Tab`）→ `_jump_via_toc` → `_toc_overlay`（模态循环：`_draw_toc` + `toc.filter_toc` + `_toc_move_cursor`）→ `Pager.move_to(line)` |
 | 目录缓存 | `open_reader` → `toc.load_toc`（命中缓存即返回；否则 `_read_lines` → `build_toc` / `build_toc_from_epub` → `save_toc`）；epub 另在 `library.import_books` 里 `_cache_epub_toc` → `toc.save_toc` |
 | 成就解锁 | `cli.main` / `cmd_import` / `open_reader` → `achievements.check_achievements(事件, 数据)` → `record_event` → `achievements.compute_metrics`（`stats.compute_metrics` ∪ 状态指标 ∪ `_note_total()`）→ `stats.evaluate_condition` → 写 `achievements.json` → `reader._celebrate_achievements` / `cli._report_unlocked` → `stats.celebrate` |
@@ -496,6 +551,22 @@
     `ps -p <pid> -o stat` 看到 `ZN`（**zombie = 已退出但没人收尸**）才发现真相，
     白排查了二十分钟。教训：pty 脚本自己也要有"我到底测到了什么"的自检（先怀疑探针，再怀疑被测代码；
     这类"改前改后一个样"的现象，先用 `git stash` 把改动摘掉复现一次，就能立刻判断是不是回归）。
+47. **纯函数住在 `reader.py` 里，别的模块就只能复制一份**（2026-09-29 修）：
+    `read_lines` / `accumulate_stats` / `_write_position` 这些**与终端无关**的逻辑原本和 curses 同文件，
+    于是 `toc.py` 写了**一份副本** `_read_lines`，注释还坦白了理由「这里不能 import reader：它有 curses」。
+    做无头边车时这个代价就摊开了：`serve.py` 要么复制逻辑、要么 import 整个 curses 前端。
+    已抽到 `wreader/session.py`（模式 #16）。教训：**判断"这段代码属于哪个模块"看的是它的依赖，不是它现在的邻居**。
+48. **`serve.py` 里 import `reader` 会悄悄把 `curses` / `rich` 拖进来**（2026-09-29）：
+    功能上照样能跑（`import curses` 不需要 TTY），所以**肉眼看不出问题**，但它意味着无头内核
+    启动时要付一个全屏 UI 的代价、还可能在无 curses 的平台上直接 ImportError。
+    `tests/test_serve.py` 因此**开一个干净解释器**（subprocess）断言四个名字都没进 `sys.modules`
+    —— 在当前进程里查是没用的，pytest 早就为了 `test_reader.py` 把 `reader` 导进来了。
+49. **测试里写 `library.get_book(id)["progress"]` 会被 pyright 判错**（2026-09-29）：
+    `get_book` 返回 `Optional[dict]`，直接下标就是 `reportOptionalSubscript`，
+    而项目要求 `npx pyright` **0 errors**。既有写法是 `book = library.get_book(id)` +
+    `assert book is not None and book[...]`；新测试里统一收成小助手 `_book(id)`（取不到就 assert 失败）。
+    同一类坑：`_raw(...)["error"]["type"]` 这种断言在 pyright 眼里也可能可选，
+    所以断言前先 `assert "error" in response`，或者把响应赋给变量再取。
 
 
 

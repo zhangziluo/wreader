@@ -83,9 +83,9 @@ Windows 数据目录：`%APPDATA%\wreader`。
 
 | 路径 | 说明 |
 | --- | --- |
-| `wreader/` | 包本体（**12** 个模块 + `data/achievements.json`） |
+| `wreader/` | 包本体（**14** 个模块 + `data/achievements.json`） |
 | `install.sh` | **一键安装脚本**（219 行，bash，幂等）：建 venv → `pip install -e .` → 往 `~/.bashrc`/`~/.zshrc` 写 `werd` 别名 → 自检版本号；`--dev` / `--no-alias` / `--help` |
-| `tests/` | **11 个文件**（10 个测试文件 + `conftest.py`），**633** 项 |
+| `tests/` | **13 个文件**（12 个测试文件 + `conftest.py`），**682** 项 |
 | `tools/` | **开发期校验脚本**（**8** 个 + `README.md`）：文档锚点 / 数字对拍 / 注释覆盖 / 折行 / 绘制 / 配色 / 鼠标 / 成就；不参与打包 |
 | `.clinerules/` | **AI 规则目录**：`memory-bank.md` = MemoryBank 维护协议，每次会话自动生效 |
 | `memory-bank/` | **项目长期记忆**：6 个状态文件 + `README.md` 索引（协议在 `.clinerules/`） |
@@ -133,8 +133,10 @@ git add -A && git commit -m "..."             # 提交
 # 代理没开时**不要**推：`curl -x http://127.0.0.1:7897 https://github.com` 返回 200 才推得了；
 # `git -c http.proxy= push` 这种"绕过"会挂在直连上（实测只能 pkill git-remote-https）
 
-# 开发
-.venv/bin/python -m pytest tests/              # 633 项，约 8~44 秒（随负载浮动）
+# 无头内核（给 GUI / 脚本用）：一行一个 JSON 请求 → 一行一个 JSON 响应；不加载 curses / rich
+echo '{"id": 1, "method": "ping"}' | .venv/bin/python -m wreader.serve
+# == 开发 ==
+.venv/bin/python -m pytest tests/              # 682 项，约 10~45 秒（随负载浮动）
 .venv/bin/python -m pytest tests/test_reader.py              # 单文件
 .venv/bin/python -m pytest -k "streak or heatmap"            # 按名字筛
 npx pyright                                   # 期望 0 errors / 0 warnings / 0 informations
@@ -181,7 +183,7 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
   （成就状态、书库索引）的用例间接覆盖，后者只有 `__version__`。
   想零风险打磨 `lock.py` 的 `fcntl.flock` 窗口，用 `tools/` 下临时加脚本调，**别把新脚本留在 `/tmp`**。
 
-## 当前测试规模（2026-09-26 实测：`633 passed in 43.84s`）
+## 当前测试规模（2026-09-29 实测：`682 passed in 15.96s`）
 
 | 文件 | 项数 | 侧重 |
 | --- | --- | --- |
@@ -191,12 +193,14 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 | `test_achievements.py` | 51 | 表达式求值、事件指标、解锁与去重 / `merge_states` |
 | `test_config.py` | 51 | `SCHEMA`、TOML 读写、旧配置迁移、**自动翻页四个键的默认值与类型** |
 | `test_cli.py` | 45 | 命令分发与输出形态（含 `data` / `prune` / `clear`） |
+| `test_serve.py` | 34 | JSON-RPC 协议与 22 个方法、**干净解释器里的隔离证明** |
 | `test_geo.py` | 31 | 位置解析 / 缓存 / 离线降级 |
 | `test_toc.py` | 18 | 章节正则 / epub 目录 / 缓存失效 |
+| `test_session.py` | 15 | 正文切行、`read_lines` 的换行规范化、位置/会话落库、粘性 `finished`、`record_history` 开关 |
 | `test_env.py` | 14 | 云主机 / WSL / tmux / 可编辑安装信号 |
 | `test_transfer.py` | 8 | 搬运包导出 / 合并 / 拒绝坏包 / 缺书计数 |
 
-> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 633；
+> 上表是**实测值**（逐文件 `pytest --collect-only`），总计 682；
 > `tools/check_doc_numbers.py` 会把这些数字与 README 表格对拍（当前 `RESULT: ALL OK`）。
 > 2026-09-25 之前是 **832** 项（含 `test_notes` / `test_translate` / `test_translator` / `test_vocab`），
 > 2026-09-25 是 559 项 / 9 个测试文件。
@@ -209,6 +213,8 @@ export WREADER_HOME=/tmp/wreader-sandbox WREADER_NOVELS_DIR=/tmp/wreader-sandbox
 > → 618 变 **633**。`tests/test_reader.py` 的 `FakeStdscr` 为这次验证加了两个小钩子
 > （`empty_key="timeout"` 让 `get_wch` 抛 `curses.error`、`timeout_value` 记住最后一次 `timeout()`），
 > 默认行为不变。
+> 2026-09-29 的**无头边车 + 会话内核**再加 49 项（`test_serve.py` 34 新文件、`test_session.py` 15 新文件）
+> → 633 变 **682**；同一次改动把 `reader.py` / `toc.py` 的注释缺口各降了 22 / 2 条（见 `progress.md` 待办 #1）。
 
 ## 开发用样例数据
 
