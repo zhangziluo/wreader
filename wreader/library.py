@@ -566,7 +566,7 @@ def merge_reading_data(document: Dict[str, Any], incoming: Any) -> Dict[str, int
     local record has no reading history of its own.  Books this library does not
     know about are skipped -- without the book there is nowhere to attach them --
     and counted in the returned summary.  *document* is modified in place, in the
-    same spirit as :func:`wreader.reader.accumulate_stats`.
+    same spirit as :func:`wreader.session.accumulate_stats`.
     """
     # 进来的不是字典（手改坏的包）：什么都不合并
     payload = incoming if isinstance(incoming, dict) else {}

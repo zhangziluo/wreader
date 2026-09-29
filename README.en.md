@@ -952,7 +952,7 @@ wreader/
 ├── tools/                   development-time checks: doc anchors, doc numbers, wrapping, drawing, colours (see tools/README.md)
 ├── .vscode/settings.json    points Pylance / the terminal at the .venv interpreter
 ├── wreader/
-│   ├── __init__.py          __version__ and the module map (22 lines)
+│   ├── __init__.py          __version__ and the module map (24 lines)
 │   ├── achievements.py      the achievement engine: events, the state file, unlock checks, live thresholds, file lock (1250 lines)
 │   ├── cli.py               argparse definition + one handler per sub-command (1004 lines)
 │   ├── config.py            settings.toml I/O, type checks, legacy migration, data dir adoption (975 lines)
@@ -960,13 +960,15 @@ wreader/
 │   ├── geo.py               location: ip-api lookup + a one hour cache, country → continent, feud pairs (343 lines)
 │   ├── library.py           txt/epub import, encoding detection, file name parsing, index (1425 lines)
 │   ├── lock.py              the cross-process file lock (flock; atomic writes only on Windows) (80 lines)
-│   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, auto scrolling (with the anti-cheat check), toc overlay, help page and notices (3411 lines)
+│   ├── reader.py            the curses pager: paging, search, bookmarks, status bar, wheel/touch, auto scrolling (with the anti-cheat check), toc overlay, help page and notices (3349 lines)
+│   ├── serve.py             headless JSON-RPC sidecar: the core (library, bookmarks, toc, stats, achievements) over one JSON object per line, for a GUI or any non-terminal client (601 lines)
+│   ├── session.py           the reading-session core, curses-free: splitting the text, storing a position and a finished session -- shared by the reader and the sidecar (248 lines)
 │   ├── stats.py             metrics, heatmap, achievement definitions, celebration (817 lines)
-│   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (474 lines)
+│   ├── toc.py               table of contents: chapters, epub nav parsing, rebuildable cache (470 lines)
 │   ├── transfer.py          the `werd data` bundle: export reading time + achievements to JSON, merge add-only (198 lines)
 │   └── data/
 │       └── achievements.json  the 48 achievement definitions (348 lines)
-└── tests/                   633 tests, all offline (see "Running the tests" below)
+└── tests/                   682 tests, all offline (see "Running the tests" below)
     ├── conftest.py          shared fixtures: isolated $WREADER_HOME, library samples, epub builder
     ├── test_achievements.py 51 tests — word counting, range dedup, event accounting, state file, locking, unlock checks, live thresholds, geo/env metrics
     ├── test_cli.py          45 tests — argument parsing, every sub-command's output, exit codes, the achievement banner, the name egg
@@ -976,6 +978,8 @@ wreader/
     ├── test_library.py      132 tests — encodings, chapters, epub, dedup, file names, search, recent books, clear/prune, merging a bundle
     ├── test_reader.py       213 tests — paging maths, Pager, status bar, keys, auto scrolling (with the anti-cheat check), sessions, wrapping, wheel, toc overlay,
     │                          help page, achievement notice, recovery flow
+    ├── test_serve.py        34 tests — the JSON-RPC protocol (bad JSON, unknown method, wrong param types), listings and search, text slices, the toc, position and session writes, stats and achievements, settings, export/import, prune and clear, and the fresh-interpreter proof that no curses/rich is pulled in
+    ├── test_session.py      15 tests — splitting the text, newline normalisation, timestamps and session entries, position writes (including the sticky finished flag), position-only vs recorded history, and the book-deleted tolerance
     ├── test_stats.py        70 tests — metrics, streaks, heatmap, definition loading, the report
     ├── test_toc.py          18 tests — chapter extraction, epub nav/ncx, custom regexes, cache invalidation
     └── test_transfer.py      8 tests — exporting a bundle, importing on a fresh machine, add-only merging, error cases
@@ -984,6 +988,33 @@ wreader/
 Layering: apart from the curses front end in `wreader/reader.py` and the output rendering in `wreader/cli.py`,
 every module is **plain functions over plain data** and never touches a terminal. The paging maths, chapter
 boundaries, statistics metrics and achievement conditions can therefore be tested or reused without a TTY.
+
+Reading itself has a **shared core**: `wreader/session.py` (splitting the text, storing a position and a
+finished session). The curses front end and `wreader/serve.py` (the headless JSON-RPC sidecar a GUI talks to)
+both go through it, so line numbers, bookmarks and durations are written in exactly one format -- and there
+is exactly one copy of the data.
+
+### The headless core: `python -m wreader.serve`
+
+`wreader/serve.py` publishes the core (library, table of contents, position, durations, statistics,
+achievements, settings, export/import) as **one JSON request per line in, one JSON response per line out**,
+for a GUI or any other non-terminal client. It does **not** import `reader` / `cli`, so starting it pulls in
+neither `curses` nor `rich`:
+
+```bash
+$ echo '{"id": 1, "method": "ping"}' | python -m wreader.serve
+{"id": 1, "result": {"pong": true, "version": "0.1.0"}}
+```
+
+- Request: `{"id": <any>, "method": "<name>", "params": {...}}`; response: `{"id": ..., "result": ...}`
+  or `{"id": ..., "error": {"type": "<class>", "message": "<text>"}}`.
+- Bad JSON, an unknown method and a parameter of the wrong type each answer with **one error line**; the
+  process keeps running.
+- Methods: `ping` / `version` / `paths` / `list` / `recent` / `search` / `get_book` / `toc` / `text` /
+  `position` / `session` / `event` / `daily_open` / `import` / `stats` / `achievements` / `config_get` /
+  `config_set` / `export` / `import_data` / `prune` / `clear`.
+- Writes go through the very same code path as the CLI: positions and durations land in the one
+  `~/.wreader/library.json` via `wreader/session.py`, so the terminal and the GUI resume from the same spot.
 
 ---
 
@@ -1028,7 +1059,7 @@ The current state is **0 errors / 0 warnings** (both `wreader/` and `tests/` are
 
 ```bash
 pip install -e ".[dev]"     # pulls in pytest
-pytest                      # 633 tests, about 10–30 seconds (varies with load)
+pytest                      # 682 tests, about 10–30 seconds (varies with load)
 pytest -q tests/test_reader.py            # one file
 pytest -k "streak or heatmap" -q          # by name
 ```
@@ -1177,7 +1208,7 @@ Ten former issues that are now fixed, kept here so they are not mistaken for pen
   the translation feature, so the problem no longer exists.
 - ~~About 10 type warnings in `library.py` / `stats.py` / `translator.py` / `vocab.py`~~ → all fixed;
   `pyright` now reports 0 errors / 0 warnings (`translator.py` / `vocab.py` went away with the feature).
-- ~~No automated tests~~ → 633 pytest tests in `tests/`, all offline, none of them touching your data.
+- ~~No automated tests~~ → 682 pytest tests in `tests/`, all offline, none of them touching your data.
 - ~~A short source-language code made the default back-end refuse to translate~~ → that code path was
   removed together with the translation feature (the discovery back then, while writing the tests:
   `detect_language()` reports `zh`, while `deep-translator` only accepts `zh-CN`).

@@ -69,15 +69,26 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # 退出阅读器之后用 rich 打印一行摘要
 from rich.console import Console
 
-# 同包引用：配置、环境探测、地理、书库、统计成就、成就事件、目录
+# 同包引用：配置、环境探测、地理、书库、会话内核、统计成就、成就事件、目录
 from . import (
     achievements,
     config,
     env,
     geo,
     library,
+    session,
     stats,
     toc,
+)
+
+# 会话内核里的纯函数：正文读取、时间戳、位置与会话落库
+# （它们住在 session 里，是为了让 serve / 测试能脱离 curses 复用同一套逻辑）
+from .session import (
+    accumulate_stats,
+    build_session,
+    iso as _iso,
+    now as _now,
+    read_lines,
 )
 
 # 模块公开的名字（Pager 与几个纯函数，方便单测）
@@ -301,35 +312,6 @@ _ARROW_CHAPTER_MIN_KEYS = 5
 
 # 退出 curses 后用于打印摘要的 rich 控制台
 console = Console()
-
-
-def _now() -> datetime:
-    """Return the current local time."""
-    # 当前本地时间；单独包一层方便测试替换
-    return datetime.now()
-
-
-def _iso(moment: datetime) -> str:
-    """Format *moment* the way the index stores timestamps."""
-    # 与索引里的时间戳格式保持一致（精确到秒）
-    return moment.isoformat(timespec="seconds")
-
-
-def read_lines(file_path: str) -> List[str]:
-    """Return the book text as lines, split exactly like the importer did."""
-    # 导入时写入的 UTF-8 正文
-    path = Path(str(file_path))
-    # 文件不在了：抛出书库异常，由 CLI 统一提示
-    if not path.is_file():
-        raise library.LibraryError("book text is missing: {}".format(path))
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise library.LibraryError("cannot read {}: {}".format(path, exc)) from exc
-    # 必须与 library 里同样的方式规范化换行，行号才能对得上
-    text = library.normalise_newlines(text)
-    # 按 \n 切行；空文件返回空列表
-    return text.split("\n") if text else []
 
 
 def clamp(position: int, total: int) -> int:
@@ -2696,65 +2678,25 @@ def handle_key(stdscr: Any, pager: Pager, key: Any) -> bool:
     return True
 
 
-def build_session(
-    started: datetime, ended: datetime, lines_read: int
-) -> Dict[str, Any]:
-    """Return the ``sessions[]`` entry describing one reading session."""
-    # 一条会话记录：起止时间 + 读了多少行
-    return {
-        "start": _iso(started),
-        "end": _iso(ended),
-        "lines_read": int(max(0, lines_read)),
-    }
-
-
-def accumulate_stats(
-    document: Dict[str, Any], seconds: int, day: str
-) -> Dict[str, Any]:
-    """Add *seconds* to the global and to the per-day reading totals."""
-    # 统计段落（不存在就建）
-    stats = document.setdefault("stats", {})
-    # 全局累计阅读秒数
-    stats["total_read_time"] = int(stats.get("total_read_time") or 0) + int(seconds)
-    # 按天的桶，用于连续天数和热力图
-    daily = stats.get("daily_read_time")
-    if not isinstance(daily, dict):
-        daily = {}
-        stats["daily_read_time"] = daily
-    # 把秒数累加到当天的桶里
-    daily[day] = int(daily.get(day) or 0) + int(seconds)
-    return stats
-
-
 def _write_position(
     document: Dict[str, Any], book_id: str, pager: Pager, moment: datetime
 ) -> bool:
-    """Store position, bookmarks and the sticky finished flag; ``False`` if gone."""
-    # 按 id 找书
-    book = document["books"].get(str(book_id))
-    if book is None:  # the book was removed while we were reading
-        # 阅读过程中书被删掉了（另一个终端里删的）
-        return False
-    progress = book.get("progress")
-    # 进度块结构不对就重建
-    if not isinstance(progress, dict):
-        progress = library.empty_progress()
-    # 覆盖式更新关键字段
-    progress.update(
-        {
-            "current_line": pager.position,
-            "percentage": pager.percentage,
-            "last_read": _iso(moment),
-            # 书签先规整成标准结构再存
-            "bookmarks": library.normalise_bookmarks(pager.bookmarks),
-            # Sticky: once a book has been finished, jumping back does not undo it.
-            # "读完了"是粘性的：读到最后一行就置位，之后回翻也不会取消
-            "finished": bool(progress.get("finished"))
-            or bool(pager.total and pager.position >= pager.total - 1),
-        }
+    """Store position, bookmarks and the sticky finished flag; ``False`` if gone.
+
+    Thin adapter over :func:`wreader.session.apply_position`: the pager is
+    unpacked into plain values, so the writing itself stays in the curses-free
+    core that the JSON-RPC sidecar shares.
+    """
+    # 把 Pager 拆成普通数据，交给会话内核去写
+    return session.apply_position(
+        document,
+        str(book_id),
+        pager.position,
+        pager.percentage,
+        pager.bookmarks,
+        pager.total,
+        moment,
     )
-    book["progress"] = progress
-    return True
 
 
 def save_position(pager: Pager) -> bool:
@@ -2764,14 +2706,15 @@ def save_position(pager: Pager) -> bool:
     insurance for the reading position, so it deliberately records no session and
     touches no statistics.  Returns ``False`` when the index could not be written.
     """
-    try:
-        # 读索引 -> 改位置 -> 写回
-        document = library.load_library()
-        if not _write_position(document, pager.book_id, pager, _now()):
-            return False
-        library.save_library(document)
-    except library.LibraryError:
-        # 索引写不了就当作失败（下一次自动保存再试）
+    # 落库交给会话内核（同一份逻辑 serve 也会用）
+    saved = session.write_position(
+        pager.book_id,
+        pager.position,
+        pager.percentage,
+        pager.bookmarks,
+        pager.total,
+    )
+    if not saved:
         return False
     # 顺手刷新"现场"：真崩了以后恢复的是最近一次自动保存的位置，而不是开书那一刻的
     write_marker(pager)
@@ -2793,28 +2736,23 @@ def save_session(
     The position and the bookmarks are always stored so ``werd read`` resumes where
     you stopped.  ``record_history`` (the ``reader.store_history`` setting) also
     appends the session with its duration to the book and to the global ``stats``.
+
+    The write itself lives in :func:`wreader.session.write_session`, which the
+    headless sidecar uses too -- this wrapper only unpacks the pager.
     """
-    document = library.load_library()
-    # 先写位置（书没了就直接返回）
-    if not _write_position(document, book_id, pager, ended):
-        return
-    progress = document["books"][str(book_id)]["progress"]
-    # 只有开了记录历史才写会话明细
-    if record_history:
-        sessions = progress.get("sessions")
-        if not isinstance(sessions, list):
-            sessions = []
-        # 追加一条会话记录
-        sessions.append(build_session(started, ended, pager.lines_read))
-        progress["sessions"] = sessions
-        # 本书累计时长
-        progress["total_time_seconds"] = int(
-            progress.get("total_time_seconds") or 0
-        ) + int(seconds)
-        # 全局与当天的统计
-        accumulate_stats(document, seconds, ended.strftime("%Y-%m-%d"))
-    # 统一落盘
-    library.save_library(document)
+    # 把 Pager 拆成普通数据，落库交给会话内核（返回值这里用不上）
+    session.write_session(
+        book_id,
+        pager.position,
+        pager.percentage,
+        pager.bookmarks,
+        pager.total,
+        seconds,
+        started,
+        ended,
+        pager.lines_read,
+        record_history=record_history,
+    )
 
 
 def _init_colors() -> None:

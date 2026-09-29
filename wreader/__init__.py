@@ -4,7 +4,9 @@ Module layout:
 
 * :mod:`wreader.cli`         -- command line entry point and argument parsing
 * :mod:`wreader.library`     -- book import, storage and lookup
+* :mod:`wreader.session`     -- reading-session core: text lines, position, session records
 * :mod:`wreader.reader`      -- curses based paged reading experience
+* :mod:`wreader.serve`       -- headless JSON-RPC sidecar: the core over stdin/stdout
 * :mod:`wreader.stats`       -- reading statistics and achievement definitions
 * :mod:`wreader.achievements` -- event driven achievements: state, unlocks, file lock
 * :mod:`wreader.config`      -- user configuration handling

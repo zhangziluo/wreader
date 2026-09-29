@@ -36,8 +36,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # 解析 nav.xhtml / toc.ncx
 from xml.etree import ElementTree
 
-# 同包引用：缓存目录（config）与章节判定 / 百分比（library）
-from . import config, library
+# 同包引用：缓存目录（config）、章节判定 / 百分比（library）与会话内核（切正文）
+from . import config, library, session
 
 # 对外暴露的接口
 __all__ = [
@@ -414,16 +414,12 @@ def save_toc(
 
 def _read_lines(book: Dict[str, Any]) -> List[str]:
     """Return the converted text of *book*, split like the importer did."""
-    # 与 reader.read_lines 用同一套规则，行号才对得上（这里不能 import reader：它有 curses）
-    path = Path(str(book.get("file_path") or ""))
+    # 正文怎么切行只有一处实现（wreader.session），行号才不会有第二套口径
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+        return session.read_lines(str(book.get("file_path") or ""))
+    except library.LibraryError:
+        # 正文不在 / 读不了：目录就当作空，由调用方给出温和提示
         return []
-    # 必须先规范化换行
-    text = library.normalise_newlines(text)
-    # 空文件返回空列表
-    return text.split("\n") if text else []
 
 
 def load_toc(

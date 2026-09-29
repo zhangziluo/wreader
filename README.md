@@ -946,7 +946,7 @@ wreader/
 ├── tools/                   开发期校验脚本：文档锚点/数字对拍/注释覆盖/折行/绘制/配色/鼠标/成就（见 tools/README.md）
 ├── .vscode/settings.json    把 Pylance / 终端指向 .venv 解释器
 ├── wreader/
-│   ├── __init__.py          __version__ 和模块地图（22 行）
+│   ├── __init__.py          __version__ 和模块地图（24 行）
 │   ├── achievements.py      成就引擎：事件记录、状态文件、解锁判定、实时门槛与文件锁（1250 行）
 │   ├── cli.py               argparse 定义 + 各子命令处理函数（1004 行）
 │   ├── config.py            settings.toml 读写、类型校验、旧配置迁移、数据目录搬迁（975 行）
@@ -954,13 +954,15 @@ wreader/
 │   ├── geo.py               地理位置：ip-api 查询 + 一小时缓存，国家→大洲、世仇组合（343 行）
 │   ├── library.py           txt/epub 导入、编码识别、书名解析、索引与模糊搜索（1425 行）
 │   ├── lock.py              跨进程文件锁（flock，Windows 退化为原子替换）（80 行）
-│   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、自动翻页（含防作弊校验）、目录浮层、帮助页与成就通知（3411 行）
+│   ├── reader.py            curses 分页阅读器：分页、搜索、书签、状态栏、滚轮/触摸、自动翻页（含防作弊校验）、目录浮层、帮助页与成就通知（3349 行）
+│   ├── serve.py             无头 JSON-RPC 边车：把内核（书库/书签/目录/统计/成就）按「一行一个 JSON 请求」暴露给 GUI 等非终端客户端（601 行）
+│   ├── session.py           阅读会话内核（无 curses）：正文切行、位置与本场会话落库 —— reader 与 serve 共用同一份逻辑（248 行）
 │   ├── stats.py             统计指标、热力图、成就判定与庆祝动画（817 行）
-│   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（474 行）
+│   ├── toc.py               目录：章节提取、epub nav 解析、可重建缓存（470 行）
 │   ├── transfer.py          `werd data` 的数据包：把时长/成就导出成 JSON、按「只加不减」合并回来（198 行）
 │   └── data/
 │       └── achievements.json  48 个成就的定义（348 行）
-└── tests/                   633 项测试，全部离线运行（见下方「运行测试」）
+└── tests/                   682 项测试，全部离线运行（见下方「运行测试」）
     ├── conftest.py          共享 fixture：隔离的 $WREADER_HOME、馆藏样例、epub 构造器
     ├── test_achievements.py 51 项 —— 字数口径、行区间去重、事件累加、状态文件、文件锁、解锁判定、实时门槛与地理/环境指标
     ├── test_cli.py          45 项 —— 参数解析、各子命令输出、退出码、成就横幅、名字彩蛋、清空/清理与数据包导入导出
@@ -969,6 +971,8 @@ wreader/
     ├── test_geo.py          31 项 —— 国家→大洲、世仇组合、ip-api 响应解析、缓存与离线降级
     ├── test_library.py      132 项 —— 编码、章节、epub、导入去重、书名解析、模糊搜索、最近在读、清空/清理、数据包合并
     ├── test_reader.py       213 项 —— 分页数学、Pager、状态栏、按键、自动翻页（含防作弊校验）、会话落库、折行、滚轮、目录浮层、帮助页、成就通知与恢复流程
+    ├── test_serve.py        34 项 —— JSON-RPC 协议（坏 JSON / 未知方法 / 参数类型）、书单与搜索、正文切片、目录、位置与会话落库、统计与成就、设置读写、导出导入、清理与对账，以及「不加载 curses/rich」的隔离证明
+    ├── test_session.py      15 项 —— 正文切行与换行规范化、时间戳与会话条目、位置落库（含粘性 finished）、只写位置 vs 记账、书被删掉的容错
     ├── test_stats.py        70 项 —— 指标、连续天数、热力图、定义加载、报告
     ├── test_toc.py          18 项 —— 章节提取、epub nav/ncx 解析、自定义正则、缓存失效与重建
     └── test_transfer.py      8 项 —— 导出数据包、在新机器上导入、只加不减的合并、各类错误输入
@@ -977,6 +981,30 @@ wreader/
 分层约定：除了 `wreader/reader.py` 的 curses 前端和 `wreader/cli.py` 的输出渲染，
 其余模块都是**纯函数 + 普通数据**，不依赖终端，所以分页数学、章节边界、统计指标、
 成就条件都可以脱离 TTY 单独测试或复用。
+
+阅读这件小事有一个**共享内核**：`wreader/session.py`（正文切行、位置与本场会话落库）。
+curses 前端和 `wreader/serve.py`（无头 JSON-RPC 边车，给 GUI 用）都走它，
+所以行号、书签、时长在终端和图形界面之间写的永远是同一套格式 —— 数据也只有一份。
+
+### 无头内核：`python -m wreader.serve`
+
+`wreader/serve.py` 把内核（书库、目录、位置、时长、统计、成就、设置、导出导入）按
+**一行一个 JSON 请求 / 一行一个 JSON 响应**暴露出来，给图形界面或任何非终端客户端用。
+它**不 import** `reader` / `cli`，所以启动时不加载 `curses` 与 `rich`：
+
+```bash
+$ echo '{"id": 1, "method": "ping"}' | python -m wreader.serve
+{"id": 1, "result": {"pong": true, "version": "0.1.0"}}
+```
+
+- 请求：`{"id": 任意, "method": "名字", "params": {...}}`；响应：`{"id": ..., "result": ...}`
+  或 `{"id": ..., "error": {"type": "类名", "message": "说明"}}`。
+- 坏 JSON、未知方法、参数类型不对都**只回一条 error**，不会让内核退出。
+- 可用方法：`ping` / `version` / `paths` / `list` / `recent` / `search` / `get_book` / `toc` /
+  `text` / `position` / `session` / `event` / `daily_open` / `import` / `stats` /
+  `achievements` / `config_get` / `config_set` / `export` / `import_data` / `prune` / `clear`。
+- 写操作与 CLI 完全同源：位置与时长都经 `wreader/session.py` 落到同一份
+  `~/.wreader/library.json`，所以终端读到哪儿、图形界面就从哪儿接着读。
 
 ---
 
@@ -1020,7 +1048,7 @@ npx pyright                 # 或者装一次 pyright 后直接 pyright
 
 ```bash
 pip install -e ".[dev]"     # 装上 pytest
-pytest                      # 633 项，约 10~30 秒（随负载浮动）
+pytest                      # 682 项，约 10~30 秒（随负载浮动）
 pytest -q tests/test_reader.py            # 只跑一个文件
 pytest -k "streak or heatmap" -q          # 按名字筛选
 ```
@@ -1152,7 +1180,7 @@ library.remove_book("3e027c4de949")   # 同时删掉 ~/novels 里的 UTF-8 正�
 - ~~`translator.__all__` 里有不存在的 `chapter_paragraphs`~~ → 该模块已随翻译功能一起删除，问题不复存在。
 - ~~`library.py` / `stats.py` / `translator.py` / `vocab.py` 还有约 10 条类型告警~~ → 已全部修掉，
   `pyright` 现在是 0 errors / 0 warnings（`translator.py` / `vocab.py` 已随功能移除）。
-- ~~没有自动化测试~~ → 已补 **633 项 pytest**（`tests/`），全程离线、不碰真实数据。
+- ~~没有自动化测试~~ → 已补 **682 项 pytest**（`tests/`），全程离线、不碰真实数据。
 - ~~中译英时源语言短码会让默认后端直接报错~~ → 该代码路径已随翻译功能移除（当年补测试时的发现：
   `detect_language()` 返回的是 `zh`，而 `deep-translator` 只认 `zh-CN`）。
 - ~~带 BOM 的损坏文件会让整次导入崩掉~~ → 已修：BOM 认 UTF-8/16/32 且宽编码优先（UTF-32 的 BOM 以
