@@ -195,6 +195,16 @@
 - **改动规模**：`wreader/` 12 → **14** 个模块、10,182 → **10,965** 行；测试 633 → **682**。
   `py_compile` / `pytest` / `pyright` / `check_docs` / `check_doc_numbers` / `check_comments` 全绿。
 
+### 图形阅读器 `wreader-gui`（2026-09-29 新增，**在仓库之外**）
+- 位置 `/Users/zhangziluo/Downloads/wreader-gui/`（与 `wreader/` 并排，物理上不会被推上 GitHub）。
+  Tauri v2 + React 19 + TS 6 + Vite 8；Rust 侧 `core_client.rs`（JSON-RPC 边车客户端）、
+  `db.rs`（SQLite 缓存）、`lib.rs`（11 个同步 `#[tauri::command]`）。
+- 前端：书架 + 阅读页（内核 `text` 按行分页）+ 本地 FTS5 搜索。
+- 数据口径：**只有 `~/.wreader` 是权威**，SQLite 是可随时重建的缓存；
+  位置 / 时长 / 成就经同一个边车与同一个 `session.py` 落库，与终端阅读器完全一致。
+- 详细状态、四条踩坑（epub.js 用不上 / FTS5 中文分词 / rustc 1.87 MSRV / async 命令撞 sqlx）
+  与"没做什么"，见 `activeContext.md` ㊲ 与那边的 `README.md`。
+
 ## 待办
 
 > 2026-09-25 删功能时顺带**清掉了一批已完成条目**（笔记落盘、成就 Phase 2/3、README 数字更正、
@@ -241,6 +251,11 @@
    若要做"清理向导"，建议挂在 `werd config --reset` 上，默认别动用户的文件。
 9. Windows 侧只有单测覆盖（`windows-curses`、`msvcrt` 分支、`lock` 退化成"只有原子替换"），
    没有真机验证过。
+10. **图形阅读器（`../wreader-gui/`）还剩阶段 4 与人眼验证**：功能已接上（书架 / 阅读页 / 本地全文搜索），
+    但 ①**没真开过窗口**（`tauri dev` 需要图形会话），排版、章节下拉、搜索结果样式都没人看过；
+    ②打包（PyInstaller → `werd-core` → `externalBin`）没做，本机也没装 PyInstaller；
+    ③全文索引要**手动**点一次「建立索引」（内核没有全文检索接口，GUI 只能自己切块建 FTS5），
+    可考虑打开书时自动建一次。细节见 `activeContext.md` ㊲。
 
 ## 已知问题（当前版本真实限制）
 
@@ -355,4 +370,9 @@
 | **2026-09-29** | 新增 **`wreader/session.py`** 把会话落库从 `reader.py` 里抽出来，而不是让 `serve.py` 复制一份 | `read_lines` / `accumulate_stats` / `_write_position` / `save_session` 与终端无关，却和 curses 住在同一文件；`toc.py` 已经因此**复制过一份** `_read_lines`（注释里写着"不能 import reader：它有 curses"）。再做第二个前端就变成同一事实三份 —— 先抽内核，再让 reader / serve / toc 共用 |
 | **2026-09-29** | `serve.py` **绝不 import `reader` / `cli`**，并用「干净解释器」测试守住这条约束 | 功能上 import 了照样能跑（`import curses` 不需要 TTY），所以**肉眼看不出问题** —— 只能靠测试守。否则无头内核启动时要付一个全屏 UI 的代价，在没 curses 的平台上还会直接 ImportError。之所以要开子进程验证：pytest 进程里 `reader` 早被 `test_reader.py` 导进来了，查 `sys.modules` 等于什么都没查 |
 | **2026-09-29** | GUI 与 CLI 的**位置坐标允许不对齐**（行号 ↔ epub.js 的 CFI），只保证书库 / 时长 / 成就共享 | 两套坐标无法无损互转，硬要精确对齐只会两边都不准。定下的口径：**时长与成就必须精确**（它们经 `session.py` 走同一份代码），**位置在各自前端精确**（GUI 存 CFI、CLI 存行号），GUI 只把「CFI → 近似百分比/行号」喂回内核 |
+| **2026-09-29** | GUI **放弃 epub.js**，改用内核的 `text` 按行分页 | 动手时才发现前提不成立：内核存的是**转换后的 txt**，原始 epub 根本不在 `~/.wreader` 里，epub.js 拿不到书、CFI 也无从谈起。共用坐标只能是行号（与 `werd` 同一套）—— 于是"位置允许近似"这个妥协**根本不需要**，位置也是精确的。epub.js 已从依赖里移除，`positions.cfi` 列留给将来"直接打开 epub" |
+| **2026-09-29** | GUI 的 SQLite 用 **`sqlx` 直连**，不用计划里的 `tauri-plugin-sql` | 用插件的话 schema 在 Rust、SQL 在 JS，两处会漂；而且全文检索的分词规则没法单测。直连 sqlx 之后，schema、中文分词、切块、FTS 查询**全都能在 `cargo test` 里脱离 webview 验证**（实测 18 项全绿），JS 侧只调 `#[tauri::command]` |
+| **2026-09-29** | GUI 的 `#[tauri::command]` **全部写成同步**，内部用 `block_on` 等 SQLite | 不是风格偏好，是被逼的：`async fn` 命令 + sqlx 会撞 `implementation of Executor is not general enough`（附赠 `Send is not general enough`）。本地管道 + 本地 SQLite 都是毫秒级，同步更简单，也省掉了 `spawn_blocking` 与 `AppHandle` 的所有权麻烦。**再想加异步命令时，先想起这条** |
+| **2026-09-29** | GUI 的中文全文检索：入库**逐字垫空格** + 查询当**短语** + 显示**去掉空格**（三步缺一不可） | FTS5 默认的 `unicode61` 会把一整串汉字当成一个词，`MATCH '三体'` 永远搜不到 `三体世界就在我们眼前`。垫空格让每个汉字成为一个 token，短语匹配于是等价于"连续出现"，查询时末尾加 `*` 还能支持"打到一半"。代价是片段里会有我们塞的空格，所以出库前必须 `desegment_cjk` 还原 |
+| **2026-09-29** | GUI 依赖解析：`[resolver] incompatible-rust-versions = "fallback"` **加** `rust-version = "1.87"` | 本机 rustc 1.87，而 `icu_* 2.3` / `darling 0.24` / `time 0.3.4x` 都要 1.88，`cargo test` 直接报 `rustc 1.87.0 is not supported`。两个都要写：只有 config 时 cargo 不知道目标 MSRV，只有 `rust-version` 时 Cargo 1.87 默认不开 MSRV 感知解析（实测：生效后 `wry` 0.57 → 0.55.1） |
 

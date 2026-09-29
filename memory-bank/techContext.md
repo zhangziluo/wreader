@@ -97,6 +97,25 @@ Windows 数据目录：`%APPDATA%\wreader`。
 | `.git/` + 远端 | git 仓库本体（2026-09-22 建）。`origin` = `https://github.com/zhangziluo/wreader`，`main` 为默认分支 |
 | `LICENSE` | MIT |
 
+## 邻近项目：`../wreader-gui/`（不在本仓库里）
+
+图形阅读器**刻意放在仓库之外**（与 `wreader/` 并排），所以它物理上不会被推上 GitHub。
+它自己的 `README.md` 是那边的唯一权威文档；这里只记与本仓库相关的部分：
+
+| 项 | 值（2026-09-29 实测） |
+| --- | --- |
+| 位置 | `/Users/zhangziluo/Downloads/wreader-gui/` |
+| 技术栈 | Tauri v2 + React 19 + TS 6 + Vite 8（`npm create tauri-app` 生成） |
+| Rust 侧 | `src-tauri/src/{core_client.rs, db.rs, lib.rs}`，11 个 `#[tauri::command]`，**全部同步** |
+| 它的缓存 | SQLite（`sqlx`，非 `tauri-plugin-sql`）：书架快照 / FTS5 全文索引 / GUI 位置 / GUI 设置 —— **可随时删，`~/.wreader` 才是权威** |
+| 与本仓库的接口 | **只经 JSON-RPC 边车** `python -m wreader.serve`（`$WREADER_CORE_PYTHON` 或开发布局的 `../wreader/.venv/bin/python`） |
+| 本机工具链 | node **v24.18.0** / npm **11.16.0** / cargo & rustc **1.87.0**（< 部分依赖要求的 1.88，见它的 README 坑 3）；**没装** PyInstaller |
+| 它的验证 | `npx tsc --noEmit` 0 错误、`npm run build` 通过、`cargo test` **18 passed**（含真拉起本仓库边车的契约测试） |
+
+**它不复制本仓库的任何逻辑**：进度百分比用 `library.position_percentage` 的算法、
+时间戳用内核的"本地时间 + 秒级"格式、行区间交给 `achievements` 去重、位置与时长经
+`session.py` 落进同一份 `library.json`。改本仓库的 JSON 形状前，**先看那边有没有对应的解析**。
+
 ## 常用命令
 
 ```bash

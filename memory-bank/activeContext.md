@@ -1545,20 +1545,75 @@ RESULT: ALL OK
 
 **已提交并推送**（见 `activeContext.md` 顶部状态、`git log`）。
 
+### ㊲ 图形阅读器（`wreader-gui/`，2026-09-29）：Tauri + React 壳，复用同一份内核数据
+
+**位置**：`/Users/zhangziluo/Downloads/wreader-gui/` —— 与 `wreader` **并排**，**刻意不在仓库里**，
+所以物理上不可能被推上 GitHub。
+
+**架构（两份数据，一份权威）**：
+
+```
+React (src/)  ──invoke──▶  Rust (src-tauri/src/lib.rs)
+                             ├── core_client.rs ── stdin/stdout 一行一个 JSON ──▶ python -m wreader.serve（权威）
+                             └── db.rs (sqlx/SQLite) ── 只做缓存：书架快照 / FTS5 全文索引 / GUI 位置 / GUI 设置
+```
+
+**做了什么**（用户计划里的阶段 2 + 阶段 3 前半）：
+
+- 骨架命令：`npm create tauri-app@latest wreader-gui --manager npm --template react-ts
+  --identifier com.wreader.gui --tauri-version 2 --yes`（React 19 / Vite 8 / TS 6）。
+- `core_client.rs`：起 sidecar 子进程 + `ping` 握手（起不来就当场报可读原因，而不是第一次翻页时神秘挂住）、
+  一行一个 JSON、按 `id` 对齐响应、`CoreError` 分四类（Startup / Transport / Protocol / Core）；
+  `Drop` 里关 stdin + `kill` + `wait`，不留孤儿 python。启动命令解析顺序：
+  `$WREADER_CORE_COMMAND` → `$WREADER_CORE_PYTHON` → 开发布局的 `../wreader/.venv/bin/python` → `python3`。
+- `db.rs`：`books`（镜像内核 `list` 的扁平行）、`chunks` + `chunks_fts`（FTS5）、
+  `positions`（GUI 自己的 CFI/行号）、`gui_settings`；`SCHEMA_VERSION` 不一致就整库重建（缓存可丢）；
+  `reset()` 是"在一个事务里拆掉再按当前 schema 建好空表"，所以界面点「清空缓存」之后不用重启。
+- `lib.rs`：11 个 `#[tauri::command]`（`core_request` / `core_version` / `sync_shelf` / `cached_shelf` /
+  `index_book` / `search_cache` / `save_gui_position` / `load_gui_position` / `get_gui_setting` /
+  `set_gui_setting` / `reset_cache`），**全部同步**（原因见下面第 4 条）。
+- 前端：书架（进度 / 行号 / 累计时长 / 上次阅读，先画缓存再同步）、阅读页（内核 `text` 按行分页，
+  一屏 40 行，跳章走 `toc`，每分钟 `position`、退出时 `session` 记时长与成就并显示新解锁）、
+  本地 FTS5 搜索（每本书先点一次「建立索引」，因为内核不提供全文检索接口）。
+- **验证**：`npx tsc --noEmit` **0 错误**、`npm run build` 通过（`dist/` 227.7 kB JS / 1.7 kB CSS）、
+  `cargo test` **18 passed**（含真拉起 Python 内核的 6 项契约测试、中文全文检索端到端、切块与分词纯函数）。
+
+**四条经验（都写进了 GUI 的 README 与代码注释）**：
+
+1. **epub.js 用不上**（原计划的核心假设不成立）：内核存的是**转换后的 txt**，原始 epub 不在
+   `~/.wreader` 里，epub.js 既拿不到书、CFI 也无从谈起。共用坐标只能是**行号**（与 `werd` 完全同一套），
+   阅读页因此走 `text` 分页。`positions.cfi` 这列保留给将来"直接打开一个 epub"的功能。
+   **epub.js 已从 `package.json` 里移除**（不留没用上的依赖）。
+2. **FTS5 的 `unicode61` 会把一整串汉字当成一个词** → `MATCH '三体'` 永远搜不到
+   `三体世界就在我们眼前`。解法三步缺一不可：入库前给每个汉字两侧垫空格（`segment_cjk`）、
+   查询时把整串当**短语**（`"'三体'"*`）、显示前再把空格去掉（`desegment_cjk`）。
+   第一版把空格垫成了**两个**（`" 三  体 "`），测试当场抓出来 —— 连续汉字之间只垫一个。
+3. **`rustc 1.87` 编不动最新传递依赖**：`icu_* 2.3` / `darling 0.24` / `time 0.3.4x` 都要求 1.88。
+   需要在 `src-tauri/.cargo/config.toml` 里设 `[resolver] incompatible-rust-versions = "fallback"`
+   **并且**在 `Cargo.toml` 里声明 `rust-version = "1.87"`：只有 config 没有 `rust-version` 时
+   cargo 不知道目标 MSRV，只写 `rust-version` 也不会触发（Cargo 1.87 默认不开 MSRV 感知解析）。
+   实测生效后 `wry` 从 0.57.0 退到 0.55.1。
+4. **`#[tauri::command] async fn` + `sqlx` 会撞 `implementation of Executor is not general enough`**
+   （六个命令一起报，还伴着 `Send is not general enough`）：rustc 对 async 命令的 `Send`/HRTB 推断
+   与 sqlx 的 `&mut *tx` 执行器组合出的坑。本项目改成**同步命令 + `tauri::async_runtime::block_on(...)`**
+   —— 本地管道与本地 SQLite 都是毫秒级，用不着异步，顺带省掉了 `spawn_blocking` 与 `AppHandle` 的所有权麻烦。
+
+**没做**（用户计划里的阶段 4）：PyInstaller 把内核打成 `werd-core` 再当 Tauri 的 `externalBin`。
+本机**没装 PyInstaller**；Tauri CLI 不需要单独装（`@tauri-apps/cli` 已随 npm 依赖装好）。
+另外 `tauri dev` / `tauri build` 需要图形会话才能真正跑起来，本轮只验证到"`cargo test` 全绿 + 前端构建通过"。
+
 ## 待办 / 下一步
 
-> **交接给下个会话的第一件事：图形阅读器（用户当前主线）。**
-> 内核那一半（阶段 1）已完成并推送 —— `wreader/serve.py` 就是给 GUI 用的接口。剩下的都在
-> **`wreader` 仓库之外**的新目录里（用户指定的做法：放在非 GitHub 目录，物理上不可能被推上去）：
-> - **阶段 2**：`npm create tauri-app`（React + TS 模板）+ `epubjs` / `@tauri-apps/api` /
->   `@tauri-apps/plugin-sql`；Rust 侧 `core_client.rs`（开发期用 `<repo>/.venv/bin/python -m wreader.serve`
->   起子进程，按行读写 JSON）、`db.rs`（SQLite：`books` / FTS5 全文索引 / `positions`(CFI) / `gui_settings`）。
->   ⚠️ **SQLite 只是缓存与索引，`~/.wreader` 的 JSON 才是唯一事实来源，随时可重建。**
-> - **阶段 3**：把导入 / 阅读 / 统计 / 搜索接上内核（走 `serve.py` 的方法表）。
-> - **阶段 4（可选）**：PyInstaller 把内核打成 `werd-core` 当 Tauri 的 `externalBin`，再 `tauri build`。
->   ⚠️ 本机**没装** Tauri CLI（`cargo tauri` / `tauri` 都没有）、**没装** PyInstaller —— 阶段 4 要先装。
-> - ⚠️ 坐标口径见 `systemPatterns.md` 模式 #15 最后一条：**时长与成就必须精确，位置允许近似**
->   （GUI 存 CFI，只把「CFI → 近似百分比/行号」喂回内核）。
+> **图形阅读器的现状**：阶段 1（内核边车）与阶段 2（Tauri 壳）**都已完成**，见 ㊱ / ㊲；
+> 阶段 3 的前半（书架 / 阅读页 / 本地 FTS5 搜索）也接上了。剩下的是**阶段 4 打包**：
+> PyInstaller 把 `wreader` 打成 `werd-core`，放进 `wreader-gui/src-tauri/binaries/`、
+> 在 `tauri.conf.json` 里声明成 `externalBin`，再用 `$WREADER_CORE_COMMAND` 指过去。
+> ⚠️ 本机没装 PyInstaller；`tauri dev` / `tauri build` 需要图形会话才能真正跑起来。
+> ⚠️ GUI 目前只验证到「`cargo test` 18 项全绿 + `npm run build` 通过」，**没有真开过窗口**，
+> 界面细节（排版、章节下拉、搜索结果样式）都还没被人眼看过。
+> ⚠️ 坐标口径见 `systemPatterns.md` 模式 #15 最后一条：**时长与成就必须精确，位置允许近似**。
+> 实际实现比原计划更简单：因为内核只有 txt（没有 epub），GUI 与终端用的是**同一套行号**，
+> 所以位置也是精确的；`positions.cfi` 留空，等将来支持直接打开 epub 时才用得上。
 
 0. **注释覆盖率拍板**（`progress.md` 待办 #1）：严格口径下 `wreader/` + `tests/` 还有 **3544** 条缺口
    （2026-09-29 复测：上一次 2771 → ㉜ 后 3099 → ㉝ 后 3204 → ㉞ 后 3403 → ㊱ 后 3544）。
